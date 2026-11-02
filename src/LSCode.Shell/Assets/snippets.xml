@@ -1,0 +1,312 @@
+<?xml version="1.0" standalone="yes"?>
+<NewDataSet>
+  <snippet>
+    <type>Tools</type>
+    <key>Generate Voucher</key>
+    <position>3</position>
+    <param></param>
+    <description></description>
+    <code>
+	<![CDATA[
+	--* generate voucher *
+DECLARE @strSQL NVARCHAR(4000), @Src VARCHAR(3), @Des VARCHAR(3), @AppDB VARCHAR(64), @SysDB VARCHAR(64), @iObject VARCHAR(128), @iTbl VARCHAR(128), @iKey VARCHAR(128), @AppType0 VARCHAR(4000), @AppType1 VARCHAR(4000), @AppType2 VARCHAR(4000), @SysType0 VARCHAR(4000), @SysType1 VARCHAR(4000), @SysType2 VARCHAR(4000), @SysType3 VARCHAR(4000), @i INT
+
+SET @Src = 'TS1'; SET @Des = 'ZHD'; SET @AppType0 = 'dmct#ma_ct, sysspmasterinfo#xid, dmloaict#ma_ct, dmmagd#ma_ct, dmttct#ma_ct, dmxlct#ma_ct, sysflowinfo#ma_ct, sysspdetailinfo#xid'
+SET @AppType1 = ''; SET @AppType2 = 'sysinventory#xvoucher' 
+SET @SysType0 = 'voucherinfo#ma_ct, sysuserdef#ma_ct, sysgridinfo#ma_ct, message#form, reports#form, repinfo#form, sysstatusinfo#ma_ct'; SET @SysType1 = ''; SET @SysType2 = 'freecodeinfo#vouchers, freefieldsinfo#vouchers, popup#vouchers'; SET @SysType3 = 'grid#code'
+
+PRINT '-- App'
+SET @i = 1
+WHILE CHARINDEX(',', @AppType0 + ',', @i) > 0
+	BEGIN
+		SET @iObject = LTRIM(SUBSTRING(@AppType0 + ',', @i, CHARINDEX(',', @AppType0 + ',', @i) - @i))
+		SET @iTbl = LEFT(@iObject, CHARINDEX('#', @iObject, 1) - 1)
+		SET @iKey = SUBSTRING(@iObject, CHARINDEX('#', @iObject, 1) + 1, 128)
+		
+		SET @strSQL = 'SELECT * INTO #' + @iTbl + ' FROM ' + @iTbl + ' WHERE ' + @iKey + ' = ''' + @Src + '''; UPDATE #' + @iTbl + ' SET ' + @iKey + ' = ''' + @Des + '''; INSERT INTO ' + @iTbl + ' SELECT * FROM #' + @iTbl
+		PRINT @strSQL
+
+		SET @i = CHARINDEX(',', @AppType0 + ',', @i) + 1
+	END
+
+SET @i = 1
+WHILE CHARINDEX(',', @AppType2 + ',', @i) > 0
+	BEGIN
+		SET @iObject = LTRIM(SUBSTRING(@AppType2 + ',', @i, CHARINDEX(',', @AppType2 + ',', @i) - @i))
+		SET @iTbl = LEFT(@iObject, CHARINDEX('#', @iObject, 1) - 1)
+		SET @iKey = SUBSTRING(@iObject, CHARINDEX('#', @iObject, 1) + 1, 128)
+		
+		SET @strSQL = 'UPDATE ' + @iTbl + ' SET ' + @iKey + ' = RTRIM(' + @iKey + ') + '', '' + ''' + @Des + ''' WHERE ' + @iKey + ' LIKE ''%' + @Src + '%'''
+		PRINT @strSQL
+
+		SET @i = CHARINDEX(',', @AppType2 + ',', @i) + 1
+	END
+
+PRINT '-- Sys'
+SET @i = 1
+WHILE CHARINDEX(',', @SysType0 + ',', @i) > 0
+	BEGIN
+		SET @iObject = LTRIM(SUBSTRING(@SysType0 + ',', @i, CHARINDEX(',', @SysType0 + ',', @i) - @i))
+		SET @iTbl = LEFT(@iObject, CHARINDEX('#', @iObject, 1) - 1)
+		SET @iKey = SUBSTRING(@iObject, CHARINDEX('#', @iObject, 1) + 1, 128)
+		
+		SET @strSQL = 'SELECT * INTO #' + @iTbl + ' FROM ' + @iTbl + ' WHERE ' + @iKey + ' = ''' + @Src + '''; UPDATE #' + @iTbl + ' SET ' + @iKey + ' = ''' + @Des + '''; INSERT INTO ' + @iTbl + ' SELECT * FROM #' + @iTbl
+		PRINT @strSQL
+
+		SET @i = CHARINDEX(',', @SysType0 + ',', @i) + 1
+	END
+
+SET @i = 1
+WHILE CHARINDEX(',', @SysType2 + ',', @i) > 0
+	BEGIN
+		SET @iObject = LTRIM(SUBSTRING(@SysType2 + ',', @i, CHARINDEX(',', @SysType2 + ',', @i) - @i))
+		SET @iTbl = LEFT(@iObject, CHARINDEX('#', @iObject, 1) - 1)
+		SET @iKey = SUBSTRING(@iObject, CHARINDEX('#', @iObject, 1) + 1, 128)
+		
+		SET @strSQL = 'UPDATE ' + @iTbl + ' SET ' + @iKey + ' = RTRIM(' + @iKey + ') + '', '' + ''' + @Des + ''' WHERE ' + @iKey + ' LIKE ''%' + @Src + '%'''
+		PRINT @strSQL
+
+		SET @i = CHARINDEX(',', @SysType2 + ',', @i) + 1
+	END
+
+SET @strSQL = 'SELECT * INTO #grid FROM grid WHERE code IN (SELECT sysid FROM sysgridinfo WHERE ma_ct = ''' + @Src + '''); UPDATE #grid SET code = ''' + @Des + ''' + SUBSTRING(code, 3, 128); INSERT INTO grid SELECT * FROM #grid'
+PRINT @strSQL
+--* End - generate voucher *
+	]]>
+	</code>    
+  </snippet>
+  
+  <snippet>
+    <type>Tools</type>
+    <key>Alter View</key>
+    <position>3</position>
+    <param></param>
+    <description></description>
+    <code>
+	<![CDATA[
+	--* alter view *
+DECLARE @ViewName NVARCHAR(4000), @strSQL NVARCHAR(4000)
+DECLARE extensionViews CURSOR FOR SELECT name FROM sysobjects WHERE xtype IN ('V') 
+	AND id IN (SELECT id FROM syscomments WHERE (TEXT LIKE '%KeySearch%'))
+OPEN extensionViews
+FETCH NEXT FROM extensionViews INTO @ViewName
+WHILE @@FETCH_STATUS = 0
+	BEGIN 
+		SET @strSQL = 'exec sp_refreshview N''dbo.' + @ViewName + '''' 
+		PRINT @strSQL
+--		EXEC sp_executesql @strSQL  
+		FETCH NEXT FROM extensionViews INTO @ViewName
+	END
+CLOSE extensionViews
+DEALLOCATE extensionViews
+--* End - alter view *
+	]]>
+	</code>    
+  </snippet>
+  
+  <snippet>
+    <type>Tools</type>
+    <key>Reset Identity Column</key>
+    <position>3</position>
+    <param></param>
+    <description></description>
+    <code>
+	<![CDATA[
+	--* reset identiy *
+SELECT 'DECLARE @MaxId INT'
+UNION ALL SELECT 'set @MaxId = null'
+	+ CHAR(13) + CHAR(10) + 'select @MaxId = max(' + COLUMN_NAME + ') from ' + TABLE_NAME 
+	+ CHAR(13) + CHAR(10) + 'if @MaxId is null set @MaxId = 0'
+	+ CHAR(13) + CHAR(10) + 'DBCC CHECKIDENT (' + CHAR(39) + TABLE_NAME + CHAR(39) + ', RESEED, @MaxId)'
+	FROM INFORMATION_SCHEMA.COLUMNS 
+	WHERE TABLE_SCHEMA = 'dbo' AND COLUMNPROPERTY(OBJECT_ID(TABLE_NAME), COLUMN_NAME, 'IsIdentity') = 1 
+		AND TABLE_NAME IN (SELECT name FROM sysobjects WHERE xtype = 'u')
+--* End - reset identiy *
+	]]>
+	</code>    
+  </snippet>
+  
+  <snippet>
+    <type>Tools</type>
+    <key>Delete Data</key>
+    <position>3</position>
+    <param></param>
+    <description></description>
+    <code>
+	<![CDATA[
+	--* delete data *
+SET NOCOUNT ON
+SELECT IDENTITY(INT, 1, 1) AS _id, CAST('' AS NVARCHAR(4000)) AS script INTO #tScript WHERE 1 = 0
+DECLARE @strsql NVARCHAR(4000), @tbl VARCHAR(64), @lst_f NVARCHAR(4000)
+DECLARE xcur CURSOR FOR
+SELECT name FROM sysobjects WHERE xtype = 'u' ORDER BY name
+OPEN xcur
+FETCH NEXT FROM xcur INTO @tbl
+WHILE @@FETCH_STATUS = 0
+BEGIN
+	SET @strsql = 'if exists(select 1 from ' + @tbl + ') insert into #tScript(script) select ''delete ' + @tbl + ' -- select * from ' + @tbl + ''''
+	EXEC sp_executesql @strsql
+FETCH NEXT FROM xcur INTO @tbl
+END
+CLOSE xcur
+DEALLOCATE xcur
+SELECT script FROM #tScript ORDER BY _id
+DROP TABLE #tScript 
+--* End - delete data *
+	]]>
+	</code>    
+  </snippet>
+  
+  <snippet>
+    <type>Tools</type>
+    <key>Re Post</key>
+    <position>3</position>
+    <param></param>
+    <description></description>
+    <code>
+	<![CDATA[
+	SET NOCOUNT ON
+GO
+DECLARE @ma_ct CHAR(3), @stt_rec CHAR(13)
+	, @cMasterTable VARCHAR(16), @cDetailTable VARCHAR(16)
+	, @cGLMasterTable VARCHAR(16), @cGLDetailTable VARCHAR(16)
+	, @cGroups VARCHAR(128), @sp_post VARCHAR(64)
+	, @strsql NVARCHAR(4000), @i INT
+
+SET @i = 0
+DECLARE xCurPost CURSOR FOR
+	SELECT DISTINCT b.ma_ct, b.stt_rec FROM ct81 a JOIN ph81 b ON a.stt_rec = b.stt_rec WHERE b.status <> '*' AND 1 = 0
+OPEN xCurPost
+FETCH NEXT FROM xCurPost INTO @ma_ct, @stt_rec
+WHILE @@FETCH_STATUS = 0
+	BEGIN
+		SELECT @cMasterTable = RTRIM(m_phdbf), @cDetailTable = RTRIM(m_ctdbf), @cGLMasterTable = 'ph11', @cGLDetailTable = 'ct11'
+			, @sp_post = RTRIM(fs_post) FROM dmct WHERE ma_ct = @ma_ct
+		SELECT @cGroups = RTRIM(groupby) FROM <sysdb>..voucherinfo WHERE ma_ct = @ma_ct
+		SET @strsql = 'exec ' + @sp_post + ' ' + CHAR(39) + @ma_ct + CHAR(39)
+				+ ', ' + CHAR(39) + @cMasterTable + CHAR(39)
+				+ ', ' + CHAR(39) + @cDetailTable + CHAR(39)
+				+ ', ' + CHAR(39) + @cGLMasterTable + CHAR(39)
+				+ ', ' + CHAR(39) + @cGLDetailTable + CHAR(39)
+				+ ', ' + CHAR(39) + @cGroups + CHAR(39)
+				+ ', ' + CHAR(39) + @stt_rec + CHAR(39)
+				+ ', 1'
+				
+	-- begin try
+	--	exec sp_executesql @strsql
+	-- end try
+	-- begin catch
+	--	print 'Error ' + @stt_mt
+	-- end catch
+
+		PRINT @strsql
+	FETCH NEXT FROM xCurPost INTO @ma_ct, @stt_mt
+	END
+CLOSE xCurPost
+DEALLOCATE xCurPost
+GO
+	]]>
+	</code>    
+  </snippet>
+  
+  <snippet>
+    <type>Statement</type>
+    <key>IF...ELSE</key>
+    <position>3</position>
+    <param></param>
+    <description></description>
+    <code>IF  BEGIN
+    
+END
+ELSE BEGIN
+
+END</code>    
+  </snippet>
+
+  <snippet>
+    <type>Statement</type>
+    <key>sysorder</key>
+    <position>55</position>
+    <param></param>
+    <description></description>
+    <code>5 AS sysorder, 1 AS sysprint, 1 AS systotal, 0 AS stt, 
+    </code>
+  </snippet>
+  
+  <snippet>
+    <type>Statement</type>
+    <key>WHILE</key>
+    <position>6</position>
+    <param></param>
+    <description></description>
+    <code>WHILE  BEGIN
+    
+END</code>
+  </snippet>
+  <snippet>
+    <type>Statement</type>
+    <key>DECLARE CURSOR</key>
+    <position>8</position>
+    <param></param>
+    <description></description>
+    <code>DECLARE iCur CURSOR FOR SELECT 
+OPEN iCur
+FETCH NEXT FROM iCur INTO 
+WHILE @@FETCH_STATUS = 0 BEGIN
+
+  FETCH NEXT FROM iCur INTO 
+END
+CLOSE iCur
+DEALLOCATE iCur</code>
+  </snippet>
+  <snippet>
+    <type>Statement</type>
+    <key>CREATE PROCEDURE</key>
+    <position>19</position>
+    <param></param>
+    <description></description>
+    <code>CREATE PROC dbo.z_fs_
+
+AS
+BEGIN
+  
+END
+GO
+    </code>
+  </snippet>
+  <snippet>
+    <type>Statement</type>
+    <key>CREATE FUNCTION (TABLE)</key>
+    <position>23</position>
+    <param></param>
+    <description></description>
+    <code>CREATE FUNCTION dbo.af_()
+    
+RETURNS @tabRet TABLE 
+AS
+BEGIN
+  INSERT INTO @tabRet
+    SELECT 
+	RETURN  
+END
+GO
+    </code>
+  </snippet>
+  <snippet>
+    <type>Statement</type>
+    <key>CREATE FUNCTION (VALUES)</key>
+    <position>23</position>
+    <param></param>
+    <description></description>
+    <code>CREATE FUNCTION dbo.af_()
+    
+RETURNS VARCHAR(128)
+AS
+BEGIN  
+	DECLARE @result VARCHAR(128)
+  
+	RETURN @result 
+END
+GO  </code>
+  </snippet>
+</NewDataSet>

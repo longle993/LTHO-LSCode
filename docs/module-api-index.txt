@@ -1,0 +1,113 @@
+AddLookup.cs: Api.GetWindowLocation
+clsForm.cs: 
+clsGenSource.cs: Cmd.FullPath, Directory.CreateDirectory, File.Delete, File.Exists
+clsMain.cs: Api.CallSQLProfiler, Api.FindWindow, clsConnection.GetConnectionFromXML, clsGlobal.CurrentConnection, clsGlobal.CurrentConnectionRow, clsGlobal.CurrentDatabase, clsGlobal.CurrentProject, Cmd.CopyString2Clipboard, Cmd.Logo, Cmd.SetDefaultValue, Cmd.SetImageControl, Dbs.ConvertVS2SQLType, Dbs.GetRow, Dbs.GetTable, Dbs.GetValue, Reg.GetRegistryKey
+Defaults.cs: 
+frmAddSource.cs: Api.SetHintText, Cmd.CheckNotBlank, Cmd.FullPath, Cmd.GetStream, Cmd.GetWordCount, Cmd.GetWordNum, Cmd.OpenFolderWithTotalCommander, Cmd.SearchDirectory, Cmd.SearchFile, Cmd.SetFormStyle, Cmd.SetImageControl, Directory.Delete, Directory.Exists, Directory.GetDirectories, Directory.GetFiles, File.Exists
+frmAddWFile.cs: Api.SetHintText, clsConnection.GetConnectionFromXML, Cmd.CheckNotBlank, Cmd.FullPath, Cmd.GetStream, Cmd.SetFormStyle, Cmd.SetImageControl, Dbs.ConvertVS2SQLType, Dbs.GetRow, Directory.Exists, Directory.GetFiles, File.Exists, File.ReadAllText, Reg.GetRegistryKey
+frmAttach.cs: clsGlobal.CurrentConnection, clsGlobal.CurrentDatabase, Cmd.SetFormStyle, Cmd.SetImageControl, Dbs.Execute, Dbs.GetTable, Dbs.GetValue
+frmBackup.cs: clsGlobal.CurrentConnection, clsGlobal.CurrentDatabase, Cmd.CheckNotBlank, Cmd.SetColumnsAccess, Cmd.SetFormStyle, Cmd.SetImageControl, Dbs.Execute, Dbs.GetRow, Dbs.GetTable
+frmCheckFieldsBetweenTables.cs: Cmd.SetDefaultValue, Cmd.SetFormStyle
+frmCheckKeyCode.cs: Cmd.SetFormStyle, Cmd.SetImageControl
+frmDBInfo.cs: clsGlobal.CurrentConnection, clsGlobal.CurrentDatabase, Cmd.SetDefaultValue, Cmd.SetFormStyle, Cmd.SetImageControl, Dbs.Execute, Dbs.GetRow, Dbs.GetTable, Dbs.GetValue, Dbs.Retrieve
+frmDescriptionColumns.cs: Cmd.CheckNotBlank, Cmd.SetColumnsAccess, Cmd.SetDefaultValue, Cmd.SetFormStyle
+frmFileLookupCopyFiles.cs: Cmd.CheckNotBlank, Cmd.SetColumnsAccess, Cmd.SetFormStyle, Directory.Exists
+frmFilterTemplate.cs: Cmd.AddUpDownCmd2DatagridView, Cmd.GetImage, Cmd.SetFormStyle
+frmFilterTemplate_Update.cs: Cmd.CheckNotBlank, Cmd.SetFormStyle
+frmGetResourceDLL.cs: Api.SetHintText, Cmd.ExactInlist, Cmd.SetFormStyle
+frmMain.cs: clsConnection.GetInfoConnection, clsGlobal.CurrentConnection, clsGlobal.CurrentConnectionRow, clsGlobal.CurrentDatabase, clsGlobal.CurrentProject, clsGlobal.fMain, clsGlobal.stsStrip, Cmd.ChangeImage, Cmd.CopyProjectInfo, Cmd.CopyString2Clipboard, Cmd.FullPath, Cmd.GetClientCode, Cmd.GetCreatedDateWindow, Cmd.GetImage, Cmd.GetWordNum, Cmd.OpenFolderWithTotalCommander, Cmd.SetFormStyle, Dbs.ConvertVS2SQLType, Dbs.GetValue, Directory.Exists, Directory.GetDirectories, Directory.GetFiles, File.Delete, File.Exists, File.ReadAllText, Reg.GetRegistryKey, Reg.GetRegistryKeys, Reg.SetRegistryKey, Sec.Decrypt, Sec.Encrypt
+frmMenu_Duplicate.cs: Cmd.SetFormStyle
+frmQueryMore.cs: Cmd.SetFormStyle
+frmQuickAccess.cs: Cmd.ChangeImage, Cmd.SetFormStyle, Reg.GetRegistryKey, Reg.SetRegistryKey
+frmRestore.cs: clsGlobal.CurrentConnection, Cmd.FullPath, Cmd.SetFormStyle, Cmd.SetImageControl, Dbs.Execute, Dbs.GetTable, Dbs.GetValue, Reg.GetRegistryKey, Reg.SetRegistryKey
+frmScript.cs: Cmd.Copy4ToolstripAndContextMenu, Cmd.GetImage, Cmd.SetFormStyle
+frmServerName.cs: Api.SetHintText, Cmd.CopyProjectInfo, Cmd.ExactInlist, Cmd.GetImage, Reg.GetRegistryKey, Reg.SetRegistryKey
+frmServerName_SyncProject.cs: clsConnection.GetConnectionFromXML, Cmd.CheckNotBlank, Cmd.SetDefaultValue, Cmd.SetFormStyle, Dbs.GetTable, Reg.GetRegistryKey, Reg.SetRegistryKey, Sec.Decrypt, Sec.Encrypt
+frmServerName_Update.cs: clsConnection.GetConnectionFromXML, clsGlobal.CurrentConnection, Cmd.CheckNotBlank, Cmd.FullPath, Cmd.GetStream, Cmd.GetValueFromControl, Cmd.RemoveNewLine, Cmd.SetDefaultValue, Cmd.SetFormStyle, Cmd.SetImageControl, Cmd.SetValue4Control, Dbs.GetTable, Dbs.GetValue, File.Exists
+frmSourceVersionConfig.cs: Cmd.CheckNotBlank, Cmd.FullPath, Cmd.GetImage, Cmd.GetStream, Cmd.SetImageControl, Cmd.SetValue4Control, File.Exists
+frmTableCheckStruct.cs: clsGlobal.CurrentConnection, Cmd.SetFormStyle, Dbs.GetRow, Dbs.GetTable
+frmTableEditColumn.cs: Cmd.CheckNotBlank, Cmd.ExactInlist, Cmd.SetColumnsAccess, Cmd.SetDefaultValue, Cmd.SetFormStyle, Dbs.Execute, Dbs.GetValue, Reg.GetRegistryKey, Reg.SetRegistryKey
+frmTranslatorServerSetting.cs: Cmd.clsResultTranslator, Cmd.SetFormStyle, Cmd.Translator, Reg.GetRegistryKey, Reg.SetRegistryKey
+frmUpdateTopBottomScript.cs: Cmd.Copy4ToolstripAndContextMenu, Cmd.GetImage, Cmd.SetFormStyle
+frmViewConfigTables.cs: Cmd.Copy4ToolstripAndContextMenu, Cmd.FullPath, Cmd.GetImage, Cmd.SetFormStyle, Cmd.SetImageControl
+frmWFileVersionConfig.cs: Cmd.CheckNotBlank, Cmd.FullPath, Cmd.GetImage, Cmd.GetStream, Cmd.SetFormStyle, Cmd.SetImageControl, Cmd.SetValue4Control, File.Exists
+Functions.cs: 
+Parser.cs: 
+RtfHtmlBuilder.cs: 
+Serializable.cs: 
+SQLEditor.cs: Reg.GetRegistryKey, Reg.SetRegistryKey
+StackEx.cs: 
+urChangeColumnWidth.cs: 
+urChangeHeader.cs: Cmd.FullPath, Cmd.SetFormStyle, Dbs.ConvertVS2SQLType, Directory.CreateDirectory, Directory.Exists, File.Copy, File.ReadAllText
+urChangeOwner.cs: Cmd.GetImage, Cmd.SetImageControl, Dbs.Execute, Dbs.GetTable
+urCheckMail.cs: Cmd.CheckNotBlank, Cmd.FullPath, Cmd.GetImage, Cmd.SetFormStyle, File.Exists, Reg.GetRegistryKey, Reg.SetRegistryKey
+urCheckRpt.cs: Cmd.FullPath, Cmd.GetDocumentXML4Search, Cmd.GetStringRegex, Cmd.OpenFolderWithTotalCommander, Cmd.SetFormStyle, Dbs.currErrorMsg, Dbs.Retrieve, Directory.Exists, File.Exists, File.ReadAllText
+urCheckRPTData.cs: Cmd.IsNumericDataType
+urClearTables.cs: clsGlobal.CurrentConnection, Cmd.GetImage, Cmd.SetColumnsAccess, Cmd.SetFormStyle, Dbs.Execute, Dbs.GetTable, Dbs.SQLDelete
+urCommand.cs: Api.SetHintText, clsConnection.GetInfoConnection, Cmd.CheckNotBlank, Cmd.CopyString2Clipboard, Cmd.FullPath, Cmd.GetImage, Cmd.GetWordCount, Cmd.GetWordNum, Cmd.OpenFileWithNotePad, Cmd.OpenFolderWithTotalCommander, Cmd.SearchFile, Cmd.SearchTreeView, Cmd.SetDefaultValue, Cmd.SetFormStyle, Cmd.SetMaxLength, Dbs.CheckPrimary, Dbs.GenSQLInsert, Dbs.GetRow, Dbs.GetTable, Dbs.GetValue, Dbs.SQLDelete, Dbs.SQLInsert, Dbs.SQLUpdate, Directory.Exists, Directory.GetDirectories, Directory.GetFiles, File.Copy, File.Delete, File.Exists, File.ReadAllText, Reg.GetRegistryKey
+urCommander.cs: Api.SetHintText, Cmd.ExactInlist, Cmd.FullPath, Cmd.GetImage, Cmd.GetValueFromImage, Cmd.SetColumnsAccess, Cmd.SetDefaultValue, Cmd.SetFormStyle, Directory.CreateDirectory, Directory.Delete, Directory.Exists, Directory.Move, File.Delete, File.Exists
+urCompareDatabase.cs: Cmd.BeautyLine, Cmd.CheckNotBlank, Cmd.GetImage, Cmd.SetFormStyle, Dbs.CreateConnection, Dbs.GetTable
+urCompareDataRow.cs: Cmd.CheckNotBlank, Cmd.GetImage, Cmd.InList, Cmd.SetFormStyle, Dbs.ConvertVS2SQLType, Dbs.CreateConnection, Dbs.GetTable, Dbs.GetValue, Dbs.Retrieve
+urCompareFolder.cs: Cmd.ChangeImage, Cmd.ExactInlist, Cmd.FullPath, Cmd.GetImage, Cmd.GetValueFromImage, Cmd.HashFile, Cmd.OpenFolderWithTotalCommander, Cmd.SetColumnsAccess, Cmd.SetFormStyle, Directory.CreateDirectory, Directory.Exists, Directory.GetDirectories, Directory.GetFiles, File.Copy, File.Exists, File.ReadAllText, JsonConvert.DeserializeObject, Reg.GetRegistryKey
+urCompareText.cs: Cmd.GetImage, Cmd.SetFormStyle, File.Exists, File.ReadAllText, Reg.GetRegistryKey
+urControlCompareText.cs: Cmd.SetFormStyle, File.Exists, Reg.GetRegistryKey
+urCreateFileRpt.cs: Cmd.ChangeXMLSign, Cmd.CheckNotBlank, Cmd.ColumnLetterInXlsx, Cmd.CopyString2Clipboard, Cmd.ExactInlist, Cmd.FullPath, Cmd.SetColumnsAccess, Cmd.SetDefaultValue, Cmd.SetFormStyle, Dbs.CloneConnection, Dbs.Retrieve, File.Copy, File.Delete, File.Exists, Reg.GetRegistryKey
+urCreateFilter.cs: Cmd.CheckNotBlank, Cmd.FullPath, Cmd.SetFormStyle
+urCreateFilterGenerate.cs: Cmd.FullPath, Cmd.GetFileContent, Cmd.SetFormStyle, Directory.CreateDirectory, Directory.Exists, File.Exists
+urCreateGridDetail.cs: Cmd.CheckNotBlank, Cmd.FullPath, Cmd.SetFormStyle, Dbs.ConvertVS2SQLType, Dbs.GetValue, Directory.Exists
+urCreateGridDetailGenerate.cs: Cmd.FullPath, Cmd.GetFileContent, Cmd.SetFormStyle, Directory.CreateDirectory, Directory.Exists, File.Exists
+urCreateList.cs: Cmd.CheckNotBlank, Cmd.FullPath, Cmd.SetFormStyle, Dbs.ConvertVS2SQLType, Dbs.GetRow, Dbs.GetTable, Dbs.GetValue
+urCreateListGenerate.cs: Cmd.FullPath, Cmd.GetFileContent, Cmd.SetFormStyle, Directory.CreateDirectory, Directory.Exists, File.Exists, File.ReadAllText
+urCreateProcessing.cs: Cmd.CheckNotBlank, Cmd.FullPath, Cmd.SetFormStyle
+urCreateProcessingGenerate.cs: Cmd.FullPath, Cmd.GetFileContent, Cmd.SetFormStyle, Directory.CreateDirectory, Directory.Exists, File.Exists
+urCreateReport.cs: Api.SetHintText, Cmd.CheckNotBlank, Cmd.FullPath, Cmd.InList, Cmd.SetFormStyle, Directory.Exists
+urCreateReportGenerate.cs: Cmd.CopyString2Clipboard, Cmd.FullPath, Cmd.GetFileContent, Cmd.InList, Cmd.SetFormStyle, Directory.CreateDirectory, Directory.Exists, File.CreateText, File.Exists, File.ReadAllText
+urCreateReportPrint.cs: Cmd.CheckNotBlank, Cmd.FullPath, Cmd.SetFormStyle
+urCreateRetrieve.cs: Cmd.ExactInlist, Cmd.FullPath, Cmd.GetImage, Cmd.GetStream, Dbs.GetTable, File.Exists, Sec.AnalysisSource
+urCreateRetrieveCalc.cs: 
+urCreateRetrieveGenerate.cs: Cmd.SetFormStyle
+urCreateVoucher.cs: clsConnection.GetConnectionFromXML, Cmd.CheckNotBlank, Cmd.FullPath, Cmd.SetFormStyle, Dbs.ConvertVS2SQLType, Dbs.GetRow, Dbs.GetTable, Dbs.GetValue, File.Exists
+urCreateVoucherGenerate.cs: clsConnection.GetConnectionFromXML, Cmd.ExactInlist, Cmd.FullPath, Cmd.SetFormStyle, Dbs.ConvertVS2SQLType, Dbs.GenInsertSQL, Dbs.GetRow, Directory.CreateDirectory, Directory.Exists, File.Exists, File.ReadAllText
+urCreateVoucherReference.cs: Cmd.SetFormStyle, File.Exists, File.ReadAllText
+urCreateVoucherSource.cs: Cmd.FullPath, Cmd.GetStream, Cmd.SetColumnsAccess, Cmd.SetFormStyle, Directory.Exists, Directory.GetFiles, File.Exists
+urCreateVoucherSQL.cs: clsConnection.GetConnectionFromXML, Cmd.ExactInlist, Cmd.SetFormStyle, Dbs.ConvertVS2SQLType, Dbs.GetRow, Dbs.GetTable, Dbs.GetValue
+urDecryptSQLObject.cs: Api.SetHintText, Cmd.BeautyLine, Cmd.CopyString2Clipboard, Cmd.GetImage, Cmd.SetFormStyle, Dbs.Execute, Dbs.GetTable, Dbs.GetValue, File.Exists, JsonConvert.DeserializeObject, Reg.GetRegistryKey, Reg.SetRegistryKey, Sec.Decrypt, Sec.Encrypt
+urExploreCommander.cs: Cmd.SetFormStyle, Reg.GetRegistryKey, Reg.SetRegistryKey
+urFileLookup.cs: Api.GetWindowLocation, Api.SetHintText, clsConnection.GetConnectionFromXML, clsConnection.GetInfoConnection, clsGlobal.CurrentConnection, clsGlobal.CurrentConnectionRow, clsGlobal.CurrentDatabase, clsGlobal.isRefreshFileLookup, Cmd.BeautyLine, Cmd.ChangeImage, Cmd.CopyString2Clipboard, Cmd.ExactInlist, Cmd.ExtSysImageGetIndex, Cmd.ExtSysImageList, Cmd.FullPath, Cmd.GetImage, Cmd.GetStream, Cmd.GetWordCount, Cmd.GetWordNum, Cmd.HashFile, Cmd.OpenFolderWithTotalCommander, Cmd.SetFormStyle, Cmd.SetImageControl, Dbs.GetTable, Directory.Exists, Directory.GetDirectories, Directory.GetFiles, File.Delete, File.Exists, File.ReadAllText, JsonConvert.SerializeObject, Reg.Contains, Reg.GetRegistryKey, Reg.SetRegistryKey, Sec.AnalysisSource
+urFileReference.cs: Api.SetHintText, clsConnection.GetInfoConnection, clsGlobal.isRefreshFileLookup, Cmd.CopyString2Clipboard, Cmd.ExactInlist, Cmd.ExtSysImageGetIndex, Cmd.ExtSysImageList, Cmd.FullPath, Cmd.GetImage, Cmd.GetStream, Cmd.GetWordCount, Cmd.GetWordNum, Cmd.OpenFolderWithTotalCommander, Cmd.SetFormStyle, Directory.Exists, Directory.GetDirectories, Directory.GetFiles, File.Exists, Reg.Contains, Reg.GetRegistryKey
+urFilterGrid.cs: Cmd.ChangeImage, Cmd.GetImage
+urFilterWrapper.cs: Cmd.ChangeImage, Cmd.GetImage
+urGenerateViewDesign.cs: Cmd.SetDefaultValue
+urGridDesign.cs: Api.GetWindowLocation, Cmd.SetDefaultValue, Cmd.SetFormStyle
+urImportExportExcel.cs: Cmd.ChangeImage, Cmd.FullPath, Cmd.GetImage, Cmd.InList, Cmd.SetColumnsAccess, Cmd.SetDefaultValue, Cmd.SetFormStyle, Directory.Exists, File.Copy, File.Exists
+urLibrary.cs: Cmd.ExactInlist, Cmd.FullPath, Cmd.GetImage, Cmd.SetFormStyle, Directory.CreateDirectory, Directory.Exists, File.Copy, File.Exists, Reg.GetRegistryKey
+urListDeclearField.cs: clsGlobal.fMain, Cmd.AddUpDownCmd2DatagridView, Cmd.ColumnLetterInXlsx, Cmd.ExactInlist, Cmd.FindTranslatorBuffer, Cmd.GetXMLHeader, Cmd.InList, Cmd.SetDefaultValue, Cmd.SetFormStyle, Dbs.GetTable, File.Exists
+urLookup.cs: Api.SetHintText, clsConnection.GetConnectionFromXML, clsGlobal.CurrentConnection, clsGlobal.CurrentConnectionRow, clsGlobal.CurrentDatabase, Cmd.ChangeImage, Cmd.GetImage, Cmd.SetFormStyle, Dbs.GetRow, Dbs.GetTable, Dbs.GetValue, Reg.GetRegistryKey, Reg.SetRegistryKey
+urMainCommand.cs: clsGlobal.fMain, Cmd.CopyString2Clipboard, Cmd.FullPath, Cmd.GetImage, Cmd.GetWordCount, Cmd.GetWordNum, Cmd.OpenFileWithNotePad, Cmd.OpenFolderWithTotalCommander, Cmd.SearchFile, Cmd.SearchTreeView, Cmd.SetFormStyle, Dbs.GetTable, Directory.Exists, Directory.GetDirectories, Directory.GetFiles, File.Copy, File.Delete, File.Exists, File.ReadAllText, Reg.GetRegistryKey, Reg.SetRegistryKey
+urMainCommand_Menu.cs: Cmd.AddLabelTranslate, Cmd.CheckNotBlank, Cmd.GetImage, Cmd.SetDefaultValue, Cmd.SetFormStyle, Dbs.CheckPrimary, Dbs.GetTable, Dbs.GetValue, Dbs.SQLDelete, Dbs.SQLInsert, Dbs.SQLUpdate
+urMainControl.cs: clsConnection.GetConnectionFromXML, clsGlobal.CurrentConnection, clsGlobal.CurrentConnectionRow, clsGlobal.CurrentDatabase, Dbs.GetValue
+urMainDvCommand.cs: clsGlobal.fMain, Cmd.CopyString2Clipboard, Cmd.GetImage, Cmd.SearchTreeView, Dbs.GenInsertSQL, Dbs.GetTable, Reg.GetRegistryKey, Reg.SetRegistryKey
+urMainDVCommand_Menu.cs: clsConnection.GetInfoConnection, Cmd.AddLabelTranslate, Cmd.CheckNotBlank, Cmd.ExactInlist, Cmd.FullPath, Cmd.GetImage, Cmd.SetDefaultValue, Cmd.SetFormStyle, Dbs.CheckPrimary, Dbs.GetTable, Dbs.GetValue, Dbs.SQLDelete, Dbs.SQLInsert, Dbs.SQLUpdate, Directory.Exists, File.Exists, File.ReadAllText
+urMainLookup.cs: Api.SetHintText, clsConnection.GetConnectionFromXML, clsGlobal.CurrentConnectionRow, clsGlobal.CurrentDatabase, Cmd.ChangeImage, Cmd.GetImage, Cmd.InList, Dbs.GetTable
+urMainWCommand.cs: clsGlobal.fMain, clsGlobal.isRefreshFileLookup, Cmd.CopyString2Clipboard, Cmd.ExactInlist, Cmd.GetImage, Cmd.SearchTreeView, Dbs.ConvertVS2SQLType, Dbs.GenInsertSQL, Dbs.GetRow, Dbs.GetTable, Dbs.Retrieve, Reg.GetRegistryKey, Reg.SetRegistryKey
+urMainWCommand_Menu.cs: clsConnection.GetInfoConnection, clsGlobal.CurrentDatabase, Cmd.AddLabelTranslate, Cmd.CheckNotBlank, Cmd.ExactInlist, Cmd.FullPath, Cmd.GetDocumentXML4Search, Cmd.GetImage, Cmd.SetDefaultValue, Cmd.SetFormStyle, Dbs.CheckPrimary, Dbs.GetTable, Dbs.GetValue, Dbs.SQLDelete, Dbs.SQLInsert, Dbs.SQLUpdate, Directory.Exists, File.Exists, File.ReadAllText
+urMinifier.cs: Cmd.GetImage, Cmd.OpenFolderWithTotalCommander, Cmd.SetFormStyle, Directory.CreateDirectory, Directory.Exists, File.Delete, File.Exists, File.ReadAllText
+urNote.cs: Cmd.FullPath, Cmd.GetImage, Directory.Exists, File.Exists, File.ReadAllText
+urNoteX.cs: clsConnection.GetConnectionFromXML, clsGlobal.CurrentConnectionRow, Cmd.ChangeImage, Cmd.ChangeSpecialFileName, Cmd.CheckNotBlank, Cmd.CopyString2Clipboard, Cmd.ExactInlist, Cmd.ExtSysImageGetIndex, Cmd.ExtSysImageList, Cmd.FullPath, Cmd.GetFileContent, Cmd.GetImage, Cmd.GetWordCount, Cmd.GetWordNum, Cmd.OpenFolderWithTotalCommander, Cmd.SetColumnsAccess, Cmd.SetDefaultValue, Cmd.SetFormStyle, Dbs.ConvertVS2SQLType, Dbs.CreateConnection, Dbs.GenInsertSQL, Dbs.GetRow, Dbs.GetTable, Dbs.GetValue, Directory.CreateDirectory, Directory.Delete, Directory.Exists, Directory.GetFiles, File.Create, File.Delete, File.Exists, File.Move, File.ReadAllBytes, File.ReadAllText, Reg.Contains, Reg.GetRegistryKey, Reg.SetRegistryKey, Sec.Decrypt
+urPRofiler.cs: Api.ActiveWindow, Api.CallSQLProfiler, Api.FindWindow, Api.GetHwd, Api.GetWindowLong, Api.MoveWindow, Api.SetParent, Api.SetWindowLong, Api.ShowWindow, clsConnection.GetConnectionFromXML, clsGlobal.CurrentConnectionRow, clsGlobal.CurrentDatabase, Cmd.ExactInlist, Dbs.ConvertVS2SQLType, Dbs.GetRow, Reg.GetRegistryKey
+urQuery.cs: Api.GetCaretLocation, clsConnection.GetConnectionFromXML, clsGlobal.CurrentConnection, clsGlobal.CurrentConnectionRow, clsGlobal.CurrentDatabase, Cmd.BeautyLine, Cmd.ChangeImage, Cmd.CopyString2Clipboard, Cmd.FullPath, Cmd.GetImage, Cmd.GetStream, Cmd.GetWordCount, Cmd.GetWordNum, Cmd.GetXMLFileContent, Cmd.GetXMLHeader, Cmd.IsNumericDataType, Cmd.SetFormStyle, Cmd.XmlComponent, Dbs.ConvertVS2SQLType, Dbs.Execute, Dbs.GetRow, Dbs.GetTable, Dbs.GetValue, Directory.Exists, File.Delete, File.Exists, File.Move, File.ReadAllText, Reg.GetRegistryKey, Reg.SetRegistryKey, Sec.Decrypt, Sec.eContract, Sec.Encrypt, Sec.EncryptionMD5
+urQueryCompare.cs: Cmd.SetFormStyle, File.Exists, Reg.GetRegistryKey
+urRptFEC.cs: Cmd.CheckNotBlank, Cmd.FullPath, Cmd.SetFormStyle, File.Delete, File.Exists
+urSetupEInvoice.cs: Cmd.CheckNotBlank, Cmd.SetFormStyle, Dbs.ConvertVS2SQLType, Dbs.Execute, Dbs.GetTable, JsonConvert.DeserializeObject, JsonConvert.SerializeObject
+urSourceRetrieve.cs: clsGlobal.CurrentConnectionRow, Cmd.CheckNotBlank, Cmd.ExactInlist, Cmd.FullPath, Cmd.GetDocumentXML4Search, Cmd.GetXMLFileContent, Cmd.SetFormStyle, Cmd.XmlComponent, Dbs.GetTable, File.Exists, File.ReadAllText
+urSourceRetrieveCondition.cs: Cmd.GetDocumentXML4Search, Cmd.SetColumnsAccess, Cmd.SetDefaultValue, Cmd.SetFormStyle, Dbs.ConvertVS2SQLType, Dbs.GetTable
+urSourceRetrieveForm.cs: clsGlobal.CurrentConnectionRow, Cmd.BeautyLine, Cmd.ExactInlist, Cmd.FullPath, Cmd.SetDefaultValue, Cmd.SetFormStyle, Dbs.GetRow, Dbs.GetTable, File.Exists, File.ReadAllText
+urSourceRetrieveGenerate.cs: Cmd.FullPath, Cmd.SetFormStyle, Directory.CreateDirectory, Directory.Exists, File.Exists, File.ReadAllText
+urSourceRetrieveGrid.cs: Cmd.AddUpDownCmd2DatagridView, Cmd.BeautyLine, Cmd.FullPath, Cmd.SetDefaultValue, Cmd.SetFormStyle, File.ReadAllText
+urSourceRetrieveLookup.cs: Cmd.AddUpDownCmd2DatagridView, Cmd.BeautyLine, Cmd.ExactInlist, Cmd.GetDocumentXML4Search, Cmd.GetFileContent, Cmd.SetFormStyle
+urStringBeauty.cs: Cmd.BeautyLine, Cmd.GetImage, Cmd.SetFormStyle, File.Exists, File.ReadAllText, Reg.GetRegistryKey, Reg.SetRegistryKey
+urTables.cs: clsConnection.GetConnectionFromXML, clsGlobal.CurrentConnectionRow, clsGlobal.CurrentDatabase, Cmd.ChangeImage, Cmd.ChangeSpecialFileName, Cmd.CopyString2Clipboard, Cmd.ExactInlist, Cmd.FullPath, Cmd.GetImage, Cmd.GetXMLHeader, Cmd.IsNumericDataType, Cmd.OpenFolderWithTotalCommander, Cmd.SetDefaultValue, Cmd.SetFormStyle, Cmd.SetImageControl, Dbs.ConvertVS2SQLType, Dbs.currErrorMsg, Dbs.Execute, Dbs.ExecuteUpdate, Dbs.GetRow, Dbs.GetTable, Dbs.GetValue, Directory.CreateDirectory, Directory.Exists, File.Exists, File.ReadAllBytes, File.WriteAllBytes, Reg.GetRegistryKey, Reg.SetRegistryKey
+urUpdate.cs: Api.SetHintText, clsConnection.GetConnectionFromXML, clsConnection.GetInfoConnection, clsConnection.GetInfoConnection2, Cmd.ChangeImage, Cmd.CheckNotBlank, Cmd.CopyString2Clipboard, Cmd.ExactInlist, Cmd.ExtSysImageGetIndex, Cmd.ExtSysImageList, Cmd.FullPath, Cmd.GetFileContent, Cmd.GetImage, Cmd.GetWordCount, Cmd.GetWordNum, Cmd.OpenFolderWithTotalCommander, Cmd.SetColumnsAccess, Cmd.SetDefaultValue, Cmd.SetFormStyle, Cmd.SetImageControl, Dbs.ConvertVS2SQLType, Dbs.GenInsertSQL, Dbs.GetRow, Dbs.GetTable, Dbs.GetValue, Directory.CreateDirectory, Directory.Delete, Directory.Exists, Directory.GetFiles, File.Copy, File.Exists, File.ReadAllText, Reg.GetRegistryKey, Reg.SetRegistryKey
+urViewTableData.cs: Cmd.ChangeImage, Cmd.GetImage, Cmd.SetFormStyle, Dbs.ConvertVS2SQLType, Dbs.ExecuteUpdate, Dbs.GetRow, Dbs.GetTable
+urWCommand.cs: Api.SetHintText, clsConnection.GetInfoConnection, Cmd.ChangeImage, Cmd.CheckNotBlank, Cmd.FullPath, Cmd.GetImage, Cmd.OpenFileWithNotePad, Cmd.SearchTreeView, Cmd.SetDefaultValue, Cmd.SetFormStyle, Cmd.SetMaxLength, Dbs.CheckPrimary, Dbs.GenSQLInsert, Dbs.GetRow, Dbs.GetTable, Dbs.GetValue, Dbs.SQLDelete, Dbs.SQLInsert, Dbs.SQLUpdate, Directory.Exists, Directory.GetDirectories, Directory.GetFiles, File.Exists, File.ReadAllText
+zurInheritsControl.cs: clsConnection.GetConnectionFromXML, Cmd.FullPath

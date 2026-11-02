@@ -1,0 +1,26 @@
+**/bin/
+**/obj/
+.vs/
+artifacts/
+*.user
+*.suo
+*.rsuser
+*.userosscache
+*.sln.docstates
+
+# Local caches and temporary files
+TestResults/
+*.log
+*.tmp
+*.bak
+*.orig
+*.rej
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Local credentials
+.env
+.env.*
+!.env.example
+!.env.sample

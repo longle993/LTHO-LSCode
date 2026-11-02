@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Demo để thử editor. Không phải schema voucher của FAST. -->
+<workspace name="LS Code Demo">
+  <voucher id="DEMO" title="Chứng từ mẫu">
+    <fields>
+      <field name="ma_kh" label="Mã khách hàng" type="string" />
+      <field name="ngay_ct" label="Ngày chứng từ" type="date" />
+      <field name="tien" label="Thành tiền" type="decimal" />
+    </fields>
+    <script><![CDATA[
+      // LS Code bảo toàn CDATA khi lưu file.
+      const title = "Tiếng Việt";
+    ]]></script>
+  </voucher>
+</workspace>
