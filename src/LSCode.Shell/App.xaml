@@ -76,6 +76,21 @@
     <Style TargetType="DataGrid"><Setter Property="RowHeight" Value="32"/><Setter Property="ColumnHeaderHeight" Value="40"/><Setter Property="Background" Value="{DynamicResource Surface}"/><Setter Property="Foreground" Value="{DynamicResource Text}"/><Setter Property="RowBackground" Value="{DynamicResource Surface}"/><Setter Property="AlternatingRowBackground" Value="{DynamicResource Panel}"/><Setter Property="BorderBrush" Value="{DynamicResource GridLine}"/><Setter Property="HorizontalGridLinesBrush" Value="{DynamicResource GridLine}"/><Setter Property="VerticalGridLinesBrush" Value="{DynamicResource GridLine}"/><Setter Property="GridLinesVisibility" Value="Horizontal"/><Setter Property="HeadersVisibility" Value="Column"/><Setter Property="ColumnWidth" Value="Auto"/><Setter Property="CanUserResizeColumns" Value="True"/><Setter Property="EnableRowVirtualization" Value="True"/><Setter Property="EnableColumnVirtualization" Value="False"/><Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Auto"/><Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto"/><Setter Property="IsReadOnly" Value="True"/><Setter Property="AutoGenerateColumns" Value="True"/></Style>
     <Style TargetType="DataGridColumnHeader"><Setter Property="Background" Value="{DynamicResource Raised}"/><Setter Property="Foreground" Value="{DynamicResource Text}"/><Setter Property="FontWeight" Value="Bold"/><Setter Property="BorderBrush" Value="{DynamicResource GridLine}"/><Setter Property="BorderThickness" Value="0,0,0,1"/><Setter Property="Padding" Value="12,8"/><Setter Property="HorizontalContentAlignment" Value="Left"/><Setter Property="ContentTemplate"><Setter.Value><DataTemplate><TextBlock Text="{Binding}" TextWrapping="NoWrap" TextTrimming="None" FontWeight="SemiBold" Foreground="{DynamicResource Text}"/></DataTemplate></Setter.Value></Setter></Style>
     <Style TargetType="DataGridCell"><Setter Property="BorderBrush" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Padding" Value="6,3"/><Setter Property="FocusVisualStyle" Value="{x:Null}"/><Style.Triggers><Trigger Property="IsSelected" Value="True"><Setter Property="Background" Value="{DynamicResource Raised}"/><Setter Property="Foreground" Value="{DynamicResource Text}"/></Trigger></Style.Triggers></Style>
+    <Style x:Key="CatalogGridCell" TargetType="DataGridCell" BasedOn="{StaticResource {x:Type DataGridCell}}">
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="DataGridCell">
+            <Border Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    Padding="{TemplateBinding Padding}"
+                    SnapsToDevicePixels="True">
+              <ContentPresenter VerticalAlignment="Center" />
+            </Border>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
 <Style TargetType="GridSplitter"><Setter Property="Background" Value="{DynamicResource Panel}"/><Style.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="{DynamicResource Accent}"/></Trigger><Trigger Property="IsKeyboardFocused" Value="True"><Setter Property="Background" Value="{DynamicResource Accent}"/></Trigger></Style.Triggers></Style>
   </Application.Resources>
 </Application>
