@@ -50,6 +50,7 @@ Xem [hướng dẫn đồng bộ và xem bảng](docs/PROJECT-SYNC.vi.md) và [t
 
 ## Tài liệu
 
+- [Đặc tả Tạo danh mục: tạo bảng, nhập dữ liệu và thêm trường](docs/CATALOG-TABLE-DESIGNER.vi.md) — yêu cầu mới, chưa triển khai; bố cục lưới theo ảnh tham chiếu, không có cột trái, bốn trường hệ thống mặc định.
 - [Bản kế hoạch và Recommended New IDE Blueprint](docs/IDE-BLUEPRINT.vi.md)
 - [Các khoảng trống cần xác minh](docs/DISCOVERY-GAPS.vi.md)
 - [Kiểm kê source FCode ban đầu](docs/source-manifest.csv)

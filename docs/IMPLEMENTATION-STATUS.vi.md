@@ -46,6 +46,8 @@ Chạy `./build.ps1 -Test -Smoke -Publish` để tái tạo build và báo cáo.
 
 ## Tiếp theo theo roadmap đã duyệt
 
+Yêu cầu bổ sung ngày 03/11/2026: [Tạo danh mục — thiết kế bảng và nhập dữ liệu](CATALOG-TABLE-DESIGNER.vi.md). **Mới có đặc tả, chưa triển khai**: tạo bảng bằng tên trường/kiểu/ràng buộc và nút Lưu, chọn bảng để nhập dữ liệu hoặc thêm trường; mọi bảng mới có `user_id0 int`, `user_id2 int`, `datetime0 datetime`, `datetime2 datetime`. Cửa sổ xem bảng hiện tại vẫn chỉ đọc.
+
 Phân tích sâu `fsystem`/`fcontrol`/`feditor`/FCodeViewer đã bổ sung; mở rộng viewer XML và nghiệp vụ sau đồng bộ; ánh xạ metadata catalog vào hành vi ERP; kiểm thử SQL integration; dịch Google trong IDE qua provider phù hợp; chuyển từng ERP tool bằng fixtures đầu vào/đầu ra. Không yêu cầu source gốc như điều kiện thực hiện.
 
 Cập nhật SYS/App: toolbar riêng từng tab SQL; chọn và lưu App database khi chuỗi còn placeholder; màn hình Projects lúc khởi động với tìm kiếm và truy cập gần nhất; cây menu mặc định SYS, tìm theo tên/sysid. Đã kiểm tra 11 mục tích hợp thật, gồm popup chèn tên bảng và kết nối App. Bản đóng gói mới: artifacts/publish-0.3/LSCode.exe.
