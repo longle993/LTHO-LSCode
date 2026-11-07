@@ -11,6 +11,20 @@ async Task Throws<T>(Func<Task> action, string name) where T : Exception
 }
 try
 {
+    var clipboardRows = new[] { new[] { "Tiếng Việt", "tab\ttrong ô", "dòng\r\nmới", "\"trích dẫn\"", "" }, new[] { "0", "", "NULL", ":null", ":text:literal" } };
+    var tsv = CatalogClipboard.Write(clipboardRows);
+    Assert(CatalogClipboard.Read(tsv).SelectMany(r => r).SequenceEqual(clipboardRows.SelectMany(r => r)), "Catalog TSV quoted Unicode/tab/newline/quote/empty round trip");
+    Assert(CatalogClipboard.Read("a\tb\r\n").Count == 1, "Catalog TSV final newline does not add a record");
+    Assert(CatalogClipboard.Read("a\tb\n\n").Count == 2, "Catalog TSV interior empty row is preserved");
+    Assert(CatalogClipboard.Read("a\t")[0].Length == 2, "Catalog TSV trailing empty column preserved");
+    Assert(CatalogClipboard.Read("\"\"")[0][0] == "", "Catalog TSV quoted empty record preserved");
+    foreach (var literal in new[] { ":null", ":default", ":empty", ":text:abc", "", "NULL", "=1+1" })
+        Assert(CatalogClipboard.DecodeLiteral(CatalogClipboard.Literal(literal)) == literal, "Catalog literal token round trip " + literal);
+    await Throws<InvalidOperationException>(() => Task.Run(() => CatalogClipboard.Read("\"not closed")), "Catalog malformed quoted clipboard rejected");
+    await Throws<InvalidOperationException>(() => Task.Run(() => CatalogClipboard.Read("\"closed\"x")), "Catalog trailing quoted garbage rejected");
+    await Throws<InvalidOperationException>(() => Task.Run(() => CatalogClipboard.Read(new string('ữ', CatalogClipboard.MaxBytes / 2))), "Catalog clipboard UTF-8 size enforced");
+    await Throws<InvalidOperationException>(() => Task.Run(() => CatalogClipboard.Write(Enumerable.Repeat(new[] { "x" }, 1001))), "Catalog copy row limit rejects whole batch");
+    await Throws<InvalidOperationException>(() => Task.Run(() => CatalogClipboard.Read(string.Join('\n', Enumerable.Repeat("x", 1002)))), "Catalog paste bounded before materializing large grid");
     var hintXml = "<config><Hint><HintItem object='$func' exact='1'><Item keyword='get' description='Read'><![CDATA[get({{0-name}}, {{1}})]]></Item></HintItem></Hint><Snippet><Item keyword='select'><![CDATA[select {{-}}]]></Item></Snippet></config>";
     var hints = CompletionSnippets.Read(hintXml);
     Assert(hints.Count == 2 && CompletionSnippets.Get(hints, "$func.ge").Single().Text == "get", "Legacy object hint parsing and dollar qualifier");

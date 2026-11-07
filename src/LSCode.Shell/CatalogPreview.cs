@@ -40,6 +40,11 @@ internal sealed class CatalogPreview : FrameworkElement, IScrollInfo
         FontWeights.SemiBold, FontStretches.Normal);
     private double cachedDpi;
     private int row = -1, column = -1, resizing = -1;
+    private readonly SortedSet<int> selectedRows = [];
+    private int rowAnchor = -1;
+    internal IReadOnlyCollection<int> SelectedRowIndexes => selectedRows;
+    internal object?[] RowValues(int index) => rows[index].ToArray();
+    internal event Action? CopyRowsRequested;
     private double resizeOrigin, resizeWidth;
     public double HorizontalOffset { get; private set; }
     public double VerticalOffset { get; private set; }
@@ -83,10 +88,11 @@ internal sealed class CatalogPreview : FrameworkElement, IScrollInfo
         rowText = new DrawingGroup?[values.Length];
         lastDrawnHorizontalOffset = double.NaN;
         cachedFirstColumn = cachedLastColumn = -1;
-        edges = Enumerable.Range(0, columns.Length + 1).Select(i => i * InitialWidth).ToArray();
+        edges = Enumerable.Range(0, columns.Length + 1).Select(i => 36 + i * InitialWidth).ToArray();
         columnPositions = Enumerable.Range(0, columns.Length).Select(i => Position(edges[i] + 6, 0)).ToArray();
         rowPositions = Enumerable.Range(0, values.Length).Select(i => Position(0, HeaderHeight + i * RowHeight + 6)).ToArray();
         row = column = -1;
+        selectedRows.Clear(); rowAnchor = -1;
         SetHorizontalOffset(0);
         SetVerticalOffset(0);
         ScrollOwner?.InvalidateScrollInfo();
@@ -288,6 +294,7 @@ internal sealed class CatalogPreview : FrameworkElement, IScrollInfo
         {
             double y = HeaderHeight + r * RowHeight - VerticalOffset;
             if (r % 2 != 0) drawing.DrawRectangle(panel, null, new Rect(0, y, ViewportWidth, RowHeight));
+            if (selectedRows.Contains(r)) drawing.DrawRectangle(raised, null, new Rect(0, y, ViewportWidth, RowHeight));
             drawing.DrawLine(rowLine, new Point(0, y + RowHeight - 0.5), new Point(ViewportWidth, y + RowHeight - 0.5));
         }
         if (row >= start && row < end && column >= first && column <= last)
@@ -326,6 +333,19 @@ internal sealed class CatalogPreview : FrameworkElement, IScrollInfo
         }
         drawing.Pop();
         drawing.Pop();
+        // Fixed row selectors preserve the existing single-cell copy behavior in the body.
+        drawing.DrawRectangle(raised, null, new Rect(0, 0, Math.Min(36, ViewportWidth), viewport.Height));
+        drawing.PushClip(bodyClip);
+        for (int r = start; r < end; r++)
+        {
+            double y = HeaderHeight + r * RowHeight - VerticalOffset;
+            if (selectedRows.Contains(r)) drawing.DrawRectangle(panel, null, new Rect(0, y, 36, RowHeight));
+            var number = new FormattedText((r + 1).ToString(CultureInfo.InvariantCulture), CultureInfo.InvariantCulture,
+                FlowDirection.LeftToRight, BodyTypeface, 12, text, dpi);
+            drawing.DrawText(number, new Point(4, y + 8));
+        }
+        drawing.DrawLine(rowLine, new Point(35.5, HeaderHeight), new Point(35.5, viewport.Height));
+        drawing.Pop();
     }
 
     private int ColumnAt(double x)
@@ -341,6 +361,12 @@ internal sealed class CatalogPreview : FrameworkElement, IScrollInfo
         var point = e.GetPosition(this);
         if (point.Y < HeaderHeight)
         {
+            if (point.X < 36)
+            {
+                Focus(); selectedRows.Clear();
+                for (int i = 0; i < rows.Length; i++) selectedRows.Add(i);
+                QueueRedraw(); return;
+            }
             int candidate = ColumnAt(point.X + HorizontalOffset - 5);
             if (Math.Abs(edges[candidate + 1] - HorizontalOffset - point.X) <= 5)
             {
@@ -354,8 +380,32 @@ internal sealed class CatalogPreview : FrameworkElement, IScrollInfo
         int selected = (int)((point.Y - HeaderHeight + VerticalOffset) / RowHeight);
         if (selected >= rows.Length || point.X + HorizontalOffset >= ExtentWidth) return;
         Focus();
+        if (point.X < 36)
+        {
+            SelectWholeRow(selected, Keyboard.Modifiers);
+            QueueRedraw(); return;
+        }
+        selectedRows.Clear(); rowAnchor = -1;
         row = selected;
         column = ColumnAt(point.X + HorizontalOffset);
+        QueueRedraw();
+    }
+
+    internal void SelectWholeRow(int index, ModifierKeys modifiers)
+    {
+        if (index < 0 || index >= rows.Length) return;
+        if ((modifiers & ModifierKeys.Shift) != 0 && rowAnchor >= 0)
+        {
+            if ((modifiers & ModifierKeys.Control) == 0) selectedRows.Clear();
+            for (int i = Math.Min(rowAnchor, index); i <= Math.Max(rowAnchor, index); i++) selectedRows.Add(i);
+        }
+        else
+        {
+            if ((modifiers & ModifierKeys.Control) == 0) selectedRows.Clear();
+            if (!selectedRows.Add(index)) selectedRows.Remove(index);
+            rowAnchor = index;
+        }
+        row = index; column = Math.Max(0, column);
         QueueRedraw();
     }
 
@@ -396,6 +446,13 @@ internal sealed class CatalogPreview : FrameworkElement, IScrollInfo
     {
         base.OnKeyDown(e);
         if (rows.Length == 0 || headers.Length == 0) return;
+        if (e.Key == Key.A && Keyboard.Modifiers == ModifierKeys.Control)
+        {
+            selectedRows.Clear(); for (int i = 0; i < rows.Length; i++) selectedRows.Add(i);
+            QueueRedraw(); e.Handled = true; return;
+        }
+        if (e.Key == Key.C && Keyboard.Modifiers == ModifierKeys.Control && selectedRows.Count > 0)
+        { CopyRowsRequested?.Invoke(); e.Handled = true; return; }
         if (e.Key == Key.C && Keyboard.Modifiers == ModifierKeys.Control && row >= 0)
         {
             try { Clipboard.SetText(Convert.ToString(rows[row][column], CultureInfo.CurrentCulture) ?? ""); }
@@ -403,7 +460,11 @@ internal sealed class CatalogPreview : FrameworkElement, IScrollInfo
         }
         else if (e.Key is Key.Left or Key.Right or Key.Up or Key.Down)
         {
-            row = Math.Clamp(row < 0 ? 0 : row + (e.Key == Key.Up ? -1 : e.Key == Key.Down ? 1 : 0), 0, rows.Length - 1);
+            int nextRow = Math.Clamp(row < 0 ? 0 : row + (e.Key == Key.Up ? -1 : e.Key == Key.Down ? 1 : 0), 0, rows.Length - 1);
+            if ((Keyboard.Modifiers & ModifierKeys.Shift) != 0 && selectedRows.Count > 0 && e.Key is Key.Up or Key.Down)
+                SelectWholeRow(nextRow, Keyboard.Modifiers);
+            else { selectedRows.Clear(); rowAnchor = -1; }
+            row = nextRow;
             column = Math.Clamp(column < 0 ? 0 : column + (e.Key == Key.Left ? -1 : e.Key == Key.Right ? 1 : 0), 0, headers.Length - 1);
             if (edges[column] < HorizontalOffset) SetHorizontalOffset(edges[column]);
             else if (edges[column + 1] > HorizontalOffset + ViewportWidth) SetHorizontalOffset(edges[column + 1] - ViewportWidth);

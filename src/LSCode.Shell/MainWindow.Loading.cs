@@ -9,8 +9,9 @@ public partial class MainWindow
     private int busyCount;
     private IDisposable BeginBusy(string message)
     {
-        busyCount++; LoadingMessage.Text = message; LoadingStrip.Visibility = Visibility.Visible;
-        return new BusyScope(() => { if (--busyCount == 0) LoadingStrip.Visibility = Visibility.Hidden; });
+        busyCount++; LoadingMessage.Text = message;
+        ProjectContextBar.Visibility = LoadingStrip.Visibility = Visibility.Visible;
+        return new BusyScope(() => { if (--busyCount == 0) ProjectContextBar.Visibility = LoadingStrip.Visibility = Visibility.Collapsed; });
     }
     private static IDisposable ShowLoadingOverlay(Grid host, string message)
     {

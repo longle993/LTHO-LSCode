@@ -55,12 +55,21 @@ public sealed class EditorTab
         Layout.Children.Add(Primary); Tab.Content = Layout; Tab.Tag = this;
         Buffer.Changed += (_, _) => { Version++; Changed?.Invoke(); };
     }
+    private static FontFamily EditorFont()
+    {
+        // Composite font metrics apply to AvalonEdit's measured text lines, including
+        // wrapping, caret hit-testing, selection and the shared split document.
+        var font = new FontFamily { LineSpacing = 1.65, Baseline = 1.25 };
+        font.FamilyMaps.Add(new FontFamilyMap { Target = "Cascadia Mono, Consolas" });
+        return font;
+    }
+
     private TextEditor CreateEditor()
     {
         var editor = new TextEditor
         {
-            Document = Buffer, ShowLineNumbers = true, FontFamily = new FontFamily("Cascadia Mono, Consolas"),
-            FontSize = 14, Padding = new Thickness(8, 10, 8, 10),
+            Document = Buffer, ShowLineNumbers = true, FontFamily = EditorFont(),
+            FontSize = 13, Padding = new Thickness(8, 10, 8, 10),
             HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto
         };
         editor.Options.IndentationSize = 4;

@@ -33,7 +33,7 @@ public partial class MainWindow
             grid.Columns.Add(ResultGrids.TextColumn(header, path, width));
         dock.Children.Add(grid);
         var layers = new Grid(); layers.Children.Add(dock);
-        var window = Dialogs.Create(this, "LS Code — Chọn dự án để kết nối", layers, 1150, 650);
+        var window = Dialogs.ProjectWindow(this, "LS Code — Chọn dự án để kết nối", layers, 1150, 650);
         using var lifetime = new CancellationTokenSource(); window.Closed += (_, _) => lifetime.Cancel();
         LegacyProject? chosen = null;
         void Reload()

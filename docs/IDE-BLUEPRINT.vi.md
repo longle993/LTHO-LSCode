@@ -157,7 +157,7 @@ DocumentService sở hữu buffer, encoding, newline, version, dirty state; Edit
 
 ## 7. UI/UX Architecture
 
-Yêu cầu bổ sung: [Tạo danh mục — thiết kế bảng và nhập dữ liệu](CATALOG-TABLE-DESIGNER.vi.md). Công cụ WPF dùng lưới theo ảnh tham chiếu, bỏ cột danh sách trái; chọn bảng trên thanh đầu, nhập tên bảng trong vùng nội dung, cấu hình trường/kiểu/ràng buộc rồi Lưu để tạo bảng. Hỗ trợ nhập bản ghi và thêm trường cho bảng đã có. Bốn trường mặc định bắt buộc: `user_id0 int`, `user_id2 int`, `datetime0 datetime`, `datetime2 datetime`. Đây là đặc tả mới, chưa triển khai; không thay thế phạm vi ERP source generator.
+Yêu cầu bổ sung: [Tạo danh mục — thiết kế bảng và nhập dữ liệu](CATALOG-TABLE-DESIGNER.vi.md). Công cụ WPF dùng lưới theo ảnh tham chiếu, bỏ cột danh sách trái; chọn bảng trên thanh đầu, nhập tên bảng trong vùng nội dung, cấu hình trường/kiểu/ràng buộc rồi Lưu để tạo bảng. Hỗ trợ nhập bản ghi và thêm trường cho bảng đã có. Bốn trường mặc định bắt buộc: `user_id0 int`, `user_id2 int`, `datetime0 datetime`, `datetime2 datetime`. Đã có source công cụ danh mục; đặc tả bổ sung ngày 05/11/2026 gồm duplicate template (nhân bản cấu trúc bảng danh mục, không kèm dữ liệu — đã được người dùng xác nhận) và copy/paste nhiều dòng cấu trúc/dữ liệu, đã triển khai trong source và kiểm chứng riêng bằng WPF cùng SQL Server cục bộ (chi tiết mục 12 của đặc tả). Không thay thế phạm vi ERP source generator.
 
 ```text
 Menu   Project ▾    Search / Command Palette           Window controls

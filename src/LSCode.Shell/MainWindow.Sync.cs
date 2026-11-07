@@ -19,7 +19,7 @@ public partial class MainWindow
     {
         if (!projectCatalogAvailable) throw new IOException("Catalog hiện không đọc được; cần khôi phục trước khi đồng bộ.");
         if (syncCancellation != null) { Log("Đang đồng bộ dự án. Có thể nhấn Dừng trong panel Chức năng."); return; }
-        var name = Dialogs.Text(this, "Đồng bộ dự án — nhập tên và nhấn Enter (ví dụ BACHVIET)");
+        var name = Dialogs.ProjectName(this);
         if (string.IsNullOrWhiteSpace(name)) return;
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(60)); syncCancellation = cancellation;
         try
@@ -38,7 +38,12 @@ public partial class MainWindow
             var target = ProjectDatabase.Target(connections.Sys);
             CommandStatus.Text = "Đang đọc cây chức năng từ " + target.Database + "…";
             // Fetch before committing: failed connections leave the current catalog/workspace intact.
-            var nodes = await ProjectDatabase.CommandsAsync(target, cancellation.Token);
+            var resolved = await ProjectDatabase.ResolveTargetsAsync([new("appConnectionString", connections.App, ""), new("sysConnectionString", connections.Sys, "")], async (probe, candidates) =>
+            {
+                var data = await ProjectDatabase.ReadAsync(probe, "SELECT name FROM sys.databases WHERE name IN (@a,@b) AND HAS_DBACCESS(name)=1", cancellation.Token, new Microsoft.Data.SqlClient.SqlParameter("@a", candidates[0]), new Microsoft.Data.SqlClient.SqlParameter("@b", candidates[1]));
+                return data.Rows.Cast<System.Data.DataRow>().Select(r => Convert.ToString(r[0])!).ToList();
+            });
+            var nodes = await ProjectDatabase.CommandsAsync(target, cancellation.Token, resolved[0].Database);
             cancellation.Token.ThrowIfCancellationRequested();
             CommitSynchronizedProject(selected!, connections, target, nodes);
         }
@@ -67,7 +72,7 @@ public partial class MainWindow
         {
             if (projectSqlTarget == null) { CommandStatus.Text = "Đồng bộ dự án để tải cây chức năng."; return; }
             CommandStatus.Text = "Đang tải chức năng…";
-            var nodes = await ProjectDatabase.CommandsAsync(projectSqlTarget, current.Token);
+            var nodes = await ProjectDatabase.CommandsAsync(projectSqlTarget, current.Token, (await DefaultAppTargetAsync()).Database);
             current.Token.ThrowIfCancellationRequested(); RenderCommands(nodes);
         }
         catch (OperationCanceledException) { if (commandCancellation == current) CommandStatus.Text = "Đã hủy tải chức năng."; }

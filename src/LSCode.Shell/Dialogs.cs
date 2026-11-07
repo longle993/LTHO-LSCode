@@ -42,6 +42,35 @@ public static class Dialogs
             WindowStartupLocation = WindowStartupLocation.CenterOwner, ShowInTaskbar = false
         };
     }
+    public static Window ProjectWindow(Window owner, string title, UIElement content, double width, double height)
+    {
+        var window = new Window { Owner = owner, Title = title, Width = width, Height = height, WindowStyle = WindowStyle.None,
+            ResizeMode = ResizeMode.NoResize, ShowInTaskbar = false, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+        var frame = new Border { BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8) };
+        frame.SetResourceReference(Border.BackgroundProperty, "Surface"); frame.SetResourceReference(Border.BorderBrushProperty, "Border");
+        var dock = new DockPanel(); frame.Child = dock; window.Content = frame;
+        var header = new DockPanel { Height = 48, Background = System.Windows.Media.Brushes.Transparent };
+        var close = new Button { Content = "×", ToolTip = "Đóng", Width = 32, Height = 32, IsCancel = true, Style = (Style)Application.Current.FindResource("IconButton") };
+        close.Click += (_, _) => window.Close(); DockPanel.SetDock(close, Dock.Right); header.Children.Add(close);
+        header.Children.Add(new TextBlock { Text = title, FontSize = 16, FontWeight = FontWeights.SemiBold, Margin = new Thickness(20, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center });
+        header.MouseLeftButtonDown += (_, e) => { if (e.ButtonState == System.Windows.Input.MouseButtonState.Pressed) window.DragMove(); };
+        DockPanel.SetDock(header, Dock.Top); dock.Children.Add(header); dock.Children.Add(content); return window;
+    }
+    public static string? ProjectName(Window owner)
+    {
+        var panel = new DockPanel { Margin = new Thickness(20, 8, 20, 16) };
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
+        var cancel = new Button { Content = "Hủy", IsCancel = true };
+        var ok = new Button { Content = "Đồng bộ", IsDefault = true, IsEnabled = false, Style = (Style)Application.Current.FindResource("PrimaryButton") };
+        actions.Children.Add(cancel); actions.Children.Add(ok); DockPanel.SetDock(actions, Dock.Bottom); panel.Children.Add(actions);
+        var row = new DockPanel(); var input = new TextBox { AcceptsReturn = false, TextWrapping = TextWrapping.NoWrap };
+        var label = new Label { Content = "Tên dự án", Target = input, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) };
+        DockPanel.SetDock(label, Dock.Left); row.Children.Add(label); row.Children.Add(input); panel.Children.Add(row);
+        var window = ProjectWindow(owner, "Đồng bộ dự án", panel, 500, 190);
+        input.TextChanged += (_, _) => ok.IsEnabled = !string.IsNullOrWhiteSpace(input.Text);
+        ok.Click += (_, _) => window.DialogResult = true; window.Loaded += (_, _) => input.Focus();
+        return window.ShowDialog() == true ? input.Text.Trim() : null;
+    }
     public static string? Text(Window owner, string title, string initial = "", bool multiline = false)
     {
         var panel = new DockPanel { Margin = new Thickness(18) };

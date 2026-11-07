@@ -1,3 +1,5 @@
+> Tham chiếu cập nhật UI/menu: [PROJECT-SYNC-UI-UPDATE.vi.md](PROJECT-SYNC-UI-UPDATE.vi.md). Batch menu mới thay mapping wcommand/command cũ bên dưới.
+
 # Đồng bộ dự án và xem dữ liệu
 
 ## Sử dụng

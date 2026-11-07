@@ -3,6 +3,8 @@ using System.Data;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
+using System.Windows.Input;
+using System.Windows.Media;
 using LSCode.Shell.Services;
 using Microsoft.Data.SqlClient;
 
@@ -44,7 +46,7 @@ public partial class MainWindow
     });
 }
 
-internal sealed class CatalogDesigner : Window
+internal sealed partial class CatalogDesigner : Window
 {
     private sealed record TableName(string Schema, string Name)
     {
@@ -76,6 +78,7 @@ internal sealed class CatalogDesigner : Window
     private readonly DataGrid existing = Grid();
     private TableName? selected;
     private DataTable? metadata;
+    private string[][] uniqueKeyColumns = [];
     private CancellationTokenSource? loading;
     private bool busy, switching, dirty, uncertain;
     private int page;
@@ -91,14 +94,22 @@ internal sealed class CatalogDesigner : Window
         public bool Unique { get; set; }
         public bool Identity { get; set; }
         public string? Default { get; set; }
+        public string IdentitySeed { get; set; } = "1";
+        public string IdentityIncrement { get; set; } = "1";
+        public int KeyOrder { get; set; }
+        public string? Collation { get; set; }
+        public bool NullDefault { get; set; }
         internal string[]? Reference { get; set; }
         public string ForeignKey => Reference is { } reference ? string.Join(".", reference.Take(3)) : "";
     }
 
-    public CatalogDesigner(SqlTarget target, Action changed)
+    public CatalogDesigner(SqlTarget target, Action changed, bool initializeDatabase = true)
     {
         this.target = target;
         this.changed = changed;
+        SetResourceReference(BackgroundProperty, "Surface");
+        SetResourceReference(ForegroundProperty, "Text");
+        FontFamily = new FontFamily("Segoe UI"); FontSize = 14;
         Title = "Danh mục";
         Width = 1080;
         Height = 720;
@@ -107,7 +118,8 @@ internal sealed class CatalogDesigner : Window
         var root = new DockPanel { Margin = new Thickness(16) };
         Content = root;
         Header(root, Label("Danh mục"), Label(target.Server + " / " + target.Database),
-            Label("Chọn bảng"), tables, Button("Tạo bảng mới", async () => await SwitchAsync(null)));
+            Label("Chọn bảng"), tables, Button("Tạo bảng mới", async () => await SwitchAsync(null)),
+            duplicate);
         Header(root, Label("Schema"), schema, Label("Tên bảng *"), name, save);
         DockPanel.SetDock(status, Dock.Bottom);
         root.Children.Add(status);
@@ -115,6 +127,7 @@ internal sealed class CatalogDesigner : Window
         modes.Items.Add(new TabItem { Header = "Cấu trúc", Content = Structure() });
         var rows = new DockPanel();
         Header(rows, Button("Thêm bản ghi", AddRecord), Button("+ Thêm trường", AddField),
+            Button("Bỏ dòng nháp", () => RemoveDraftRows(data)),
             Button("Trang trước", async () => await PageAsync(-1)), Button("Trang sau", async () => await PageAsync(1)));
         previewScroll.Content = preview;
         var dataHost = new System.Windows.Controls.Grid();
@@ -133,6 +146,7 @@ internal sealed class CatalogDesigner : Window
         Loaded += async (_, _) =>
         {
             await SwitchAsync(null);
+            if (!initializeDatabase) return;
             try
             {
                 var schemas = await ProjectDatabase.ReadAsync(target, "SELECT name FROM sys.schemas ORDER BY name", CancellationToken.None);
@@ -151,15 +165,14 @@ internal sealed class CatalogDesigner : Window
             e.Cancel = true;
             if (await ResolveDraftAsync()) { dirty = false; Close(); }
         };
+        InitializeTransfer();
     }
 
     private UIElement Structure()
     {
         var panel = new DockPanel();
-        Header(panel, Button("Thêm trường", AddField), Button("Chọn khóa ngoại…", async () => await ChooseReferenceAsync()), Button("Bỏ trường nháp", () =>
-        {
-            if (fields.SelectedItem is Field field) draft.Remove(field);
-        }));
+        Header(panel, Button("Thêm trường", AddField), Button("Chọn khóa ngoại…", async () => await ChooseReferenceAsync()),
+            Button("Bỏ trường nháp", () => RemoveDraftRows(fields)));
         existing.IsReadOnly = true;
         existing.AutoGenerateColumns = true;
         existing.MaxHeight = 220;
@@ -188,6 +201,7 @@ internal sealed class CatalogDesigner : Window
             EnableRowVirtualization = true, CanUserAddRows = false, CanUserDeleteRows = false,
             CanUserSortColumns = false, CanUserReorderColumns = false, ColumnWidth = 150 };
         grid.SetResourceReference(DataGrid.CellStyleProperty, "CatalogGridCell");
+        grid.PreviewMouseLeftButtonDown += BeginCellOnClick;
         grid.AutoGeneratingColumn += (_, e) =>
         {
             e.Column.Width = 150;
@@ -199,6 +213,36 @@ internal sealed class CatalogDesigner : Window
         // Thumb drags can cross hundreds of columns in one gesture. Realize the final viewport on release.
         ScrollViewer.SetIsDeferredScrollingEnabled(grid, true);
         return grid;
+    }
+
+    private static void BeginCellOnClick(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not DataGrid { IsReadOnly: false } grid || e.OriginalSource is not DependencyObject source) return;
+        var cell = source;
+        while (cell is not DataGridCell && cell is Visual) cell = VisualTreeHelper.GetParent(cell);
+        if (cell is not DataGridCell { IsReadOnly: false, IsEditing: false } targetCell) return;
+        targetCell.Focus();
+        grid.CurrentCell = new DataGridCellInfo(targetCell);
+        if (grid.SelectionUnit == DataGridSelectionUnit.FullRow) grid.SelectedItem = grid.CurrentCell.Item;
+        else targetCell.IsSelected = true;
+        // Begin without the mouse args: CheckBoxColumn otherwise toggles during
+        // PrepareCellForEdit as well as in our first-click handoff below.
+        if (!grid.BeginEdit()) return;
+        // The initial hit was on the display element; route it once to the new editor.
+        if (targetCell.Column is DataGridCheckBoxColumn && targetCell.Content is CheckBox check)
+        {
+            check.IsChecked = check.IsChecked != true;
+            check.GetBindingExpression(System.Windows.Controls.Primitives.ToggleButton.IsCheckedProperty)?.UpdateSource();
+            e.Handled = true;
+        }
+        else if (targetCell.Content is ComboBox combo)
+        {
+            combo.Focus(); combo.IsDropDownOpen = true; e.Handled = true;
+        }
+        else if (targetCell.Content is TextBox text)
+        {
+            text.Focus(); text.SelectAll(); e.Handled = true;
+        }
     }
 
     private static DataGridTextColumn TextColumn(string title, string property) => new()
@@ -263,6 +307,7 @@ internal sealed class CatalogDesigner : Window
             name.Text = table?.Name ?? "";
             name.IsReadOnly = table != null;
             metadata = null;
+            uniqueKeyColumns = [];
             draft.Clear();
             records.Clear();
             data.ItemsSource = null;
@@ -273,6 +318,8 @@ internal sealed class CatalogDesigner : Window
             existing.ItemsSource = null;
             dirty = false;
             uncertain = false;
+            duplicateSource = null;
+            templateOriginalNames.Clear();
             page = 0;
             ((TabItem)modes.Items[1]).IsEnabled = table != null;
             modes.SelectedIndex = table == null ? 0 : 1;
@@ -298,7 +345,9 @@ internal sealed class CatalogDesigner : Window
                    c.is_identity, c.is_computed, d.definition AS [Mặc định], c.generated_always_type,
                    c.system_type_id, c.column_id, c.object_id,
                    CAST(CASE WHEN marker.name IS NOT NULL AND c.name IN ('user_id0', 'user_id2', 'datetime0', 'datetime2')
-                       THEN 1 ELSE 0 END AS bit) AS [Hệ thống]
+                       THEN 1 ELSE 0 END AS bit) AS [Hệ thống], c.collation_name,
+                   CAST(CASE WHEN EXISTS (SELECT 1 FROM sys.indexes i WHERE i.object_id=c.object_id AND i.is_primary_key=1)
+                       THEN 1 ELSE 0 END AS bit) AS [Có khóa chính]
             FROM sys.columns c LEFT JOIN sys.default_constraints d ON d.object_id=c.default_object_id
             LEFT JOIN sys.extended_properties marker ON marker.class=1 AND marker.major_id=c.object_id
                 AND marker.minor_id=0 AND marker.name=N'LSCode.Catalog'
@@ -316,10 +365,11 @@ internal sealed class CatalogDesigner : Window
         try
         {
             var columnsTask = MetadataAsync(table, request.Token);
+            var keysTask = UniqueKeysAsync(table, request.Token);
             var rowsTask = ProjectDatabase.ReadAsync(target,
                 "SELECT * FROM " + table.Sql + " ORDER BY (SELECT NULL) OFFSET @offset ROWS FETCH NEXT 100 ROWS ONLY",
                 request.Token, new SqlParameter("@offset", offset));
-            await Task.WhenAll(columnsTask, rowsTask);
+            await Task.WhenAll(columnsTask, rowsTask, keysTask);
             var columns = await columnsTask;
             if (columns.Rows.Count == 0) throw new InvalidOperationException("Không đọc được cấu trúc bảng.");
             var result = await rowsTask;
@@ -328,6 +378,7 @@ internal sealed class CatalogDesigner : Window
                 .Select(c => (string?)c.ExtendedProperties["OriginalName"] ?? c.ColumnName).ToArray(),
                 result.Rows.Cast<DataRow>().Select(row => row.ItemArray).ToArray(), request.Token);
             metadata = columns;
+            uniqueKeyColumns = await keysTask;
             existing.ItemsSource = columns.DefaultView;
             data.ItemsSource = null;
             data.Columns.Clear();
@@ -339,7 +390,7 @@ internal sealed class CatalogDesigner : Window
         catch (Exception ex) { if (!request.IsCancellationRequested) Error(ex); }
         finally
         {
-            if (ReferenceEquals(loading, request)) { loading = null; save.IsEnabled = !busy; }
+            if (ReferenceEquals(loading, request)) { loading = null; save.IsEnabled = !busy; UpdateTransferState(); }
         }
     }
 
@@ -419,6 +470,14 @@ internal sealed class CatalogDesigner : Window
 
     private sealed class ValueColumn(string type, bool nullable, bool hasDefault) : DataGridTextColumn
     {
+        protected override FrameworkElement GenerateElement(DataGridCell cell, object item)
+        {
+            var element = base.GenerateElement(cell, item);
+            if (element is TextBlock text && item is string?[] row)
+                text.Text = DisplayCellValue(row[cell.Column.DisplayIndex]);
+            return element;
+        }
+
         protected override FrameworkElement GenerateEditingElement(DataGridCell cell, object item)
         {
             if (type == "bit")
@@ -574,6 +633,7 @@ internal sealed class CatalogDesigner : Window
             ((UIElement)Content).IsEnabled = true;
             save.IsEnabled = true;
             save.Content = "Lưu";
+            UpdateTransferState();
         }
     }
 
@@ -628,27 +688,35 @@ internal sealed class CatalogDesigner : Window
         }
     }
 
-    private List<Statement> DefinitionCommands(TableName table, bool creating)
+    private List<Statement> DefinitionCommands(TableName table, bool creating, IReadOnlyList<Field>? fieldsToDefine = null)
     {
+        var definitions = fieldsToDefine ?? draft.ToArray();
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var columns = new List<string>();
         var keys = new List<string>();
         if (creating) names.UnionWith(Audit);
-        if (draft.Count(f => f.Identity) > 1) throw new InvalidOperationException("Mỗi bảng chỉ có một trường tự tăng.");
-        foreach (var field in draft)
+        if (definitions.Count(f => f.Identity) + (!creating && metadata != null ? metadata.Rows.Cast<DataRow>().Count(r => (bool)r[6]) : 0) > 1)
+            throw new InvalidOperationException("Mỗi bảng chỉ có một trường tự tăng.");
+        if (!creating && metadata != null) names.UnionWith(metadata.Rows.Cast<DataRow>().Select(r => (string)r[0]));
+        if (!creating && definitions.Any(f => f.Key) && metadata is { Rows.Count: > 0 } && metadata.Columns.Count > 15 && (bool)metadata.Rows[0][15])
+            throw new InvalidOperationException("Bảng đã có khóa chính; bỏ lựa chọn khóa chính ở trường mới.");
+        foreach (var field in definitions)
         {
             var name = field.Name.Trim();
             string id;
             try { id = Quote(name); }
             catch (InvalidOperationException ex) { throw new CellException(field, 0, ex.Message, true); }
             if (!names.Add(name)) throw new CellException(field, 0, "Tên trường bị trùng: " + name, true);
-            if (field.Identity && (field.Type is not ("int" or "bigint" or "smallint" or "tinyint") || field.Default != null))
+            if (field.Identity && (field.Type is not ("int" or "bigint" or "smallint" or "tinyint") || field.Default != null || field.NullDefault))
                 throw new CellException(field, 6, name + ": tự tăng cần kiểu số nguyên và không có DEFAULT.", true);
             string sqlType;
             try { sqlType = SqlType(field); }
             catch (InvalidOperationException ex) { throw new CellException(field, 2, ex.Message, true); }
-            var definition = id + " " + sqlType + (field.Identity ? " IDENTITY(1,1)" : "") +
-                (field.Required || field.Key ? " NOT NULL" : " NULL") + (field.Unique ? " UNIQUE" : "");
+            if (field.Identity && (!long.TryParse(field.IdentitySeed, out _) || !long.TryParse(field.IdentityIncrement, out long increment) || increment == 0))
+                throw new InvalidOperationException(name + ": seed/increment tự tăng không hợp lệ.");
+            var definition = id + " " + sqlType + (field.Collation != null ? " COLLATE " + CollationSql(field.Collation) : "") +
+                (field.Identity ? $" IDENTITY({field.IdentitySeed},{field.IdentityIncrement})" : "") +
+                (field.Required || field.Key || field.Identity ? " NOT NULL" : " NULL") + (field.Unique ? " UNIQUE" : "");
             if (field.Default != null)
             {
                 object value;
@@ -659,18 +727,26 @@ internal sealed class CatalogDesigner : Window
                     Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture)!)
                     .Replace("'", "''", StringComparison.Ordinal) + "'";
             }
+            else if (field.NullDefault) definition += " DEFAULT NULL";
             if (field.Reference is { } reference)
             {
-                if (!string.Equals(reference[3], field.Type, StringComparison.Ordinal))
+                bool self = creating && duplicateSource != null && reference[0] == duplicateSource.Schema && reference[1] == duplicateSource.Name;
+                var referencedField = self ? definitions.SingleOrDefault(f => templateOriginalNames.GetValueOrDefault(f) == reference[2]) ??
+                    definitions.SingleOrDefault(f => f.Name.Trim() == reference[2]) : null;
+                if (self && referencedField == null)
+                    throw new CellException(field, 8, name + ": trường được tham chiếu đã bị bỏ khỏi bản nháp.", true);
+                if (!string.Equals(referencedField?.Type ?? reference[3], field.Type, StringComparison.Ordinal))
                     throw new CellException(field, 8, name + ": kiểu khóa ngoại phải khớp với cột đích.", true);
-                definition += " REFERENCES " + Quote(reference[0]) + "." + Quote(reference[1]) + "(" + Quote(reference[2]) + ")";
+                var referenceTable = self ? table : new TableName(reference[0], reference[1]);
+                definition += " REFERENCES " + referenceTable.Sql + "(" + Quote(referencedField?.Name.Trim() ?? reference[2]) + ")";
             }
             columns.Add(definition);
             if (field.Key) keys.Add(id);
         }
         if (creating)
             for (int i = 0; i < Audit.Length; i++) columns.Add(Quote(Audit[i]) + (i < 2 ? " int NULL" : " datetime NULL"));
-        if (keys.Count > 0) columns.Add("PRIMARY KEY (" + string.Join(", ", keys) + ")");
+        if (keys.Count > 0) columns.Add("PRIMARY KEY (" + string.Join(", ", definitions.Where(f => f.Key)
+            .OrderBy(f => f.KeyOrder == 0 ? int.MaxValue : f.KeyOrder).Select(f => Quote(f.Name.Trim()))) + ")");
         if (columns.Count == 0) return [];
         var list = string.Join(", ", columns);
         if (!creating) return [new Statement($"ALTER TABLE {table.Sql} ADD {list}", [])];
@@ -683,11 +759,13 @@ internal sealed class CatalogDesigner : Window
         ];
     }
 
-    private List<Statement> InsertCommands(TableName table)
+    private List<Statement> InsertCommands(TableName table, IReadOnlyList<string?[]>? rowsToInsert = null)
     {
+        var pending = rowsToInsert ?? records.ToArray();
         var result = new List<Statement>();
-        foreach (var record in records)
+        foreach (var record in pending)
         {
+            var checks = new List<string>();
             var columns = new List<string>();
             var values = new List<string>();
             var parameters = new List<SqlParameter>();
@@ -710,7 +788,7 @@ internal sealed class CatalogDesigner : Window
                 }
                 var parameter = "@p" + i;
                 object converted;
-                try { converted = value == ":null" ? DBNull.Value : ConvertValue((string)column[1], value == ":empty" ? "" : value); }
+                try { converted = value == ":null" ? DBNull.Value : ConvertValue((string)column[1], value == ":empty" ? "" : LSCode.Core.CatalogClipboard.DecodeLiteral(value)); }
                 catch (Exception ex) when (ex is FormatException or OverflowException)
                 { throw new CellException(record, i, "Giá trị không hợp lệ cho " + column[1] + "."); }
                 if (converted == DBNull.Value && !(bool)column[5])
@@ -720,9 +798,17 @@ internal sealed class CatalogDesigner : Window
                 if (converted is string text && (string)column[1] is "nchar" or "nvarchar" &&
                     (short)column[2] is > 0 and var maxBytes && text.Length > maxBytes / 2)
                     throw new CellException(record, i, "Giá trị vượt quá độ dài của cột.");
+                ValidateValueFits(column, converted, record, i);
                 columns.Add(Quote((string)column[0]));
                 values.Add(parameter);
                 var argument = new SqlParameter(parameter, converted);
+                if (converted is string && (string)column[1] is "varchar" or "char" && column.Table.Columns.Count > 14 && column[14] is string collation)
+                {
+                    string ansi = $"CONVERT(varchar(max), {parameter} COLLATE {CollationSql(collation)})";
+                    string limit = Convert.ToInt32(column[2]) > 0 ? $"DATALENGTH({ansi}) > {Convert.ToInt32(column[2])} OR " : "";
+                    checks.Add($"IF {limit}CONVERT(varbinary(max), CONVERT(nvarchar(max), {ansi})) <> CONVERT(varbinary(max), {parameter}) " +
+                        $"THROW 50001, N'Dữ liệu văn bản vượt độ dài hoặc không biểu diễn được bằng collation của cột {Quote((string)column[0]).Replace("'", "''", StringComparison.Ordinal)}.', 1;");
+                }
                 switch ((string)column[1])
                 {
                     case "bit": argument.SqlDbType = SqlDbType.Bit; break;
@@ -738,13 +824,15 @@ internal sealed class CatalogDesigner : Window
             var sql = columns.Count == 0 ? $"INSERT INTO {table.Sql} DEFAULT VALUES" :
                 $"INSERT INTO {table.Sql} ({string.Join(", ", columns)}) VALUES ({string.Join(", ", values)})";
             if (values.Contains("@auditTime")) sql = "DECLARE @auditTime datetime = GETDATE(); " + sql;
+            sql = string.Join(" ", checks) + " " + sql;
             result.Add(new Statement(sql, parameters.ToArray()));
         }
+        ValidateBatchKeys(result, pending);
         return result;
     }
 
     private static bool Managed(DataRow column) => (bool)column[13] || (bool)column[6] || (bool)column[7] ||
-        Convert.ToInt32(column[9]) != 0 || Convert.ToInt32(column[10]) == 189;
+        Convert.ToInt32(column[9]) != 0 || Convert.ToInt32(column[10]) == 189 || !Types.Contains((string)column[1]);
 
     private static object ConvertValue(string type, string text)
     {

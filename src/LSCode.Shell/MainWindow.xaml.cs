@@ -59,7 +59,7 @@ public partial class MainWindow : Window
                 RefreshSnippets();
                 try { projects = ProjectStore.Load(); }
                 catch (Exception ex) { projectCatalogAvailable = false; Log("Không đọc được project catalog; file được giữ nguyên: " + ex.Message); }
-                var smoke = Environment.GetCommandLineArgs().Any(a => a is "--smoke" or "--project-smoke");
+                var smoke = Environment.GetCommandLineArgs().Any(a => a is "--smoke" or "--project-smoke" or "--compact-ui-smoke");
                 startup.Dispose();
                 if (!smoke) await SelectProjectAsync();
                 if (smoke && Directory.Exists(settings.Workspace)) LoadWorkspace(settings.Workspace!);
@@ -307,10 +307,30 @@ public partial class MainWindow : Window
     {
         var row = new DockPanel { LastChildFill = true };
         var extension = Path.GetExtension(name).ToLowerInvariant();
-        var glyph = folder ? "\uE8B7" : extension switch { ".sql" => "\uE968", ".xml" or ".xsd" or ".f" or ".aspx" or ".js" => "\uE943", ".config" => "\uE713", ".xlsx" or ".xls" or ".csv" => "\uE80A", _ => "\uE8A5" };
-        var icon = new TextBlock { Text = glyph, FontFamily = new FontFamily("Segoe MDL2 Assets"), Width = 20, FontSize = 14, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) };
-        icon.SetResourceReference(TextBlock.ForegroundProperty, "Muted");
-        DockPanel.SetDock(icon, Dock.Left); row.Children.Add(icon);
+        var glyph = folder ? "\uE8B7" : extension switch { ".sql" => "\uE968", ".xml" or ".xsd" or ".f" or ".aspx" or ".js" => "\uE943", ".config" => "\uE713", ".rpt" => "\uE9F9", ".xlsx" or ".xls" or ".csv" => "\uE80A", _ => "\uE8A5" };
+        var icon = new TextBlock { Text = glyph, FontFamily = new FontFamily("Segoe MDL2 Assets"), Width = 18, FontSize = 16, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 5, 0) };
+        icon.SetResourceReference(TextBlock.ForegroundProperty, folder ? "Accent" : "Text");
+        if (folder)
+        {
+            var folderIcon = new System.Windows.Shapes.Path
+            {
+                Data = Geometry.Parse("M1,4 L7,4 L9,6 L17,6 L17,16 L1,16 Z"),
+                Width = 17, Height = 16, Stretch = Stretch.Uniform, StrokeThickness = 1.3,
+                VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0)
+            };
+            folderIcon.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, "Accent");
+            DockPanel.SetDock(folderIcon, Dock.Left); row.Children.Add(folderIcon);
+        }
+        else { DockPanel.SetDock(icon, Dock.Left); row.Children.Add(icon); }
+        if (!folder)
+        {
+            var type = extension.TrimStart('.').ToUpperInvariant();
+            var label = new TextBlock { Text = type.Length == 0 ? "FILE" : type, FontSize = 10,
+                FontWeight = FontWeights.SemiBold, MinWidth = 30, VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 6, 0) };
+            label.SetResourceReference(TextBlock.ForegroundProperty, "Muted");
+            DockPanel.SetDock(label, Dock.Left); row.Children.Add(label);
+        }
         row.Children.Add(new TextBlock { Text = name, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center, ToolTip = name });
         return row;
     }

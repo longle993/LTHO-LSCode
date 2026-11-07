@@ -21,7 +21,7 @@ public static class EmbeddedHighlighting
           <Color name="Function" foreground="$FUNCTION"/>
           <Color name="Markup" foreground="$MARKUP"/>
           <Color name="Entity" foreground="$ENTITY"/>
-          <Color name="Attribute" foreground="$ENTITY"/>
+          <Color name="Attribute" foreground="$ATTRIBUTE"/>
           <RuleSet name="SQL" ignoreCase="true">
             <Span color="Comment" begin="--"/>
             <Span color="Comment" multiline="true" begin="/\*" end="\*/"/>
@@ -70,14 +70,15 @@ public static class EmbeddedHighlighting
         """;
         bool light = theme == "Light", contrast = theme == "High Contrast";
         source = source.Replace("$ROOT", language == ".sql" ? "SQL" : language is ".js" or ".ts" ? "JS" : "XML")
-            .Replace("$GREEN", light ? "#237A32" : "#7ECB89")
-            .Replace("$RED", light ? "#C41A16" : "#FF7B72")
+            .Replace("$GREEN", light ? "#18683C" : contrast ? "#BFFF00" : "#63D990")
+            .Replace("$RED", light ? "#9A246D" : contrast ? "#FF80FF" : "#F58BCB")
             .Replace("$KEY", light ? "#005FB8" : contrast ? "#FFFF00" : "#79B8FF")
-            .Replace("$STRING", light ? "#9E4A13" : contrast ? "#FFFFFF" : "#E9B58D")
-            .Replace("$COMMENT", light ? "#477044" : contrast ? "#BFFF00" : "#91B98D")
+            .Replace("$STRING", light ? "#8B3F0B" : contrast ? "#FFFFFF" : "#F2B77D")
+            .Replace("$COMMENT", light ? "#466347" : contrast ? "#BFFF00" : "#8EC58A")
             .Replace("$FUNCTION", light ? "#192738" : "#E0E6EE")
-            .Replace("$MARKUP", light ? "#005FB8" : contrast ? "#FFFF00" : "#79B8FF")
-            .Replace("$ENTITY", light ? "#8A3FFC" : contrast ? "#FF00FF" : "#D58CFF");
+            .Replace("$MARKUP", light ? "#0758AD" : contrast ? "#FFFF00" : "#65B5FF")
+            .Replace("$ATTRIBUTE", light ? "#006975" : contrast ? "#00FFFF" : "#57D4DF")
+            .Replace("$ENTITY", light ? "#7524A8" : contrast ? "#FF80FF" : "#D29CFF");
         // Entity delimiter quotes belong to XML, not to the embedded lexer. An XML
         // entity cannot contain its own unescaped delimiter as a code string opener.
         var xml = XDocument.Parse(source); XNamespace ns = "http://icsharpcode.net/sharpdevelop/syntaxdefinition/2008";

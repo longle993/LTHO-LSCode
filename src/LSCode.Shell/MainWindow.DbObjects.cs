@@ -58,7 +58,7 @@ public partial class MainWindow
     {
         objectCancellation?.Cancel(); objectCancellation?.Dispose(); objectCancellation = new CancellationTokenSource();
         var generation = objectCancellation.Token;
-        DbObjects.Items.Clear(); DbObjectStatus.Text = "Mở nhóm để tải App DB • 200 đối tượng mỗi lượt";
+        DbObjects.Items.Clear(); DbObjectStatus.Text = "";
         foreach (var (label, types) in new[] { ("Tables", "'U'"), ("Views", "'V'"), ("Stored procedures", "'P','PC'"), ("Functions", "'FN','IF','TF','FS','FT'") })
         {
             var state = new DbGroupState(types);
