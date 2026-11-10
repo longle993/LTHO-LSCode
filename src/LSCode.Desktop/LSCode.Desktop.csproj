@@ -1,6 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><TargetFramework>net10.0-windows</TargetFramework><UseWPF>true</UseWPF><OutputType>WinExe</OutputType><AssemblyName>LSCode.WebView</AssemblyName></PropertyGroup>
+  <PropertyGroup>
+    <ApplicationIcon>../../assets/logo2.ico</ApplicationIcon>
+  </PropertyGroup>
   <ItemGroup>
+    <Resource Include="$(ApplicationIcon)" Link="Assets/logo.ico" />
     <ProjectReference Include="../LSCode.Application/LSCode.Application.csproj" />
     <ProjectReference Include="../LSCode.Infrastructure/LSCode.Infrastructure.csproj" />
     <ProjectReference Include="../LSCode.Contracts/LSCode.Contracts.csproj" />

@@ -92,8 +92,9 @@ export function subscribe(fn: (e: { type: string }) => void) {
     listeners.delete(fn);
   };
 }
-export function operation<T>(method: string, payload: unknown = {}) {
+export function operation<T>(method: string, payload: unknown = {}, timeoutMs?: number) {
   const id = crypto.randomUUID();
+  let timer: number | undefined;
   const promise = new Promise<T>((resolve, reject) => {
     if (!native) {
       reject(
@@ -104,6 +105,13 @@ export function operation<T>(method: string, payload: unknown = {}) {
       return;
     }
     pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
+    if (timeoutMs !== undefined) {
+      timer = window.setTimeout(() => {
+        if (!pending.delete(id)) return;
+        reject(new Error("Thao tác quá thời gian chờ. Vui lòng thử lại."));
+        void request("operation.cancel", { requestId: id }).catch(() => {});
+      }, timeoutMs);
+    }
     window.chrome!.webview!.postMessage({
       protocolVersion: 1,
       requestId: id,
@@ -113,12 +121,18 @@ export function operation<T>(method: string, payload: unknown = {}) {
   });
   return {
     id,
-    promise,
+    promise: timeoutMs === undefined ? promise : promise.finally(() => window.clearTimeout(timer)),
     cancel: () => request("operation.cancel", { requestId: id }),
   };
 }
 export function request<T>(method: string, payload: unknown = {}): Promise<T> {
   return operation<T>(method, payload).promise;
+}
+export function notifyWindowReady() {
+  let frame = requestAnimationFrame(() => {
+    frame = requestAnimationFrame(() => void request("window.ready").catch(() => {}));
+  });
+  return () => cancelAnimationFrame(frame);
 }
 export function readClipboard(): Promise<string> {
   return native

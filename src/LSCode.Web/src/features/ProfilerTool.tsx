@@ -1,22 +1,30 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Play, Square } from "lucide-react";
 import { Button, DataGrid, Select } from "../ui";
 import { request } from "../bridge";
-import type { ToolProps } from "./types";
+import type { Target } from "../bridge";
 import { useTask } from "./useTask";
-export function ProfilerTool({ target, onText }: ToolProps) {
-  const [user, setUser] = useState("profiler"),
+export function ProfilerTool({ target, visible, closing, onBusyChange }: {
+  target?: Target;
+  visible: boolean;
+  closing: boolean;
+  onBusyChange: (busy: boolean) => void;
+}) {
+  const [user, setUser] = useState("profile"),
     [password, setPassword] = useState("fsd"),
     [profilerPath, setProfilerPath] = useState("");
   const [engine, setEngine] = useState("ssms18");
   const [running, setRunning] = useState(false),
-    [rows, setRows] = useState<TraceEvent[]>([]),
+    [{ rows, offset }, setBuffer] = useState<{ rows: TraceEvent[]; offset: number }>({ rows: [], offset: 0 }),
+    [gridVersion, setGridVersion] = useState(0),
+    [followLatest, setFollowLatest] = useState(true),
     [filter, setFilter] = useState(""),
     [templatePath, setTemplatePath] = useState(""),
     [selected, setSelected] = useState(""),
     [dropped, setDropped] = useState(0),
     [layout, setLayout] = useState(false);
   const task = useTask();
+  useEffect(() => onBusyChange(task.busy), [task.busy, onBusyChange]);
   const active = useRef(true);
   const [pollError, setPollError] = useState("");
   useEffect(() => {
@@ -28,11 +36,11 @@ export function ProfilerTool({ target, onText }: ToolProps) {
       .catch(() => {});
     return () => {
       active.current = false;
-      void request("profiler.stop").catch(() => {});
     };
   }, []);
   useEffect(() => {
-    if (!running) return;
+    if (!running || closing) return;
+    let current = true;
     let pending = false;
     const timer = setInterval(async () => {
       if (pending) return;
@@ -41,21 +49,34 @@ export function ProfilerTool({ target, onText }: ToolProps) {
         const b = await request<{ events: TraceEvent[]; dropped: number }>(
           "profiler.read",
         );
-        if (active.current) {
-          setRows((old) => [...old, ...b.events].slice(-5000));
+        if (current) {
+          if (b.events.length) setBuffer((old) => {
+            const combined = [...old.rows, ...b.events];
+            const removed = Math.max(0, combined.length - 5000);
+            return { rows: combined.slice(removed), offset: old.offset + removed };
+          });
           setDropped(b.dropped);
+          setPollError("");
         }
       } catch (e) {
-        setPollError((e as Error).message);
-        setRunning(false);
+        if (current) setPollError((e as Error).message);
       } finally {
         pending = false;
       }
     }, 700);
-    return () => clearInterval(timer);
-  }, [running]);
+    return () => { current = false; clearInterval(timer); };
+  }, [running, closing]);
+  function replaceRows(events: TraceEvent[]) {
+    setBuffer({ rows: events, offset: 0 });
+    setGridVersion((old) => old + 1);
+    setSelected("");
+  }
+  const table = useMemo(() => ({
+    columns: ["Thời gian", "Event", "Database", "Login", "Duration ms", "Reads", "SQL"],
+    rows: rows.map((r) => [r.time, r.event, r.database, r.login, String(r.durationMs), String(r.reads), r.text]),
+  }), [rows]);
   return (
-    <div className="tool-body large">
+    <div className="tool-body profiler-body" ref={(element) => { if (element) element.inert = closing; }}>
       <p className="muted">
         {target
           ? `${target.server} / ${target.database}`
@@ -133,6 +154,7 @@ export function ProfilerTool({ target, onText }: ToolProps) {
                 password,
                 profilerPath,
               });
+              setFollowLatest(true);
               setRunning(true);
             })
           }
@@ -152,7 +174,17 @@ export function ProfilerTool({ target, onText }: ToolProps) {
           <Square size={14} />
           Dừng
         </Button>
-        <Button onClick={() => setRows([])}>Xóa</Button>
+        <Button onClick={() => replaceRows([])}>Xóa</Button>
+        <Button
+          aria-pressed={followLatest}
+          variant={followLatest ? "secondary" : "outline"}
+          onClick={() => {
+            if (followLatest) setSelected(rows.at(-1)?.text ?? "");
+            setFollowLatest(!followLatest);
+          }}
+        >
+          Theo dõi cuối lưới
+        </Button>
         <Button onClick={() => setLayout(!layout)}>Đổi bố cục</Button>
         <Button
           onClick={() =>
@@ -191,7 +223,8 @@ export function ProfilerTool({ target, onText }: ToolProps) {
                       ]),
                     ),
                   ) as TraceEvent[];
-                setRows(normalized);
+                replaceRows(normalized);
+                setFollowLatest(true);
               } finally {
                 await request("document.close", { id: opened.id });
               }
@@ -202,35 +235,23 @@ export function ProfilerTool({ target, onText }: ToolProps) {
         </Button>
       </div>
       <div
-        className={layout ? "tool-columns" : ""}
+        className={layout ? "profiler-results tool-columns" : "profiler-results"}
         style={{
           display: "flex",
           flexDirection: layout ? "row" : "column",
           flex: 1,
-          minHeight: 0,
           gap: 12,
         }}
       >
         <DataGrid
-          table={{
-            columns: [
-              "Thời gian",
-              "Event",
-              "Database",
-              "Login",
-              "Duration ms",
-              "Reads",
-              "SQL",
-            ],
-            rows: rows.map((r) => [
-              r.time,
-              r.event,
-              r.database,
-              r.login,
-              String(r.durationMs),
-              String(r.reads),
-              r.text,
-            ]),
+          key={gridVersion}
+          table={table}
+          rangeSelection
+          followEnd={visible && followLatest}
+          rowOffset={offset}
+          onInspect={() => {
+            if (followLatest) setSelected(rows.at(-1)?.text ?? "");
+            setFollowLatest(false);
           }}
           onRow={(r) => setSelected(r[6] ?? "")}
         />
@@ -238,7 +259,7 @@ export function ProfilerTool({ target, onText }: ToolProps) {
           className="trace-sql"
           style={layout ? { flex: 1, maxHeight: "none" } : undefined}
         >
-          {selected || "Nhấn đúp sự kiện để xem SQL."}
+          {(followLatest ? rows.at(-1)?.text : selected) || "Chọn một dòng để xem SQL."}
         </pre>
       </div>
       <p className="form-error">{task.error || pollError}</p>

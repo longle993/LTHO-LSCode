@@ -24,11 +24,19 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
     private readonly SemaphoreSlim traceGate = new(1);
     private readonly SemaphoreSlim persistenceGate = new(1);
     private readonly CatalogWorkspace catalog = new();
+    private sealed record TableSnapshot(string Id, SqlTarget Target, string Qualified, DataTable Data);
+    private volatile TableSnapshot? tableSnapshot;
     public DeveloperTools() => http.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "Mozilla/5.0");
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private SqlTarget Target(JsonElement p) => targets.TryGetValue(p.GetProperty("targetId").GetString() ?? "", out var t) ? t : throw new InvalidOperationException("Chọn kết nối cho tab hiện tại.");
     private TargetInfo Register(SqlTarget t) { var id = Guid.NewGuid().ToString("N"); targets[id] = t; return new(id, t.Server, t.Database); }
     private static ProjectInfo Project(LegacyProject p) => new(p.Id, p.Name, p.Server, p.Database, p.SourcePath);
+    private static string Identifier(string name) =>
+        string.IsNullOrWhiteSpace(name) || name.Length > 128 || name.Contains('\0')
+            ? throw new ArgumentException("Tên schema, bảng hoặc cột không hợp lệ.")
+            : name;
+    private static string[] RequiredColumns(string[] names) => names.Length == 0
+        ? throw new ArgumentException("Chọn ít nhất một cột.") : names;
     private static ResultSet Table(DataTable t) => new(t.Columns.Cast<DataColumn>().Select(c => c.ColumnName).ToArray(),
         t.Rows.Cast<DataRow>().Select(r => r.ItemArray.Select(x => x is null or DBNull ? null : Convert.ToString(x, System.Globalization.CultureInfo.InvariantCulture)).ToArray()).ToArray());
     public async Task<object?> ExecuteAsync(string method, JsonElement p, CancellationToken ct)
@@ -37,11 +45,19 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
         string S(string key, string fallback = "") => p.TryGetProperty(key, out var x) && x.ValueKind == JsonValueKind.String ? x.GetString()! : fallback;
         bool B(string key) => p.TryGetProperty(key, out var x) && x.ValueKind == JsonValueKind.True;
         int I(string key, int fallback = 0) => p.TryGetProperty(key, out var x) && x.TryGetInt32(out var n) ? n : fallback;
+        string QualifiedTable() => ProjectDatabase.Quote(Identifier(S("schema", "dbo"))) + "." + ProjectDatabase.Quote(Identifier(S("table")));
+        string[] ColumnNames() => p.TryGetProperty("columns", out var values)
+            ? (values.Deserialize<string[]>() ?? []).Select(Identifier).Distinct(StringComparer.Ordinal).ToArray() : [];
         switch (method)
         {
             case "studio.bootstrap":
-                var settings = SettingsStore.Load();
-                return new { settings, projects = ProjectStore.Load().Select(Project), snippets = ReadSnippets(), version = "0.1-webview" };
+                return await Task.Run(() => new
+                {
+                    settings = SettingsStore.Load(),
+                    projects = ProjectStore.Load().Select(Project).ToArray(),
+                    snippets = ReadSnippets(),
+                    version = "0.1-webview"
+                }, ct);
             case "settings.read": return SettingsStore.Load();
             case "settings.save":
                 await persistenceGate.WaitAsync(ct);
@@ -87,7 +103,7 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                 var project = ProjectStore.Load().First(x => x.Id == S("id"));
                 var available = new List<TargetInfo>();
                 if (!string.IsNullOrWhiteSpace(project.Field("SysConnectionString")) || !string.IsNullOrWhiteSpace(project.Field("WebConfigPath")))
-                    available.AddRange((await ProjectDatabase.ConfiguredTargetsAsync(project).WaitAsync(ct)).Select(Register));
+                    available.AddRange((await ProjectDatabase.ConfiguredTargetsAsync(project).WaitAsync(TimeSpan.FromSeconds(30), ct)).Select(Register));
                 else if (!string.IsNullOrWhiteSpace(project.Server) && !string.IsNullOrWhiteSpace(project.Database)) {
                     var legacyConnection = new SqlConnectionStringBuilder { DataSource = project.Server, InitialCatalog = project.Database, IntegratedSecurity = string.IsNullOrWhiteSpace(project.User), UserID = project.User, Password = project.Field("Password"), Encrypt = SqlConnectionEncryptOption.Optional, ConnectTimeout = 12, ApplicationName = "LS Code" };
                     available.Add(Register(new(project.Server, project.Database, legacyConnection.ConnectionString)));
@@ -99,11 +115,13 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
             case "project.sync":
                 var config = S("configPath"); var connections = await Task.Run(() => ProjectDiscovery.ReadConnections(config), ct);
                 var identity = new SqlConnectionStringBuilder(connections.Sys);
-                var profile = ProjectImporter.Create(S("name"), identity.DataSource, identity.InitialCatalog, Path.GetDirectoryName(config)!);
+                var projectName = S("name").Trim();
+                var profile = ProjectImporter.Create(projectName, identity.DataSource, identity.InitialCatalog, Path.GetDirectoryName(config)!);
                 var raw = XmlTools.Parse(profile.RawXml).Root!;
                 raw.Add(new XElement("WebConfigPath", config), new XElement("AppConnectionString", connections.App), new XElement("SysConnectionString", connections.Sys));
+                raw.SetElementValue("ProgramPath", $"http://172.168.5.14/{Uri.EscapeDataString(projectName)}/Main/Login.aspx");
                 profile = profile with { RawXml = raw.ToString(SaveOptions.DisableFormatting) };
-                await SaveProjectAsync(profile, ct); return Project(profile);
+                await SaveProjectAsync(profile, ct, preserveProgramPath: true); return Project(profile);
             case "sql.connect":
                 var builder = new SqlConnectionStringBuilder { DataSource = S("server"), InitialCatalog = S("database"), IntegratedSecurity = B("integratedSecurity"),
                     UserID = B("integratedSecurity") ? "" : S("user"), Password = B("integratedSecurity") ? "" : S("password"), Encrypt = true,
@@ -125,29 +143,66 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                 return CompletionSnippets.Get(jsSnippets, S("beforeCaret")).ToArray();
             case "sql.refresh": SqlSchemaCompletion.Clear(); return true;
             case "schema.objects":
+                var search = S("query").Trim();
+                var objectOffset = Math.Max(0, I("offset"));
+                // Metadata-only searches avoid reading module definitions on every keystroke.
+                var filter = search.Length == 0 ? "" : B("content")
+                    ? "AND (CHARINDEX(@q, o.name) > 0 OR CHARINDEX(@q, OBJECT_DEFINITION(o.object_id)) > 0)"
+                    : "AND CHARINDEX(@q, o.name) > 0";
                 return Table(await ProjectDatabase.ReadAsync(Target(p), """
-                    SELECT s.name AS [Schema],o.name AS [Name],o.type_desc AS [Type],o.object_id AS [Id]
-                    FROM sys.objects o JOIN sys.schemas s ON s.schema_id=o.schema_id
-                    LEFT JOIN sys.sql_modules m ON m.object_id=o.object_id
-                    WHERE o.is_ms_shipped=0 AND o.type IN ('U','V','P','FN','IF','TF')
-                    AND (o.name LIKE @q OR (@content=1 AND m.definition LIKE @q))
-                    ORDER BY s.name,o.name OFFSET @offset ROWS FETCH NEXT 200 ROWS ONLY
-                    """, ct, new SqlParameter("@q", "%" + S("query") + "%"), new SqlParameter("@content", B("content")), new SqlParameter("@offset", Math.Max(0, I("offset")))));
+                    WITH matching AS (
+                        SELECT s.name AS [Schema], o.name AS [Name], o.type_desc AS [Type], o.object_id AS [Id],
+                            ROW_NUMBER() OVER (ORDER BY s.name, o.name, o.object_id) AS position
+                        FROM sys.objects o JOIN sys.schemas s ON s.schema_id = o.schema_id
+                        WHERE o.is_ms_shipped = 0 AND o.type IN ('U','V','P','FN','IF','TF')
+                    """ + "\n" + filter + """
+
+                    )
+                    SELECT TOP (200) [Schema], [Name], [Type], [Id]
+                    FROM matching WHERE position > @offset ORDER BY position
+                    """, ct, new SqlParameter("@q", search), new SqlParameter("@offset", objectOffset)));
             case "schema.columns":
                 return Table(await ProjectDatabase.ReadAsync(Target(p), "SELECT c.name AS [Column],t.name AS [Type],c.max_length AS [Length],c.is_nullable AS [Nullable],c.is_identity AS [Identity] FROM sys.columns c JOIN sys.types t ON t.user_type_id=c.user_type_id WHERE c.object_id=OBJECT_ID(@object) ORDER BY c.column_id", ct, new SqlParameter("@object", S("object"))));
+            case "table.names":
+                return Table(await ProjectDatabase.ReadAsync(Target(p), """
+                    SELECT TOP (30) s.name AS [Schema], t.name AS [Name]
+                    FROM sys.tables t JOIN sys.schemas s ON s.schema_id=t.schema_id
+                    WHERE t.is_ms_shipped=0 AND (@q='' OR CHARINDEX(@q,t.name)>0 OR CHARINDEX(@q,s.name+'.'+t.name)>0)
+                    ORDER BY CASE WHEN CHARINDEX(@q,t.name)=1 THEN 0 ELSE 1 END, s.name, t.name
+                    """, ct, new SqlParameter("@q", S("query").Trim())));
+            case "table.structure": return await TableInspection.StructureAsync(Target(p), QualifiedTable(), ct);
+            case "table.createScript": return await TableDefinition.ReadAsync(Target(p), QualifiedTable(), ct);
+            case "table.insertScript":
+                var snapshot = tableSnapshot;
+                if (snapshot == null || snapshot.Id != S("snapshotId"))
+                    throw new InvalidOperationException("Dữ liệu đã thay đổi. Hãy đọc lại bảng.");
+                return await TableInspection.InsertScriptAsync(snapshot.Target, snapshot.Qualified, snapshot.Data, ct);
+            case "table.addScript": return await TableInspection.AddColumnsAsync(Target(p), QualifiedTable(), RequiredColumns(ColumnNames()), ct);
+            case "table.dropColumns":
+                await TableInspection.DropColumnsAsync(Target(p), QualifiedTable(), RequiredColumns(ColumnNames()), ct);
+                tableSnapshot = null;
+                return true;
             case "schema.script":
                 var definition = await ProjectDatabase.ReadAsync(Target(p), "SELECT OBJECT_DEFINITION(OBJECT_ID(@object)) AS [Text]", ct, new SqlParameter("@object", S("object")));
                 if (definition.Rows.Count > 0 && definition.Rows[0][0] is string script) return script;
                 return await TableDefinition.ReadAsync(Target(p), S("object"), ct);
             case "table.read":
+            case "table.view":
                 // SELECT clauses are intentionally a developer SQL surface, executed with this target's permissions.
                 // Object identifiers are always quoted independently of those expressions.
-                var qualified = ProjectDatabase.Quote(S("schema", "dbo")) + "." + ProjectDatabase.Quote(S("table"));
-                var columns = p.TryGetProperty("columns", out var cols) ? cols.Deserialize<string[]>() ?? [] : [];
+                var qualified = QualifiedTable();
+                var columns = ColumnNames();
                 var select = columns.Length == 0 ? "*" : string.Join(",", columns.Select(ProjectDatabase.Quote));
                 var readSql = "SELECT TOP (1000) " + select + " FROM " + qualified
                     + (S("where").Length > 0 ? " WHERE " + S("where") : "") + (S("orderBy").Length > 0 ? " ORDER BY " + S("orderBy") : "");
-                return Table(await ProjectDatabase.ReadAsync(Target(p), ReadOnlyQuery.Validate(readSql), ct));
+                var readTarget = Target(p);
+                var data = await ProjectDatabase.ReadAsync(readTarget, ReadOnlyQuery.Validate(readSql), ct).ConfigureAwait(false);
+                if (method == "table.read") return Table(data);
+                var preview = TableInspection.Preview(data);
+                ct.ThrowIfCancellationRequested();
+                var snapshotId = Guid.NewGuid().ToString("N");
+                tableSnapshot = new(snapshotId, readTarget, qualified, data);
+                return new { data = preview, snapshotId };
             case "project.commands": return await ProjectDatabase.CommandsAsync(Target(p), ct, S("appDatabase"));
             case "project.controller":
                 return await Task.Run(async () =>
@@ -158,9 +213,10 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                     var files = WorkspaceFileIndex.Files(Directory.Exists(controllerRoot)?controllerRoot:root, ct,false).Take(100001).ToArray();
                     if(files.Length>100000)throw new IOException("Project vượt 100000 file; cần thu hẹp thư mục.");
                     var related = new HashSet<string>(names.Count == 0 ? [Path.GetFileNameWithoutExtension(file)] : names, StringComparer.OrdinalIgnoreCase);
+                    var byName = files.ToLookup(f => Path.GetFileNameWithoutExtension(f), StringComparer.OrdinalIgnoreCase);
                     var pending = new Queue<string>(related);
                     while (pending.TryDequeue(out var name))
-                        foreach (var xmlFile in files.Where(f => Path.GetExtension(f).Equals(".xml", StringComparison.OrdinalIgnoreCase) && Path.GetFileNameWithoutExtension(f).Equals(name, StringComparison.OrdinalIgnoreCase)))
+                        foreach (var xmlFile in byName[name].Where(f => Path.GetExtension(f).Equals(".xml", StringComparison.OrdinalIgnoreCase)))
                             foreach (var child in ProjectConventions.GridControllers(await File.ReadAllTextAsync(xmlFile, ct))) if (related.Add(child)) pending.Enqueue(child);
                     return new { file, files = files.Where(f => related.Contains(Path.GetFileNameWithoutExtension(f))).Prepend(file).Distinct(StringComparer.OrdinalIgnoreCase).ToArray() };
                 }, ct);
@@ -210,7 +266,7 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                     if (trace != null || extendedTrace != null) throw new InvalidOperationException("Profiler đang chạy. Dừng phiên hiện tại trước.");
                     var t = Target(p);
                     if (!B("useTargetCredentials")) {
-                        var auth = new SqlConnectionStringBuilder(t.ConnectionString) { IntegratedSecurity = false, Authentication = SqlAuthenticationMethod.NotSpecified, UserID = S("user", "profiler"), Password = S("password", "fsd") };
+                        var auth = new SqlConnectionStringBuilder(t.ConnectionString) { IntegratedSecurity = false, Authentication = SqlAuthenticationMethod.NotSpecified, UserID = S("user", "profile"), Password = S("password", "fsd") };
                         t = t with { ConnectionString = auth.ConnectionString };
                     }
                     if (S("profilerPath").Length > 0) {
@@ -257,10 +313,24 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
         if (!File.Exists(file)) file = Path.Combine(AppContext.BaseDirectory, "Assets", "snippets.xml");
         return File.Exists(file) ? SnippetImporter.Read(File.ReadAllText(file)) : [];
     }
-    private async Task SaveProjectAsync(LegacyProject project, CancellationToken ct)
+    private async Task SaveProjectAsync(LegacyProject project, CancellationToken ct, bool preserveProgramPath = false)
     {
         await persistenceGate.WaitAsync(ct);
-        try { ProjectStore.Save(ProjectImporter.Merge(ProjectStore.Load(), [project], true).Projects); }
+        try
+        {
+            var existing = ProjectStore.Load();
+            if (preserveProgramPath)
+            {
+                var customPath = existing.FirstOrDefault(p => p.Id == project.Id)?.Field("ProgramPath");
+                if (!string.IsNullOrWhiteSpace(customPath))
+                {
+                    var raw = XmlTools.Parse(project.RawXml).Root!;
+                    raw.SetElementValue("ProgramPath", customPath);
+                    project = project with { RawXml = raw.ToString(SaveOptions.DisableFormatting) };
+                }
+            }
+            ProjectStore.Save(ProjectImporter.Merge(existing, [project], true).Projects);
+        }
         finally { persistenceGate.Release(); }
     }
     public async Task StopTraceAsync()

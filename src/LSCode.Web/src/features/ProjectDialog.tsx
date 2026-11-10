@@ -5,6 +5,8 @@ import { Button, Modal } from "../ui";
 import { request } from "../bridge";
 import type { Project } from "../bridge";
 import { useTask } from "./useTask";
+import { LoadingLine } from "../LoadingLine";
+import { SyncTool } from "./SyncTool";
 export function ProjectDialog({
   projects,
   onProjects,
@@ -31,6 +33,15 @@ export function ProjectDialog({
     sourcePath: "",
   });
   const task = useTask();
+  const [opening, setOpening] = useState(false);
+  async function open(project: Project) {
+    setOpening(true);
+    try {
+      await onOpen(project);
+    } finally {
+      setOpening(false);
+    }
+  }
   const exportProjects = () =>
     task.run(async () => {
       const text = await request<string>("project.export");
@@ -50,6 +61,9 @@ export function ProjectDialog({
           <Button variant="ghost" onClick={() => setMode("create")}>
             Tạo profile
           </Button>
+          <Button variant={mode === "sync" ? "secondary" : "ghost"} onClick={() => setMode("sync")}>
+            Đồng bộ dự án
+          </Button>
           <Button variant="ghost" onClick={() => setMode("import")}>
             Import XML
           </Button>
@@ -57,6 +71,12 @@ export function ProjectDialog({
             Export
           </Button>
         </div>
+        {mode === "sync" && (
+          <SyncTool onProjects={(updated) => {
+            onProjects(updated);
+            setMode("list");
+          }} />
+        )}
         {mode === "list" && (
           <>
             <input
@@ -65,7 +85,8 @@ export function ProjectDialog({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
-            <div className="project-list">
+            <div className="project-list loading-region" aria-busy={opening}>
+              <LoadingLine busy={opening} label="Đang mở dự án…" />
               {projects
                 .filter((p) =>
                   [p.name, p.server, p.database]
@@ -98,7 +119,7 @@ export function ProjectDialog({
                       });
                     }}
                     title="Nhấp để mở · Chuột phải để xem và sửa thông tin"
-                    onClick={() => void task.run(() => onOpen(p))}
+                    onClick={() => void task.run(() => open(p))}
                   >
                     <FolderOpen size={19} className="project-icon" />
                     <span>
@@ -131,7 +152,7 @@ export function ProjectDialog({
                 );
                 onProjects(await request<Project[]>("project.list"));
                 setMode("list");
-                if (mode === "edit") await onOpen(updated);
+                if (mode === "edit") await open(updated);
               });
             }}
           >

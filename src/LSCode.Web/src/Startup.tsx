@@ -1,9 +1,25 @@
 import { lazy, Suspense, useEffect, useState } from "react";
-import { request, native, subscribe } from "./bridge";
+import logo from "../../../assets/logo2.png";
+import { request, native, subscribe, notifyWindowReady } from "./bridge";
 import type { Bootstrap } from "./bridge";
 import { ProjectDialog } from "./features/ProjectDialog";
 const load = () => import("./App");
 const App = lazy(load);
+
+function StartupSplash({ label }: { label: string }) {
+  return (
+    <div className="startup-splash before:animate-studio-layer after:animate-studio-layer motion-reduce:before:animate-none motion-reduce:after:animate-none" role="status">
+      <div className="startup-lockup animate-studio-enter motion-reduce:animate-none">
+        <div className="startup-brand">
+          <img className="app-logo" src={logo} alt="" />
+          <strong>Studio Code</strong>
+        </div>
+        <span>{label}</span>
+        <div className="startup-track before:animate-studio-sweep motion-reduce:before:animate-none" aria-hidden="true" />
+      </div>
+    </div>
+  );
+}
 export default function Startup() {
   const [bootstrap, setBootstrap] = useState<Bootstrap>(),
     [entered, setEntered] = useState(false),
@@ -33,6 +49,10 @@ export default function Startup() {
       .catch((e) => setError(e.message));
   }, []);
   useEffect(() => {
+    if (!native || (!bootstrap && !error)) return;
+    return notifyWindowReady();
+  }, [bootstrap, error]);
+  useEffect(() => {
     return subscribe((e) => {
       if (e.type === "window.closing" && !document.querySelector(".studio"))
         void request("window.close");
@@ -41,15 +61,16 @@ export default function Startup() {
   if (entered)
     return (
       <Suspense
-        fallback={<div className="empty">Đang mở trình soạn thảo…</div>}
+        fallback={<StartupSplash label={projectId ? "Đang mở dự án…" : "Đang mở trình soạn thảo…"} />}
       >
         <App bootstrap={bootstrap} initialProjectId={projectId} />
       </Suspense>
     );
+  if (!bootstrap && !error) return <StartupSplash label="Đang khởi động…" />;
   return (
     <div className="startup">
       <div className="brand">
-        <span className="brand-mark">LS</span>
+        <img className="brand-mark app-logo" src={logo} alt="" />
         <strong>Studio Code</strong>
       </div>
       {bootstrap ? (
@@ -63,8 +84,8 @@ export default function Startup() {
           }}
         />
       ) : (
-        <div className="empty" role="status">
-          {error || "Đang tải danh sách dự án…"}
+        <div className="empty" role="alert">
+          {error}
         </div>
       )}
     </div>

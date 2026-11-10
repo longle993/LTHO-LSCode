@@ -1,4 +1,6 @@
 import ControllerExplorer, { FileIcon } from "./ControllerExplorer";
+import logo from "../../../assets/logo2.png";
+import { LoadingLine } from "./LoadingLine";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   SunMoon,
@@ -22,6 +24,7 @@ import {
   Braces,
   SlidersHorizontal,
   PanelBottom,
+  PanelLeftClose,
   X,
   Command,
   RefreshCw,
@@ -31,7 +34,10 @@ import {
   Languages,
   ArrowUpRight,
 } from "lucide-react";
-import { native, request, operation, subscribe, quoteSqlName } from "./bridge";
+import { native, request, operation, subscribe, quoteSqlName, notifyWindowReady } from "./bridge";
+import { PanelResizeHandle } from "./PanelResizeHandle";
+import { ProfilerTool } from "./features/ProfilerTool";
+import { TableTool } from "./features/TableTool";
 import type {
   Bootstrap,
   DocumentInfo,
@@ -94,7 +100,15 @@ export default function App({
     [activeId, setActiveIdRaw] = useState(""),
     [workspace, setWorkspace] = useState(""),
     [project, setProject] = useState<Project>();
+  const [profilerTab, setProfilerTab] = useState<{ target?: Target }>(),
+    [tableTab, setTableTab] = useState<{ target?: Target }>(),
+    [selectedTool, setSelectedTool] = useState<"profiler" | "table">(),
+    [profilerBusy, setProfilerBusy] = useState(false),
+    [closingProfiler, setClosingProfiler] = useState(false);
+  const profilerSelected = selectedTool === "profiler";
+  const tableSelected = selectedTool === "table";
   const setActiveId = (id: string) => {
+    setSelectedTool(undefined);
     setActiveIdRaw(id);
     setPaneIds((old) => old.map((v, i) => (i === paneRef.current ? id : v)));
   };
@@ -106,6 +120,7 @@ export default function App({
   const [dialog, setDialog] = useState(""),
     [palette, setPalette] = useState(""),
     [ready, setReady] = useState(!native),
+    [openingInitialProject, setOpeningInitialProject] = useState(!!initialProjectId),
     [status, setStatus] = useState("Sẵn sàng"),
     [error, setError] = useState(""),
     [cursor, setCursor] = useState("Dòng 1, cột 1");
@@ -126,6 +141,8 @@ export default function App({
   const [commands, setCommands] = useState<CommandNode[]>([]),
     [menuQuery, setMenuQuery] = useState(""),
     [menuIndex, setMenuIndex] = useState(-1),
+    [controllerRequests, setControllerRequests] = useState(0),
+    [expandedController, setExpandedController] = useState<string>(),
     [controllerFiles, setControllerFiles] = useState<
       { name: string; files: string[] }[]
     >([]);
@@ -166,31 +183,49 @@ export default function App({
   const suppress = useRef(false),
     notified = useRef(new Set<string>()),
     dbGeneration = useRef(0),
-    dbLoadedTarget = useRef(""),
+    dbLoadedQuery = useRef(""),
+    dbRequest = useRef<ReturnType<typeof operation<Table>>>(),
+    dbTimer = useRef<number>(),
+    dbCache = useRef(new Map<string, { table: Table; expires: number }>()),
+    controllerCache = useRef(new Map<string, { file: string; files: string[] }>()),
     defaultTarget = useRef<Target>(),
     projectTargetIds = useRef<string[]>([]),
     pendingOpens = useRef(new Map<string, Promise<void>>());
   latest.current = { tabs, activeId, settings };
   const active = tabs.find((t) => t.id === activeId),
     target = active?.target ?? defaultTarget.current;
+  useEffect(() => {
+    if (!active?.path) return;
+    const path = active.path;
+    setExpandedController((current) =>
+      controllerFiles.find((group) => group.name === current && group.files.includes(path))?.name
+      ?? controllerFiles.find((group) => group.files.includes(path))?.name
+      ?? current,
+    );
+  }, [active?.path]);
   const [selectedCommand, setSelectedCommand] = useState("");
   useEffect(() => {
-    dbGeneration.current++;
     setObjects(undefined);
-    setDbBusy(false);
-    dbLoadedTarget.current = "";
+    dbLoadedQuery.current = "";
     setObjectOffset(0);
   }, [target?.id]);
   useEffect(() => {
-    if (
-      side &&
-      nav === "database" &&
-      target &&
-      dbLoadedTarget.current !== target.id
-    )
-      void guard(() => loadObjects());
-  }, [side, nav, target?.id]);
+    if (!side || nav !== "database" || !target) return;
+    const key = dbQueryKey();
+    if (dbLoadedQuery.current !== key) {
+      if (!dbLoadedQuery.current && !objectQuery.trim()) void guard(() => loadObjects());
+      else dbTimer.current = window.setTimeout(() => void guard(() => loadObjects()), contentSearch ? 500 : 280);
+    }
+    return () => {
+      window.clearTimeout(dbTimer.current);
+      dbGeneration.current++;
+      void dbRequest.current?.cancel().catch(() => {});
+      dbRequest.current = undefined;
+      setDbBusy(false);
+    };
+  }, [side, nav, target?.id, objectQuery, contentSearch]);
   useEffect(() => {
+    controllerCache.current.clear();
     void searchRef.current?.cancel().catch(() => {});
     searchRef.current = undefined;
     setHits([]);
@@ -222,7 +257,7 @@ export default function App({
     return d;
   }, []);
   const newDocument = useCallback(
-    (text = "", name?: string) =>
+    (text = "", name?: string, connection?: Target) =>
       addDocument(
         {
           id: crypto.randomUUID(),
@@ -234,7 +269,7 @@ export default function App({
           newline: "CRLF",
           version: 1,
         },
-        defaultTarget.current ??
+        connection ?? defaultTarget.current ??
           latest.current.tabs.find((t) => t.id === latest.current.activeId)
             ?.target ??
           targets[0],
@@ -435,18 +470,21 @@ export default function App({
         setTabs((old) => [...old, { ...d, saved: "" }]);
         setActiveId(d.id);
       }
+      setReady(true);
       if (initialProjectId) {
         const selected = b.projects.find((p) => p.id === initialProjectId);
         if (selected) await openProject(selected);
       }
-      setReady(true);
       setStatus(
         recovery.length
           ? `Đã khôi phục ${recovery.length} file chưa lưu`
           : "Đã kết nối .NET",
       );
-    });
+    }).finally(() => setOpeningInitialProject(false));
   }, [guard]);
+  useEffect(() => {
+    if (native && window.__LSCODE_SMOKE__ && ready) return notifyWindowReady();
+  }, [ready]);
   useEffect(() => {
     document.documentElement.dataset.theme = settings.theme;
   }, [settings.theme]);
@@ -629,7 +667,19 @@ export default function App({
       await request("settings.save", { settings: next });
     }
   }
+  async function closeProfilerTab() {
+    if (profilerBusy || closingProfiler) return;
+    setClosingProfiler(true);
+    try {
+      await request("profiler.stop");
+      setProfilerTab(undefined);
+      setSelectedTool((current) => current === "profiler" ? undefined : current);
+    } finally {
+      setClosingProfiler(false);
+    }
+  }
   const execute = async (id: string) => {
+    if (selectedTool && /^(editor\.|sql\.|file\.save|xml\.include)/.test(id)) return;
     switch (id) {
       case "file.new":
         newDocument();
@@ -641,7 +691,17 @@ export default function App({
         await chooseFolder();
         break;
       case "file.close":
-        if (active) await closeTab(active);
+        if (profilerSelected) await closeProfilerTab();
+        else if (tableSelected) closeTableTab();
+        else if (active) await closeTab(active);
+        break;
+      case "profiler":
+        setProfilerTab((existing) => existing ?? { target });
+        setSelectedTool("profiler");
+        break;
+      case "table":
+        setTableTab({ target });
+        setSelectedTool("table");
         break;
       case "window.new":
         await request("window.new");
@@ -787,6 +847,10 @@ export default function App({
         setDialog(id);
     }
   };
+  function closeTableTab() {
+    setTableTab(undefined);
+    setSelectedTool((current) => current === "table" ? undefined : current);
+  }
   const executeRef = useRef(execute);
   executeRef.current = execute;
   useEffect(() => {
@@ -851,29 +915,56 @@ export default function App({
       if (searchRef.current === op) setSearching(false);
     }
   }
-  async function loadObjects(offset = 0) {
+  function dbQueryKey() {
+    return JSON.stringify([target?.id, objectQuery.trim(), contentSearch]);
+  }
+  async function loadObjects(offset = 0, refresh = false) {
     if (!target) {
       setDialog("connection");
       return;
     }
+    window.clearTimeout(dbTimer.current);
     const generation = ++dbGeneration.current;
+    void dbRequest.current?.cancel().catch(() => {});
+    dbRequest.current = undefined;
+    const queryKey = dbQueryKey();
+    const cacheKey = JSON.stringify([queryKey, offset]);
+    const cached = dbCache.current.get(cacheKey);
+    if (!refresh && cached && cached.expires > Date.now()) {
+      dbLoadedQuery.current = queryKey;
+      setObjects(cached.table);
+      setObjectOffset(offset);
+      setDbBusy(false);
+      return;
+    }
     setDbBusy(true);
     try {
-      const table = await request<Table>("schema.objects", {
+      const op = operation<Table>("schema.objects", {
         targetId: target.id,
-        query: objectQuery,
+        query: objectQuery.trim(),
         content: contentSearch,
         offset,
       });
+      dbRequest.current = op;
+      const table = await op.promise;
       if (generation === dbGeneration.current) {
-        dbLoadedTarget.current = target.id;
+        dbLoadedQuery.current = queryKey;
+        const cache = dbCache.current;
+        if (cache.size >= 24) {
+          const oldest = cache.keys().next().value;
+          if (oldest !== undefined) cache.delete(oldest);
+        }
+        cache.set(cacheKey, { table, expires: Date.now() + 30_000 });
         setObjects(table);
         setObjectOffset(offset);
       }
     } catch (e) {
       if (generation === dbGeneration.current) throw e;
     } finally {
-      if (generation === dbGeneration.current) setDbBusy(false);
+      if (generation === dbGeneration.current) {
+        dbRequest.current = undefined;
+        setDbBusy(false);
+      }
     }
   }
   async function loadCommands() {
@@ -921,18 +1012,33 @@ export default function App({
   }
   async function openController(node: CommandNode) {
     const root = workspace;
-    const found = await request<{ file: string; files: string[] }>(
-      "project.controller",
-      { root: workspace, link: node.entry.link },
-    );
+    const key = JSON.stringify([root, node.entry.link]);
+    const cache = controllerCache.current;
+    let found = cache.get(key);
+    if (!found) {
+      setControllerRequests((count) => count + 1);
+      try {
+        found = await operation<{ file: string; files: string[] }>(
+          "project.controller", { root, link: node.entry.link }, 20_000,
+        ).promise;
+      } finally {
+        setControllerRequests((count) => count - 1);
+      }
+    }
     if (root !== latest.current.settings.workspace) return;
+    if (cache.size >= 64) {
+      const oldest = cache.keys().next().value;
+      if (oldest !== undefined) cache.delete(oldest);
+    }
+    cache.set(key, found);
+    const { file, files } = found;
     setControllerFiles((old) => [
-      ...old.filter((g) => g.name !== found.file),
-      { name: found.file, files: found.files },
+      ...old.filter((g) => g.name !== file),
+      { name: file, files },
     ]);
+    setExpandedController(file);
     setNav("files");
-    if (found.files[0]) await open(found.files[0]);
-    else await open(found.file);
+    setSide(true);
   }
   function exportCsv() {
     if (!result?.tables[resultIndex]) return;
@@ -947,10 +1053,10 @@ export default function App({
     });
   }
   async function openProject(p: Project) {
-    const opened = await request<{
+    const opened = await operation<{
       project: Project;
       targets: Target[];
-    }>("project.open", { id: p.id });
+    }>("project.open", { id: p.id }, 31_000).promise;
     setProject(opened.project);
     defaultTarget.current = opened.targets[0];
     projectTargetIds.current = opened.targets.map((t) => t.id);
@@ -1004,7 +1110,7 @@ export default function App({
     <div className="studio" data-ready={ready}>
       <header className="topbar">
         <div className="brand">
-          <span className="brand-mark">LS</span>
+          <img className="brand-mark app-logo" src={logo} alt="" />
           <strong>Studio Code</strong>
           <span className="edition">WebView</span>
         </div>
@@ -1061,7 +1167,8 @@ export default function App({
           </IconButton>
         </div>
       </header>
-      <div className="contextbar">
+      <div className="contextbar loading-region" aria-busy={openingInitialProject}>
+        <LoadingLine busy={openingInitialProject} label="Đang mở dự án…" />
         <Button variant="ghost" onClick={() => setDialog("projects")}>
           <FolderOpen size={16} />
           <span className="context-name">{project?.name ?? "Chọn dự án"}</span>
@@ -1162,7 +1269,7 @@ export default function App({
             })}
         </nav>
         {side && (
-          <aside className="sidebar">
+          <aside className="sidebar" id="project-sidebar">
             <div className="sidebar-heading">
               <h2>
                 {
@@ -1179,12 +1286,16 @@ export default function App({
                 onClick={() =>
                   void guard(async () => {
                     setRefresh((v) => v + 1);
+                    controllerCache.current.clear();
                     if (nav === "functions") await loadCommands();
-                    if (nav === "database") await loadObjects();
+                    if (nav === "database") await loadObjects(0, true);
                   })
                 }
               >
                 <RefreshCw size={14} />
+              </IconButton>
+              <IconButton label="Ẩn không gian dự án" onClick={() => setSide(false)}>
+                <PanelLeftClose size={15} />
               </IconButton>
             </div>
             <div className="side-tabs">
@@ -1212,6 +1323,8 @@ export default function App({
                     </div>
                     <ControllerExplorer
                       groups={controllerFiles}
+                      expandedGroup={expandedController}
+                      onExpandGroup={setExpandedController}
                       activePath={active?.path}
                       onOpen={(p) => void guard(() => open(p))}
                       onClose={(name) =>
@@ -1312,7 +1425,7 @@ export default function App({
                     value={objectQuery}
                     onChange={(e) => setObjectQuery(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter") void guard(() => loadObjects());
+                      if (e.key === "Enter") void guard(() => loadObjects(0, true));
                     }}
                   />
                   <div className="inline-checks">
@@ -1326,17 +1439,15 @@ export default function App({
                     </label>
                     <Button
                       disabled={dbBusy}
-                      onClick={() => void guard(() => loadObjects())}
+                      onClick={() => void guard(() => loadObjects(0, true))}
                     >
                       Tìm
                     </Button>
                   </div>
                 </div>
-                <div className="side-content">
-                  {dbBusy ? (
-                    <div className="empty">Đang tải database…</div>
-                  ) : (
-                    (objects?.rows.map((r, i) => (
+                <div className="side-content loading-region" aria-busy={dbBusy}>
+                  <LoadingLine busy={dbBusy} label="Đang tải database…" />
+                  {objects?.rows.map((r, i) => (
                       <button
                         className="db-row"
                         key={i}
@@ -1359,12 +1470,11 @@ export default function App({
                         </span>
                         <ArrowUpRight size={12} />
                       </button>
-                    )) ?? (
+                    )) ?? (!dbBusy && (
                       <div className="empty">
                         Nhấn Tìm để tải danh sách object.
                       </div>
-                    ))
-                  )}
+                    ))}
                 </div>
                 {objects && (
                   <div className="side-footer">
@@ -1376,9 +1486,7 @@ export default function App({
                     >
                       Trước
                     </Button>
-                    <span>
-                      {objectOffset + 1}–{objectOffset + objects.rows.length}
-                    </span>
+                    <span>{objects.rows.length ? `${objectOffset + 1}–${objectOffset + objects.rows.length}` : "0 kết quả"}</span>
                     <Button
                       disabled={objects.rows.length < 200 || dbBusy}
                       onClick={() =>
@@ -1410,7 +1518,8 @@ export default function App({
                     <Button onClick={() => setDialog("sync")}>Đồng bộ</Button>
                   </div>
                 </div>
-                <div className="side-content">
+                <div className="side-content loading-region" aria-busy={controllerRequests > 0}>
+                  <LoadingLine busy={controllerRequests > 0} label="Đang tải cây controller…" />
                   {!menuQuery && (
                     <FunctionTree
                       nodes={commands}
@@ -1450,12 +1559,12 @@ export default function App({
           >
             {tabs.map((t) => (
               <div
-                className={`document-tab ${t.id === activeId ? "active" : ""}`}
+                className={`document-tab ${!selectedTool && t.id === activeId ? "active" : ""}`}
                 key={t.id}
               >
                 <button
                   role="tab"
-                  aria-selected={t.id === activeId}
+                  aria-selected={!selectedTool && t.id === activeId}
                   title={t.path ?? t.name}
                   onClick={() => setActiveId(t.id)}
                 >
@@ -1473,10 +1582,43 @@ export default function App({
                 </IconButton>
               </div>
             ))}
+            {profilerTab && (
+              <div className={`document-tab ${profilerSelected ? "active" : ""}`}>
+                <button id="profiler-tab" role="tab" aria-controls="profiler-panel" aria-selected={profilerSelected} onClick={() => setSelectedTool("profiler")}>
+                  <Activity size={15} />
+                  <span>SQL Profiler</span>
+                </button>
+                <IconButton label="Đóng SQL Profiler" disabled={profilerBusy || closingProfiler} onClick={() => void guard(closeProfilerTab)}>
+                  <X size={13} />
+                </IconButton>
+              </div>
+            )}
+            {tableTab && (
+              <div className={`document-tab ${tableSelected ? "active" : ""}`}>
+                <button id="table-inspection-tab" role="tab" aria-controls="table-inspection-panel" aria-selected={tableSelected} onClick={() => setSelectedTool("table")}>
+                  <Database size={15} />
+                  <span>Cấu trúc và dữ liệu</span>
+                </button>
+                <IconButton label="Đóng Cấu trúc và dữ liệu" onClick={closeTableTab}><X size={13} /></IconButton>
+              </div>
+            )}
             <IconButton label="File mới" onClick={() => newDocument()}>
               <FilePlus2 size={16} />
             </IconButton>
           </div>
+          {profilerTab && (
+            <section id="profiler-panel" className="profiler-panel" role="tabpanel" aria-labelledby="profiler-tab" hidden={!profilerSelected}>
+              <ProfilerTool target={profilerTab.target ?? target} visible={profilerSelected} closing={closingProfiler} onBusyChange={setProfilerBusy} />
+            </section>
+          )}
+          {tableTab && (
+            <section id="table-inspection-panel" className="profiler-panel" role="tabpanel" aria-labelledby="table-inspection-tab" hidden={!tableSelected}>
+              <TableTool target={tableTab.target ?? target}
+                onText={(text, name) => newDocument(text, name, tableTab.target ?? target)}
+                onConnect={() => setDialog("connection")} />
+            </section>
+          )}
+          <div className="editor-content" hidden={!!selectedTool}>
           <div className="editor-toolbar">
             <div className="breadcrumb">
               <Code2 size={14} />
@@ -1656,7 +1798,8 @@ export default function App({
               </div>
             )}
           </div>
-          <section className={`bottom-panel ${panel ? "" : "collapsed"}`}>
+          {panel && <PanelResizeHandle />}
+          <section id="results-panel" className={`bottom-panel ${panel ? "" : "collapsed"}`}>
             <div className="bottom-toolbar">
               <div className="panel-tabs">
                 {[
@@ -1755,6 +1898,7 @@ export default function App({
                 </pre>
               ))}
           </section>
+          </div>
         </main>
       </div>
       <footer className="statusbar">
@@ -1790,10 +1934,11 @@ export default function App({
             setSettings(preferences);
             if (!project) defaultTarget.current = t;
             setTargets((old) => [...old, t]);
+            if (tableSelected) setTableTab({ target: t });
             setTabs((old) =>
               old.map((d) => (d.id === activeId ? { ...d, target: t } : d)),
             );
-            if (!active)
+            if (!active && !tableSelected)
               addDocument(
                 {
                   id: crypto.randomUUID(),

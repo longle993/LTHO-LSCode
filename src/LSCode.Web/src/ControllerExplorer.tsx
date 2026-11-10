@@ -90,11 +90,15 @@ export function controllerTree(files: string[]): Node[] {
 }
 export default function ControllerExplorer({
   groups,
+  expandedGroup,
+  onExpandGroup,
   activePath,
   onOpen,
   onClose,
 }: {
   groups: { name: string; files: string[] }[];
+  expandedGroup?: string;
+  onExpandGroup: (name?: string) => void;
   activePath?: string | null;
   onOpen: (p: string) => void;
   onClose: (p: string) => void;
@@ -186,10 +190,10 @@ export default function ControllerExplorer({
             <button
               className="tree-row"
               title={g.name}
-              onClick={() => toggle(g.name)}
-              aria-expanded={!closed.has(g.name)}
+              onClick={() => onExpandGroup(expandedGroup === g.name ? undefined : g.name)}
+              aria-expanded={expandedGroup === g.name}
             >
-              {closed.has(g.name) ? (
+              {expandedGroup !== g.name ? (
                 <ChevronRight size={13} />
               ) : (
                 <ChevronDown size={13} />
@@ -205,12 +209,15 @@ export default function ControllerExplorer({
             <button
               className="button ghost icon-button"
               aria-label={"Đóng controller " + g.name}
-              onClick={() => onClose(g.name)}
+              onClick={() => {
+                if (expandedGroup === g.name) onExpandGroup(undefined);
+                onClose(g.name);
+              }}
             >
               <X size={13} />
             </button>
           </div>
-          {!closed.has(g.name) && tree(controllerTree(g.files), g.name)}
+          {expandedGroup === g.name && tree(controllerTree(g.files), g.name)}
         </section>
       ))}
     </>

@@ -79,13 +79,14 @@ if (args.Contains("--sql"))
 {
     await using var tools = new DeveloperTools();
     async Task<object?> Call(string method, object payload) => await tools.ExecuteAsync(method, JsonSerializer.SerializeToElement(payload, Protocol.Json), default);
-    var admin = (TargetInfo)(await Call("sql.connect", new { server = ".", database = "master", integratedSecurity = true, trustCertificate = true }))!;
+    var server = Environment.GetEnvironmentVariable("LSCODE_TEST_SQL_SERVER") ?? ".";
+    var admin = (TargetInfo)(await Call("sql.connect", new { server, database = "master", integratedSecurity = true, trustCertificate = true }))!;
     var database = "LSCodeWebViewTest_" + Guid.NewGuid().ToString("N");
     if (!Regex.IsMatch(database, "^LSCodeWebViewTest_[a-f0-9]{32}$")) throw new Exception("Unsafe fixture database name");
     await Call("sql.execute", new { targetId = admin.Id, sql = "CREATE DATABASE [" + database + "]" });
     try
     {
-        var target = (TargetInfo)(await Call("sql.connect", new { server = ".", database, integratedSecurity = true, trustCertificate = true }))!;
+        var target = (TargetInfo)(await Call("sql.connect", new { server, database, integratedSecurity = true, trustCertificate = true }))!;
         var batch = (ExecutionResult)(await Call("sql.execute", new { targetId = target.Id, sql = "CREATE TABLE #test(value int);\nGO\nINSERT INTO #test VALUES (42);\nGO\nSELECT value FROM #test;" }))!;
         Check(batch.Tables[0].Rows[0][0] == "42", "SQL keeps connection/temp table across GO batches");
         using (var cts = new CancellationTokenSource(300))
@@ -118,6 +119,21 @@ if (args.Contains("--sql"))
         await File.WriteAllTextAsync(Path.Combine(root,"App_Data","detail.f"),"<controller/>");
         var related=JsonSerializer.SerializeToElement(await Call("project.controller",new{root,link="menu.aspx"}),Protocol.Json);
         Check(related.GetProperty("files").GetArrayLength()==3,"Controller explorer includes ASPX and child grid files");
+        var syncConfig = Path.Combine(root, "web.config");
+        await File.WriteAllTextAsync(syncConfig, """
+            <configuration><connectionStrings>
+              <add name="appConnectionString" connectionString="Server=.;Database=Fixture_App;Integrated Security=True" />
+              <add name="sysConnectionString" connectionString="Server=.;Database=Fixture_Sys;Integrated Security=True" />
+            </connectionStrings></configuration>
+            """);
+        var synced = (ProjectInfo)(await Call("project.sync", new { name = "Dự án A", configPath = syncConfig }))!;
+        var syncedDetails = JsonSerializer.SerializeToElement(await Call("project.details", new { id = synced.Id }), Protocol.Json);
+        Check(syncedDetails.GetProperty("programPath").GetString() == "http://172.168.5.14/D%E1%BB%B1%20%C3%A1n%20A/Main/Login.aspx",
+            "Project sync assigns the encoded default login URL");
+        await Call("project.update", new { id = synced.Id, name = synced.Name, server = synced.Server, database = synced.Database, sourcePath = synced.SourcePath, programPath = "https://example.test/custom" });
+        await Call("project.sync", new { name = "Dự án A", configPath = syncConfig });
+        var resynced = JsonSerializer.SerializeToElement(await Call("project.details", new { id = synced.Id }), Protocol.Json);
+        Check(resynced.GetProperty("programPath").GetString() == "https://example.test/custom", "Project sync preserves a custom program URL");
         var signature = loaded.GetProperty("signature").GetString();
         var records = new string?[][] { [":text::null", "Tiếng Việt", null, null, null, null], ["second", ":empty", null, null, null, null] };
         var insertion = JsonSerializer.SerializeToElement(await Call("catalog.preview", new { targetId = target.Id, schema = "dbo", table = "catalog", creating = false, signature, fields = Array.Empty<CatalogField>(), rows = records }), Protocol.Json);
@@ -146,6 +162,25 @@ if (args.Contains("--sql"))
         Check(precise.Tables[0].Rows[0][0]=="2026-11-10T12:34:56.1234567"&&precise.Tables[0].Rows[0][1]=="8","Typed parameters preserve datetime2 precision and automatic rowversion");
         var richTemplate=(List<CatalogField>)(await Call("catalog.duplicate",new{targetId=target.Id,schema="dbo",table="child_fixture"}))!;
         Check(richTemplate.Single(f=>f.Name=="label").Unique&&richTemplate.Single(f=>f.Name=="parent_id").Reference?.SequenceEqual(new[]{"dbo","parent_fixture","id","int"})==true,"Template copy preserves UNIQUE and foreign-key reference");
+        var structure = (ResultSet)(await Call("table.structure", new { targetId = target.Id, table = "child_fixture" }))!;
+        Check(structure.Rows.Single(row => row[0] == "id")[2]!.StartsWith("PK")
+            && structure.Rows.Single(row => row[0] == "label")[2]!.StartsWith("UQ")
+            && structure.Rows.Single(row => row[0] == "parent_id")[2]!.StartsWith("FK"), "Table structure shows primary, unique and foreign keys");
+        var createScript = (string)(await Call("table.createScript", new { targetId = target.Id, table = "child_fixture" }))!;
+        Check(createScript.Contains("CREATE TABLE [dbo].[child_fixture]") && createScript.Contains("PRIMARY KEY")
+            && createScript.Contains("UNIQUE") && createScript.Contains("FOREIGN KEY"), "Create table script includes table keys");
+        var addColumns = (string)(await Call("table.addScript", new { targetId = target.Id, table = "child_fixture", columns = new[] { "label", "parent_id" } }))!;
+        Check(addColumns.Contains("ALTER TABLE [dbo].[child_fixture] ADD") && addColumns.Contains("[label] NVARCHAR(20) NULL")
+            && addColumns.Contains("[parent_id] INT NULL"), "Add column script preserves selected type and nullability");
+        await Call("sql.execute", new { targetId = target.Id, sql = "CREATE TABLE dbo.insert_fixture(id int IDENTITY PRIMARY KEY, label nvarchar(60) NULL, payload varbinary(8), spare int, version rowversion); INSERT dbo.insert_fixture(label,payload) VALUES (N'Việt'' Nam',0x0AFF),(NULL,0x00);" });
+        var view = JsonSerializer.SerializeToElement(await Call("table.view", new { targetId = target.Id, table = "insert_fixture", where = "id=1", columns = new[] { "id", "label", "payload", "version" } }), Protocol.Json);
+        var insert = (string)(await Call("table.insertScript", new { snapshotId = view.GetProperty("snapshotId").GetString() }))!;
+        Check(view.GetProperty("data").GetProperty("rows").GetArrayLength() == 1 && insert.Contains("N'Việt'' Nam'")
+            && insert.Contains("0x0AFF") && insert.Contains("IDENTITY_INSERT") && !insert.Contains("[version]"), "Insert script uses the filtered snapshot and skips rowversion");
+        await Reject<Microsoft.Data.SqlClient.SqlException>(async () => await Call("table.dropColumns", new { targetId = target.Id, table = "insert_fixture", columns = new[] { "spare", "id" } }), "Dependent column drop is rejected atomically");
+        await Call("table.dropColumns", new { targetId = target.Id, table = "insert_fixture", columns = new[] { "spare" } });
+        var afterDrop = (ResultSet)(await Call("table.structure", new { targetId = target.Id, table = "insert_fixture" }))!;
+        Check(afterDrop.Rows.All(row => row[0] != "spare") && afterDrop.Rows.Any(row => row[0] == "id"), "Drop column changes only the explicitly selected column");
         Check(richTemplate.Single(f=>f.Name=="created") is {Size:"3",NullDefault:true},"Template copy preserves datetime2 scale and DEFAULT NULL");
         await Call("sql.execute",new{targetId=target.Id,sql="ALTER TABLE dbo.child_fixture ADD CHECK(parent_id>0)"});
         await Reject<InvalidOperationException>(async()=>await Call("catalog.duplicate",new{targetId=target.Id,schema="dbo",table="child_fixture"}),"Unsupported template constraints fail rather than disappear");
@@ -154,6 +189,20 @@ if (args.Contains("--sql"))
         await Reject<InvalidOperationException>(async () => await Call("catalog.commit", new { targetId = target.Id, previewId = alteredPreview.GetProperty("previewId").GetString() }), "Catalog rechecks schema before write");
         var schemaResult = JsonSerializer.SerializeToElement(await Call("schema.objects", new {targetId=target.Id,query="",offset=0}),Protocol.Json);
         Check(schemaResult.GetProperty("rows").GetArrayLength()>0,"Database explorer loads real SQL objects");
+        await Call("sql.execute", new { targetId = admin.Id, sql = $"ALTER DATABASE [{database}] SET COMPATIBILITY_LEVEL = 100" });
+        var tableFixture = string.Join("\n", Enumerable.Range(0, 203).Select(i => $"CREATE TABLE dbo.[paging_{i:D3}](id int);"));
+        await Call("sql.execute", new { targetId = target.Id, sql = tableFixture });
+        async Task<ResultSet> ObjectPage(string query, int offset, bool content = false) =>
+            (ResultSet)(await Call("schema.objects", new { targetId = target.Id, query, offset, content }))!;
+        var firstPage = await ObjectPage("paging_", 0);
+        var secondPage = await ObjectPage("paging_", 200);
+        Check(firstPage.Rows.Length == 200 && secondPage.Rows.Select(r => r[1]).SequenceEqual(new[] { "paging_200", "paging_201", "paging_202" }),
+            "Object search pages deterministically at compatibility level 100");
+        Check((await ObjectPage("paging%", 0)).Rows.Length == 0, "Object search treats wildcard characters literally");
+        await Call("sql.execute", new { targetId = target.Id, sql = "CREATE PROCEDURE dbo.search_fixture AS SELECT 'lscode_definition_marker';" });
+        Check((await ObjectPage("lscode_definition_marker", 0)).Rows.Length == 0
+            && (await ObjectPage("lscode_definition_marker", 0, content: true)).Rows.Single()[1] == "search_fixture",
+            "Object definition search is opt-in");
         if (args.Contains("--profiler"))
         {
             await Call("profiler.start", new { targetId = target.Id, useTargetCredentials = true, engine = args.Contains("--profiler-ssms18") ? "ssms18" : "extendedEvents" });

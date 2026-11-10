@@ -5,7 +5,7 @@ import { request, operation } from "../bridge";
 import type { Project } from "../bridge";
 import type { ToolProps } from "./types";
 import { useTask } from "./useTask";
-export function SyncTool({ onProjects }: ToolProps) {
+export function SyncTool({ onProjects }: Pick<ToolProps, "onProjects">) {
   const [name, setName] = useState(""),
     [root, setRoot] = useState("\\\\172.168.5.14\\CustomerPro"),
     [matches, setMatches] = useState<
@@ -71,14 +71,16 @@ export function SyncTool({ onProjects }: ToolProps) {
             onClick={() =>
               void task.run(async () => {
                 const op = operation("project.sync", {
-                  name,
+                  name: m.name,
                   configPath: m.configPath,
                 });
                 pending.current = op;
                 await op.promise;
                 const projects = await request<Project[]>("project.list");
-                if (alive.current) onProjects(projects);
-                setMatches([]);
+                if (alive.current) {
+                  setMatches([]);
+                  onProjects(projects);
+                }
               })
             }
           >

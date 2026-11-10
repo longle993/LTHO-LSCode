@@ -59,9 +59,9 @@ public sealed class DocumentWorkspace : IDocumentWorkspace
         snapshots[id] = new(new FileSnapshot("", document.Text, encoding, document.Bom, ""), 1);
         return document with { Id = id, Path = null, Version = 1 };
     }
-    public Task<Entry[]> ListAsync(string path, CancellationToken ct) => Task.Run(() => Directory.EnumerateFileSystemEntries(path)
-        .Where(p => { ct.ThrowIfCancellationRequested(); return (File.GetAttributes(p) & FileAttributes.ReparsePoint) == 0 && !WorkspaceSearch.IgnoredDirectories.Contains(Path.GetFileName(p)); })
-        .Select(p => new Entry(p, Path.GetFileName(p), Directory.Exists(p))).OrderByDescending(e => e.Directory).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToArray(), ct);
+    public Task<Entry[]> ListAsync(string path, CancellationToken ct) => Task.Run(() => new DirectoryInfo(path).EnumerateFileSystemInfos()
+        .Where(entry => { ct.ThrowIfCancellationRequested(); return (entry.Attributes & FileAttributes.ReparsePoint) == 0 && !WorkspaceSearch.IgnoredDirectories.Contains(entry.Name); })
+        .Select(entry => new Entry(entry.FullName, entry.Name, entry is DirectoryInfo)).OrderByDescending(e => e.Directory).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToArray(), ct);
     public Task<string[]> FilesAsync(string path, CancellationToken ct) => Task.Run(() => WorkspaceFileIndex.Files(path, ct).Take(100000).ToArray(), ct);
     public async Task<object> SearchAsync(string path, string query, bool regex, bool matchCase, Dictionary<string, string> buffers, CancellationToken ct)
     {

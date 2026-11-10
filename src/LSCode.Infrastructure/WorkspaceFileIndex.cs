@@ -9,16 +9,22 @@ internal static class WorkspaceFileIndex
         var pending=new Stack<string>();pending.Push(root);
         while(pending.TryPop(out var folder))
         {
-            ct.ThrowIfCancellationRequested();string[] files,folders;
-            try{files=Directory.GetFiles(folder);folders=Directory.GetDirectories(folder);}catch(Exception ex)when(ex is IOException or UnauthorizedAccessException){continue;}
-            foreach(var file in files)
+            ct.ThrowIfCancellationRequested();
+            FileSystemInfo[] entries;
+            try { entries = new DirectoryInfo(folder).GetFileSystemInfos(); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { continue; }
+            foreach (var entry in entries)
             {
                 ct.ThrowIfCancellationRequested();
-                if((File.GetAttributes(file)&FileAttributes.ReparsePoint)!=0)continue;
-                var extension=Path.GetExtension(file);
-                if(!textOnly||WorkspaceSearch.TextExtensions.Contains(extension)||ExtraTextExtensions.Contains(extension))yield return file;
+                if ((entry.Attributes & FileAttributes.ReparsePoint) != 0) continue;
+                if (entry is DirectoryInfo)
+                {
+                    if (!WorkspaceSearch.IgnoredDirectories.Contains(entry.Name)) pending.Push(entry.FullName);
+                    continue;
+                }
+                if (!textOnly || WorkspaceSearch.TextExtensions.Contains(entry.Extension) || ExtraTextExtensions.Contains(entry.Extension))
+                    yield return entry.FullName;
             }
-            foreach(var child in folders)if(!WorkspaceSearch.IgnoredDirectories.Contains(Path.GetFileName(child))&&(File.GetAttributes(child)&FileAttributes.ReparsePoint)==0)pending.Push(child);
         }
     }
 }

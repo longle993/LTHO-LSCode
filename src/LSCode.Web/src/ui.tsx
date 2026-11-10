@@ -1,5 +1,5 @@
 import { writeClipboard } from "./bridge";
-import { useEffect, useRef, useState, useId } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useId } from "react";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { X, ChevronDown, Check } from "lucide-react";
 import type { Table } from "./bridge";
@@ -187,11 +187,21 @@ export function DataGrid({
   onRow,
   selectedRows,
   onSelectionChange,
+  onRowContextMenu,
+  rangeSelection = false,
+  followEnd = false,
+  rowOffset = 0,
+  onInspect,
 }: {
   table: Table;
   onRow?: (row: (string | null)[]) => void;
   selectedRows?: number[];
   onSelectionChange?: (rows: number[]) => void;
+  onRowContextMenu?: (row: number, event: React.MouseEvent<HTMLTableRowElement>) => void;
+  rangeSelection?: boolean;
+  followEnd?: boolean;
+  rowOffset?: number;
+  onInspect?: () => void;
 }) {
   const [selection, setSelection] = useState<{
     r: number;
@@ -201,6 +211,12 @@ export function DataGrid({
     kind: "cell" | "row" | "column";
   }>();
   const [copyError, setCopyError] = useState("");
+  const grid = useRef<HTMLDivElement>(null);
+  const drag = useRef<{ pointer: number; kind: "cell" | "row"; x: number; y: number }>();
+  const dragFrame = useRef(0);
+  const priorOffset = useRef(rowOffset);
+  const rowHeight = 32;
+  useEffect(() => () => cancelAnimationFrame(dragFrame.current), []);
   const select = (
     r: number,
     c: number,
@@ -209,7 +225,7 @@ export function DataGrid({
   ) =>
     setSelection((old) =>
       shift && old
-        ? { ...old, endR: r, endC: c }
+        ? old.endR === r && old.endC === c ? old : { ...old, endR: r, endC: c }
         : { r, c, endR: r, endC: c, kind },
     );
   async function copy(kind = selection?.kind ?? "cell") {
@@ -253,9 +269,51 @@ export function DataGrid({
     (selection.kind === "row" ||
       (c >= Math.min(selection.c, selection.endC) &&
         c <= Math.max(selection.c, selection.endC)));
-  useEffect(() => setSelection(undefined), [table]);
+  useLayoutEffect(() => {
+    const removed = rowOffset - priorOffset.current;
+    priorOffset.current = rowOffset;
+    if (!rangeSelection) setSelection(undefined);
+    else if (removed > 0) {
+      if (!followEnd && grid.current)
+        grid.current.scrollTop = Math.max(0, grid.current.scrollTop - removed * rowHeight);
+      setSelection((old) =>
+        old && old.kind !== "column" && Math.min(old.r, old.endR) >= removed
+          ? { ...old, r: old.r - removed, endR: old.endR - removed }
+          : old?.kind === "column" ? old : undefined,
+      );
+    }
+  }, [table, rangeSelection, rowOffset]);
   const [top, setTop] = useState(0);
-  const rowHeight = 32;
+  useLayoutEffect(() => {
+    if (!followEnd || !grid.current) return;
+    setSelection(undefined);
+    grid.current.scrollTop = grid.current.scrollHeight;
+    setTop(grid.current.scrollTop);
+  }, [followEnd, table]);
+  function cellAt(element: Element | null) {
+    const cell = element?.closest<HTMLTableCellElement>("[data-grid-row]");
+    if (!cell || !grid.current?.contains(cell)) return;
+    return { row: Number(cell.dataset.gridRow), column: Number(cell.dataset.gridColumn) };
+  }
+  function extendDrag() {
+    const active = drag.current;
+    const element = grid.current;
+    if (!active || !element) return;
+    const rect = element.getBoundingClientRect();
+    const right = rect.left + element.clientWidth;
+    const bottom = rect.top + element.clientHeight;
+    const topEdge = rect.top + rowHeight;
+    const dx = active.x < rect.left + 12 ? -12 : active.x > right - 12 ? 12 : 0;
+    const dy = active.y < topEdge + 12 ? -16 : active.y > bottom - 12 ? 16 : 0;
+    const oldTop = element.scrollTop, oldLeft = element.scrollLeft;
+    element.scrollBy(dx, dy);
+    const x = Math.max(rect.left + 1, Math.min(right - 1, active.x));
+    const y = Math.max(topEdge + 1, Math.min(bottom - 1, active.y));
+    const cell = cellAt(document.elementFromPoint(x, y));
+    if (cell) select(cell.row, active.kind === "row" ? 0 : Math.max(0, cell.column), true, active.kind);
+    if (oldTop !== element.scrollTop || oldLeft !== element.scrollLeft)
+      dragFrame.current = requestAnimationFrame(extendDrag);
+  }
   const first = Math.min(
       Math.max(0, table.rows.length - 1),
       Math.max(0, Math.floor(top / rowHeight) - 5),
@@ -263,10 +321,38 @@ export function DataGrid({
     last = Math.min(table.rows.length, first + 60);
   return (
     <div
-      className="data-grid"
+      ref={grid}
+      className={rangeSelection ? "data-grid data-grid-range" : "data-grid"}
       tabIndex={0}
-      aria-label="Bảng dữ liệu · Chọn ô, Shift chọn vùng, Ctrl+C sao chép"
+      aria-label={rangeSelection ? "Bảng sự kiện · Kéo chọn vùng, Ctrl+C sao chép" : "Bảng dữ liệu · Chọn ô, Shift chọn vùng, Ctrl+C sao chép"}
+      onWheel={onInspect}
+      onPointerDown={(e) => {
+        if (!rangeSelection || e.button !== 0) return;
+        onInspect?.();
+        const cell = cellAt(e.target as Element);
+        if (!cell) return;
+        e.preventDefault();
+        e.currentTarget.focus({ preventScroll: true });
+        e.currentTarget.setPointerCapture(e.pointerId);
+        const kind = cell.column < 0 ? "row" : "cell";
+        drag.current = { pointer: e.pointerId, kind, x: e.clientX, y: e.clientY };
+        select(cell.row, Math.max(0, cell.column), e.shiftKey, kind);
+        onRow?.(table.rows[cell.row]);
+      }}
+      onPointerMove={(e) => {
+        const active = drag.current;
+        if (active?.pointer !== e.pointerId) return;
+        active.x = e.clientX;
+        active.y = e.clientY;
+        cancelAnimationFrame(dragFrame.current);
+        extendDrag();
+      }}
+      onLostPointerCapture={() => {
+        drag.current = undefined;
+        cancelAnimationFrame(dragFrame.current);
+      }}
       onKeyDown={(e) => {
+        onInspect?.();
         if (
           (e.ctrlKey || e.metaKey) &&
           e.key.toLowerCase() === "c" &&
@@ -278,7 +364,7 @@ export function DataGrid({
       }}
       onScroll={(e) => setTop(e.currentTarget.scrollTop)}
     >
-      {selection && (
+      {selection && !rangeSelection && (
         <div className="grid-copy-menu">
           <Button onClick={() => void copy("cell")}>Sao chép ô / vùng</Button>
           <Button onClick={() => void copy("row")}>Sao chép dòng</Button>
@@ -286,6 +372,7 @@ export function DataGrid({
           <span role="alert">{copyError}</span>
         </div>
       )}
+      {rangeSelection && copyError && <span role="alert">{copyError}</span>}
       <table>
         <thead>
           <tr>
@@ -339,11 +426,14 @@ export function DataGrid({
             <tr
               key={first + i}
               aria-selected={
-                onSelectionChange
+                followEnd && first + i === table.rows.length - 1
+                  ? true
+                  : onSelectionChange
                   ? selectedRows?.includes(first + i)
                   : undefined
               }
               onDoubleClick={() => onRow?.(row)}
+              onContextMenu={(event) => onRowContextMenu?.(first + i, event)}
               tabIndex={onRow ? 0 : undefined}
               onKeyDown={(e) => {
                 if (e.key === "Enter") onRow?.(row);
@@ -351,8 +441,10 @@ export function DataGrid({
             >
               <td
                 className="row-number"
+                data-grid-row={rangeSelection ? first + i : undefined}
+                data-grid-column={rangeSelection ? -1 : undefined}
                 title="Chọn dòng · Ctrl+C sao chép"
-                onClick={(e) => select(first + i, 0, e.shiftKey, "row")}
+                onClick={(e) => { if (!rangeSelection) select(first + i, 0, e.shiftKey, "row"); }}
               >
                 {onSelectionChange ? (
                   <button
@@ -380,12 +472,14 @@ export function DataGrid({
               {row.map((v, k) => (
                 <td
                   key={k}
+                  data-grid-row={rangeSelection ? first + i : undefined}
+                  data-grid-column={rangeSelection ? k : undefined}
                   title={v ?? "NULL"}
                   tabIndex={0}
                   className={
                     isSelected(first + i, k) ? "grid-selected" : undefined
                   }
-                  onClick={(e) => select(first + i, k, e.shiftKey)}
+                  onClick={(e) => { if (!rangeSelection) select(first + i, k, e.shiftKey); }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") select(first + i, k, e.shiftKey);
                   }}

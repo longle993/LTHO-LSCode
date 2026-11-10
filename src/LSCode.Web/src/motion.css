@@ -1,0 +1,11 @@
+@import "tailwindcss/utilities.css" source(none);
+@import "tailwindcss/theme.css" layer(theme);
+@source "./Startup.tsx";
+@source "./LoadingLine.tsx";
+@source "./features/TableTool.tsx";
+
+@theme {
+  --animate-studio-enter: startup-reveal 420ms ease-out both;
+  --animate-studio-layer: splash-layer-enter 650ms ease-out both;
+  --animate-studio-sweep: loading-sweep 1.2s ease-in-out infinite;
+}
