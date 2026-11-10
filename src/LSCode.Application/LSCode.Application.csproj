@@ -1,0 +1,1 @@
+<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><ProjectReference Include="../LSCode.Domain/LSCode.Domain.csproj" /></ItemGroup></Project>

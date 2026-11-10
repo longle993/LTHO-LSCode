@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net10.0-windows</TargetFramework><UseWPF>true</UseWPF><OutputType>WinExe</OutputType><AssemblyName>LSCode.WebView</AssemblyName></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../LSCode.Application/LSCode.Application.csproj" />
+    <ProjectReference Include="../LSCode.Infrastructure/LSCode.Infrastructure.csproj" />
+    <ProjectReference Include="../LSCode.Contracts/LSCode.Contracts.csproj" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4314.35" />
+    <Content Include="../LSCode.Web/dist/**/*" Link="wwwroot/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../LSCode.Shell/Assets/*.xml" Link="Assets/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../Template/*.tdf" Link="Template/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../LSCode.TraceHost/bin/LSCode.TraceHost.exe" Link="LSCode.TraceHost.exe" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+  <Target Name="BuildTraceHost" BeforeTargets="PrepareForBuild">
+    <MakeDir Directories="$(MSBuildProjectDirectory)/../LSCode.TraceHost/bin" />
+    <Exec Command="&quot;$(WINDIR)\Microsoft.NET\Framework\v4.0.30319\csc.exe&quot; /nologo /target:exe /platform:x86 /reference:System.Data.dll /reference:System.Web.Extensions.dll /out:&quot;$(MSBuildProjectDirectory)\..\LSCode.TraceHost\bin\LSCode.TraceHost.exe&quot; &quot;$(MSBuildProjectDirectory)\..\LSCode.TraceHost\Program.cs&quot; &quot;$(MSBuildProjectDirectory)\..\LSCode.Core\ProfilerDatabaseFilter.cs&quot;" />
+  </Target>
+</Project>

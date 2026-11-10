@@ -1,5 +1,7 @@
 # LTHO Studio Code (LS Code)
 
+**Bản React + WebView2:** build bằng `./build-webview.ps1 -Test -Smoke -Publish`, mở `artifacts/publish-webview/LSCode.WebView.exe`. [Hướng dẫn và trạng thái kiểm chứng](docs/WEBVIEW-RUNNING.vi.md) · [Đặc tả chuyển đổi toàn bộ tính năng](docs/WEBVIEW-MIGRATION.vi.md). Bản WPF bên dưới vẫn được giữ để đối chiếu.
+
 **Giao diện A mới:** chạy `artifacts/publish-ui-a/LSCode.exe`. [Thiết kế, kiểm chứng và hướng dẫn](docs/UI-REDESIGN-A.vi.md). Một cột File/Chức năng/DB, vùng editor rộng hơn, style dùng chung và ba theme.
 
 Bản Profiler trước lần thiết kế giao diện **`artifacts/publish-profiler18/LSCode.exe`**: [sửa reader và xác nhận bắt được SQL trên BACHVIET App](docs/PROFILER-LIVE-CAPTURE.vi.md). [cấu hình đường dẫn SSMS 18 một lần](docs/PROFILER-PATH.vi.md). [Profiler mặc định và template SQL2014](docs/PROFILER-DEFAULTS.vi.md). Bao gồm [Compare Text, Compare Folder, Beautify SQL](docs/COMPARE-AND-BEAUTIFY.vi.md). Bản này giữ các sửa lỗi [giải quyết %Database, mặc định App và chuyển App/SYS](docs/CONFIG-DATABASES.vi.md). Các bản publish và dữ liệu smoke cũ đã được dọn; tài liệu phiên bản cũ được giữ làm lịch sử.
@@ -62,4 +64,6 @@ Plan đã được người dùng xác nhận triển khai. Source Fcode cũ đ�
 
 ## Dọn file sinh tự động
 
-Chạy `./clean.ps1 -WhatIf` để xem danh sách, hoặc `./clean.ps1` để xóa `bin`/`obj`, các bản publish cũ và kết quả kiểm thử tạm. Đóng ứng dụng đang chạy từ thư mục build trước khi dọn. Script giữ `artifacts/publish`, `artifacts/publish-ui-a`, `artifacts/publish-ui-compact`, cache NuGet, thiết lập Visual Studio và bản sao lưu source. Chạy lại `./build.ps1 -Test -Publish` khi cần tạo bản build mới. Các thư mục sinh tự động đã được loại khỏi Git bằng `.gitignore`.
+Chạy `./clean.ps1 -WhatIf` để xem danh sách, hoặc `./clean.ps1` để xóa `bin`/`obj` của các project .NET, `dist`/`*.tsbuildinfo` frontend, các bản publish cũ được chỉ định và hồ sơ smoke tạm. Đóng ứng dụng đang chạy từ thư mục build trước khi dọn. Script giữ `artifacts/publish`, `artifacts/publish-ui-a`, `artifacts/publish-ui-compact`, `artifacts/publish-webview` (kể cả khi app đang chạy), báo cáo QA, cache NuGet/npm, thiết lập Visual Studio và bản sao lưu source. Chạy lại `./build.ps1 -Test -Publish` khi cần tạo bản build mới. Các thư mục sinh tự động đã được loại khỏi Git bằng `.gitignore`.
+
+Cập nhật workbench: [Explorer gọn, tab thấp và DB lazy load](docs/WEBVIEW-EXPLORER-COMPACT.vi.md) · [Các thay đổi 10/11/2026](docs/WEBVIEW-UPDATE-2026-11-10.vi.md).

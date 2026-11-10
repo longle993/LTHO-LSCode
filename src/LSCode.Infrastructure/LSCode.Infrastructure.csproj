@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net10.0-windows</TargetFramework></PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.13" />
+    <ProjectReference Include="../LSCode.Application/LSCode.Application.csproj" />
+    <ProjectReference Include="../LSCode.Core/LSCode.Core.csproj" />
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="6.1.3" />
+    <PackageReference Include="Microsoft.SqlServer.TransactSql.ScriptDom" Version="180.117.0" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" />
+  </ItemGroup>
+  <!-- Transitional adapters reuse the canonical implementations without referencing the WPF assembly. -->
+  <ItemGroup>
+    <Compile Include="../LSCode.Shell/Services/SqlRunner.cs" Link="Legacy/SqlRunner.cs" />
+    <Compile Include="../LSCode.Shell/Services/SettingsStore.cs" Link="Legacy/SettingsStore.cs" />
+    <Compile Include="../LSCode.Shell/Services/ProjectStore.cs" Link="Legacy/ProjectStore.cs" />
+    <Compile Include="../LSCode.Shell/Services/ProjectDatabase.cs" Link="Legacy/ProjectDatabase.cs" />
+    <Compile Include="../LSCode.Shell/Services/SqlLanguageService.cs" Link="Legacy/SqlLanguageService.cs" />
+    <Compile Include="../LSCode.Shell/Services/SqlSchemaCompletion.cs" Link="Legacy/SqlSchemaCompletion.cs" />
+    <Compile Include="../LSCode.Shell/Services/TableDefinition.cs" Link="Legacy/TableDefinition.cs" />
+    <Compile Include="../LSCode.Shell/Services/ProfilerSession.cs" Link="Legacy/ProfilerSession.cs" />
+    <Compile Include="../LSCode.Shell/Services/SqlTraceSession.cs" Link="Legacy/SqlTraceSession.cs" />
+  </ItemGroup>
+</Project>

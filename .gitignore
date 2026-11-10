@@ -24,3 +24,7 @@ Desktop.ini
 .env.*
 !.env.example
 !.env.sample
+# React/WebView build products
+src/LSCode.Web/node_modules/
+src/LSCode.Web/dist/
+src/LSCode.Web/*.tsbuildinfo
