@@ -48,13 +48,32 @@ internal static class TableInspection
             }).ToArray());
     }
 
-    public static async Task<string> AddColumnsAsync(SqlTarget target, string qualified, string[] names, CancellationToken ct)
+    public static async Task<string> ColumnScriptAsync(SqlTarget target, string schema, string table, string[] names,
+        bool alter, bool detectPartitions, CancellationToken ct)
     {
+        var qualified = ProjectDatabase.Quote(schema) + "." + ProjectDatabase.Quote(table);
         var metadata = await TableDefinition.ColumnsAsync(target, qualified, ct);
         var byName = metadata.Rows.Cast<DataRow>().ToDictionary(r => (string)r["name"], StringComparer.Ordinal);
-        var definitions = names.Select(name => byName.TryGetValue(name, out var row)
-            ? TableDefinition.ColumnSql(row)
-            : throw new InvalidOperationException("Cột đã thay đổi. Hãy đọc lại cấu trúc."));
+        var columns = names.Select(name => byName.TryGetValue(name, out var row) ? row
+            : throw new InvalidOperationException("Cột đã thay đổi. Hãy đọc lại cấu trúc.")).ToArray();
+        var definitions = columns.Select(row =>
+        {
+            if (!alter) return TableDefinition.ColumnSql(row);
+            if (!row.IsNull("computed") || !row.IsNull("seed") || (bool)row["is_sparse"] ||
+                Convert.ToInt32(row["system_type_id"]) == 189 ||
+                (!row.IsNull("generated") && Convert.ToInt32(row["generated"]) != 0))
+                throw new NotSupportedException("Không thể tạo ALTER COLUMN cho cột tính toán, tự sinh hoặc SPARSE.");
+            return ProjectDatabase.Quote((string)row["name"]) + " " + TableDefinition.TypeSql(row)
+                + ((bool)row["is_nullable"] ? " NULL" : " NOT NULL");
+        }).ToArray();
+        var partition = detectPartitions ? await PartitionColumnScript.DetectAsync(target, schema, table, ct) : null;
+        if (partition is not null)
+            return partition.Build(target.Database, names.Select((name, index) =>
+                (name, definitions[index], !alter && (bool)columns[index]["is_nullable"] &&
+                    columns[index].IsNull("computed") &&
+                    Convert.ToInt32(columns[index]["system_type_id"]) is 167 or 175 or 231 or 239)), alter);
+        if (alter)
+            return string.Concat(definitions.Select(definition => $"ALTER TABLE {qualified} ALTER COLUMN {definition};\n"));
         return $"ALTER TABLE {qualified} ADD\n    {string.Join(",\n    ", definitions)};\n";
     }
 

@@ -1,7 +1,10 @@
 import ControllerExplorer, { FileIcon } from "./ControllerExplorer";
+import { pathIsWithin, rebasePath, tabFolderLabel } from "./fileLabels";
+import { FileSections } from "./features/FileSections";
+import { ProjectHistory } from "./features/ProjectHistory";
 import logo from "../../../assets/logo2.png";
 import { LoadingLine } from "./LoadingLine";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   SunMoon,
   Minus,
@@ -28,13 +31,14 @@ import {
   X,
   Command,
   RefreshCw,
+  Trash2,
   Activity,
   GitCompareArrows,
   Blocks,
   Languages,
   ArrowUpRight,
 } from "lucide-react";
-import { native, request, operation, subscribe, quoteSqlName, notifyWindowReady } from "./bridge";
+import { native, request, operation, subscribe, quoteSqlName, notifyWindowReady, writeClipboard } from "./bridge";
 import { PanelResizeHandle } from "./PanelResizeHandle";
 import { ProfilerTool } from "./features/ProfilerTool";
 import { TableTool } from "./features/TableTool";
@@ -67,6 +71,8 @@ import {
 } from "./tools";
 
 type Tab = DocumentInfo & { saved: string; target?: Target; project?: string };
+type TableTab = { id: string; number: number; target?: Target; table?: string };
+type ControllerGroup = { link: string; file: string; files: string[] };
 type Entry = { path: string; name: string; directory: boolean };
 type Hit = { path: string; line: number; column: number; preview: string };
 const initialSettings: Settings = {
@@ -101,12 +107,17 @@ export default function App({
     [workspace, setWorkspace] = useState(""),
     [project, setProject] = useState<Project>();
   const [profilerTab, setProfilerTab] = useState<{ target?: Target }>(),
-    [tableTab, setTableTab] = useState<{ target?: Target }>(),
-    [selectedTool, setSelectedTool] = useState<"profiler" | "table">(),
+    [tableTabs, setTableTabs] = useState<TableTab[]>([]),
+    [selectedTool, setSelectedTool] = useState<string>(),
     [profilerBusy, setProfilerBusy] = useState(false),
     [closingProfiler, setClosingProfiler] = useState(false);
   const profilerSelected = selectedTool === "profiler";
-  const tableSelected = selectedTool === "table";
+  const tableTab = tableTabs.find((tab) => tab.id === selectedTool);
+  const tableSelected = !!tableTab;
+  const tableNumber = useRef(0);
+  useEffect(() => {
+    if (selectedTool) document.getElementById(selectedTool + "-tab")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [selectedTool]);
   const setActiveId = (id: string) => {
     setSelectedTool(undefined);
     setActiveIdRaw(id);
@@ -142,10 +153,32 @@ export default function App({
     [menuQuery, setMenuQuery] = useState(""),
     [menuIndex, setMenuIndex] = useState(-1),
     [controllerRequests, setControllerRequests] = useState(0),
-    [expandedController, setExpandedController] = useState<string>(),
-    [controllerFiles, setControllerFiles] = useState<
-      { name: string; files: string[] }[]
-    >([]);
+    [controllers, setControllers] = useState<ControllerGroup[]>([]),
+    [expandedController, setExpandedController] = useState<string>();
+  const controller = controllers.find((entry) => entry.link === expandedController);
+  const controllerRequest = useRef(0);
+  const controllerSelection = useRef(0);
+  const [historyRevision, setHistoryRevision] = useState(0);
+  const [history, setHistory] = useState<{ projectId: string; files: string[] }[]>();
+  const [historySearch, setHistorySearch] = useState("");
+  const historyResults = useMemo(() => {
+    const query = historySearch.trim().toLowerCase();
+    if (!query) return history;
+    return history?.flatMap((entry) => {
+      const files = entry.files.filter((path) =>
+        path.split(/[\\/]/).slice(-2).some((part) => part.toLowerCase().includes(query)));
+      return files.length ? [{ ...entry, files }] : [];
+    });
+  }, [history, historySearch]);
+  const switchingHistoryProject = useRef(false);
+  const [projectActionBusy, setProjectActionBusy] = useState(false);
+  const [structureClear, setStructureClear] = useState<{ id: string; path: string; count: number }>();
+  const [searchFolder, setSearchFolder] = useState("");
+  const searchFolders = useMemo(() => [...new Set(controller?.files.flatMap((path) => {
+    const separator = Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/"));
+    return separator > 0 ? [path.slice(0, separator)] : [];
+  }) ?? [])].sort(), [controller]);
+  const searchRoot = searchFolders.includes(searchFolder) ? searchFolder : workspace;
   const [unsavedPrompt, setUnsavedPrompt] = useState<{
     names: string[];
     resolve: (choice: "save" | "discard" | "cancel") => void;
@@ -160,9 +193,9 @@ export default function App({
     column: number;
   }>();
   const resultsByTab = useRef(new Map<string, QueryResult>());
-  const [external, setExternal] = useState<Tab>(),
-    [refresh, setRefresh] = useState(0);
+  const [external, setExternal] = useState<Tab>();
   const primaryEditor = useRef<EditorHandle>();
+  const scriptToFocus = useRef<string>();
   const editor = useRef<EditorHandle>(),
     latest = useRef({ tabs, activeId, settings }),
     runRef = useRef<ReturnType<typeof operation<QueryResult>>>(),
@@ -194,15 +227,6 @@ export default function App({
   latest.current = { tabs, activeId, settings };
   const active = tabs.find((t) => t.id === activeId),
     target = active?.target ?? defaultTarget.current;
-  useEffect(() => {
-    if (!active?.path) return;
-    const path = active.path;
-    setExpandedController((current) =>
-      controllerFiles.find((group) => group.name === current && group.files.includes(path))?.name
-      ?? controllerFiles.find((group) => group.files.includes(path))?.name
-      ?? current,
-    );
-  }, [active?.path]);
   const [selectedCommand, setSelectedCommand] = useState("");
   useEffect(() => {
     setObjects(undefined);
@@ -237,6 +261,26 @@ export default function App({
       ?.scrollIntoView({ block: "nearest" });
   }, [menuIndex]);
   const dirty = (t: Tab) => textOf(t) !== t.saved;
+  const dirtyByTab = useRef(new WeakMap<Tab, boolean>());
+  const tabDetails = useMemo(() => {
+    const groups = new Map<string, Tab[]>();
+    for (const tab of tabs) {
+      const name = tab.name.toLowerCase();
+      const peers = groups.get(name) ?? [];
+      peers.push(tab);
+      groups.set(name, peers);
+    }
+    return new Map(tabs.map((tab) => {
+      const folder = tabFolderLabel(tab, groups.get(tab.name.toLowerCase())!);
+      const changed = dirtyByTab.current.get(tab) ?? dirty(tab);
+      dirtyByTab.current.set(tab, changed);
+      return [tab.id, { folder, label: folder ? tab.name + " — " + folder : tab.name, changed }];
+    }));
+  }, [tabs]);
+  const paneOptions = useMemo(() => tabs.map((tab) => {
+    const detail = tabDetails.get(tab.id)!;
+    return { value: tab.id, label: detail.label + (detail.changed ? " •" : "") };
+  }), [tabs, tabDetails]);
   const guard = useCallback(
     async <T,>(work: () => Promise<T>): Promise<T | undefined> => {
       setError("");
@@ -250,8 +294,34 @@ export default function App({
     },
     [],
   );
-  const addDocument = useCallback((d: DocumentInfo, t?: Target) => {
-    modelFor(d);
+  useEffect(() => {
+    if (!native || !active?.path || selectedTool) return;
+    const path = active.path;
+    const candidates = projects.filter((entry) => entry.sourcePath && pathIsWithin(path, entry.sourcePath));
+    const owner = candidates.find((entry) => entry.id === active.project)
+      ?? candidates.find((entry) => entry.id === project?.id)
+      ?? candidates.sort((a, b) => b.sourcePath.length - a.sourcePath.length)[0];
+    if (!owner) return;
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(() => {
+        if (editor.current?.getModel()?.uri.path !== "/" + active.id) return;
+        void guard(async () => {
+          await request("project.history.record", { id: owner.id, path });
+          setHistoryRevision((version) => version + 1);
+        });
+      });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [active?.id, active?.path, selectedTool, project?.id, projects, guard]);
+  useEffect(() => {
+    if (!native || nav !== "history") return;
+    let current = true;
+    void request<NonNullable<typeof history>>("project.history.list").then((entries) => {
+      if (current) setHistory(entries);
+    }).catch((error) => { if (current) setError((error as Error).message); });
+    return () => { current = false; };
+  }, [nav, projects, historyRevision]);
+  const addDocument = useCallback((d: DocumentInfo & { project?: string }, t?: Target) => {
     setTabs((old) => [...old, { ...d, saved: d.text, target: t }]);
     setActiveId(d.id);
     return d;
@@ -277,17 +347,29 @@ export default function App({
     [addDocument, targets],
   );
   const open = useCallback(
-    async (path?: string, line?: number, column?: number) => {
+    async (path?: string, line?: number, column?: number, projectId?: string) => {
       if (!path) {
-        for (const d of await request<DocumentInfo[]>("document.openMany")) {
-          const existing = latest.current.tabs.find(
-            (t) => t.path?.toLowerCase() === d.path?.toLowerCase(),
-          );
+        const documents = await request<DocumentInfo[]>("document.openMany");
+        const byPath = new Map(latest.current.tabs.flatMap((tab) =>
+          tab.path ? [[tab.path.toLowerCase(), tab.id] as const] : []));
+        const added: Tab[] = [];
+        const redundant: string[] = [];
+        let lastId: string | undefined;
+        for (const document of documents) {
+          const key = document.path?.toLowerCase();
+          const existing = key ? byPath.get(key) : undefined;
           if (existing) {
-            setActiveId(existing.id);
-            await request("document.close", { id: d.id });
-          } else addDocument(d, defaultTarget.current ?? targets[0]);
+            lastId = existing;
+            redundant.push(document.id);
+          } else {
+            lastId = document.id;
+            if (key) byPath.set(key, document.id);
+            added.push({ ...document, saved: document.text, target: defaultTarget.current ?? targets[0] });
+          }
         }
+        if (added.length) setTabs((old) => [...old, ...added]);
+        if (lastId) setActiveId(lastId);
+        await Promise.all(redundant.map((id) => request("document.close", { id })));
         return;
       }
       const key = path.toLowerCase();
@@ -304,7 +386,7 @@ export default function App({
           const d = await request<DocumentInfo | null>("document.open", {
             path,
           });
-          if (d) addDocument(d, defaultTarget.current ?? targets[0]);
+          if (d) addDocument({ ...d, project: projectId }, defaultTarget.current ?? (projectId ? undefined : targets[0]));
         })();
         pendingOpens.current.set(key, work);
         try {
@@ -466,7 +548,6 @@ export default function App({
           path: null,
           version: 1,
         });
-        modelFor(d);
         setTabs((old) => [...old, { ...d, saved: "" }]);
         setActiveId(d.id);
       }
@@ -486,8 +567,25 @@ export default function App({
     if (native && window.__LSCODE_SMOKE__ && ready) return notifyWindowReady();
   }, [ready]);
   useEffect(() => {
-    document.documentElement.dataset.theme = settings.theme;
-  }, [settings.theme]);
+    const root = document.documentElement;
+    root.dataset.theme = settings.theme;
+    const color = settings.accentColor;
+    if (color && /^#[\da-f]{6}$/i.test(color)) {
+      const [r, g, b] = color.slice(1).match(/../g)!.map((value) => {
+        const channel = parseInt(value, 16) / 255;
+        return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+      });
+      root.style.setProperty("--primary", color);
+      root.style.setProperty("--accent", color);
+      const light = 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.179;
+      root.style.setProperty("--primary-hover", light
+        ? "color-mix(in srgb, var(--primary) 88%, white)"
+        : "color-mix(in srgb, var(--primary) 88%, black)");
+      root.style.setProperty("--primary-foreground", light ? "#000" : "#fff");
+    } else {
+      for (const property of ["--primary", "--accent", "--primary-hover", "--primary-foreground"]) root.style.removeProperty(property);
+    }
+  }, [settings.theme, settings.accentColor]);
   useEffect(() => {
     setResult(resultsByTab.current.get(activeId));
     setResultIndex(0);
@@ -500,16 +598,25 @@ export default function App({
   useEffect(() => {
     if (!native || !ready) return;
     let busy = false;
+    let nextBackground = 0;
     const timer = setInterval(async () => {
       if (busy) return;
       busy = true;
       try {
-        for (const t of latest.current.tabs.filter(
-          (x) => x.path && !notified.current.has(x.id),
-        )) {
+        const { tabs, activeId } = latest.current;
+        const eligible = tabs.filter((tab) => tab.path && !notified.current.has(tab.id));
+        const active = eligible.find((tab) => tab.id === activeId);
+        const background = eligible.filter((tab) => tab.id !== activeId);
+        const batch = active ? [active] : [];
+        for (let index = 0; index < Math.min(3, background.length); index++) {
+          batch.push(background[nextBackground++ % background.length]);
+        }
+        for (const t of batch) {
           if (await request<boolean>("document.changed", { id: t.id })) {
+            const current = latest.current.tabs.find((tab) => tab.id === t.id);
+            if (!current || current.path !== t.path) continue;
             notified.current.add(t.id);
-            setExternal(t);
+            setExternal(current);
             break;
           }
         }
@@ -660,7 +767,9 @@ export default function App({
     const path = await request<string | null>("workspace.folder");
     if (path) {
       setWorkspace(path);
-      setControllerFiles([]);
+      controllerRequest.current++;
+      setControllers([]);
+      setExpandedController(undefined);
       setNav("files");
       const next = { ...settings, workspace: path };
       setSettings(next);
@@ -692,22 +801,28 @@ export default function App({
         break;
       case "file.close":
         if (profilerSelected) await closeProfilerTab();
-        else if (tableSelected) closeTableTab();
+        else if (tableTab) closeTableTab(tableTab.id);
         else if (active) await closeTab(active);
         break;
       case "profiler":
         setProfilerTab((existing) => existing ?? { target });
         setSelectedTool("profiler");
         break;
-      case "table":
-        setTableTab({ target });
-        setSelectedTool("table");
+      case "table": {
+        const id = "table-" + crypto.randomUUID();
+        const number = ++tableNumber.current;
+        setTableTabs((tabs) => [...tabs, { id, number, target }]);
+        setSelectedTool(id);
         break;
+      }
       case "window.new":
         await request("window.new");
         break;
       case "editor.find":
         editor.current?.trigger("keyboard", "actions.find", null);
+        break;
+      case "editor.sections":
+        if (active) setDialog("editor.sections");
         break;
       case "editor.replace":
         editor.current?.trigger(
@@ -728,7 +843,8 @@ export default function App({
         setStatus("Đã xóa cache gợi ý SQL");
         break;
       case "workspace.refresh":
-        setRefresh((v) => v + 1);
+        controllerCache.current.clear();
+        if (controller) await openController(controller.link);
         break;
       case "workspace.files":
         setNav("files");
@@ -847,9 +963,11 @@ export default function App({
         setDialog(id);
     }
   };
-  function closeTableTab() {
-    setTableTab(undefined);
-    setSelectedTool((current) => current === "table" ? undefined : current);
+  function closeTableTab(id: string) {
+    const index = tableTabs.findIndex((tab) => tab.id === id);
+    const next = tableTabs[index + 1] ?? tableTabs[index - 1];
+    setTableTabs((tabs) => tabs.filter((tab) => tab.id !== id));
+    setSelectedTool((current) => current === id ? next?.id : current);
   }
   const executeRef = useRef(execute);
   executeRef.current = execute;
@@ -868,6 +986,9 @@ export default function App({
       ]
         .filter(Boolean)
         .join("+");
+      if (e.target instanceof HTMLElement &&
+        (key === "Ctrl+Space" && e.target.closest('.table-inspection [role="combobox"]') ||
+          key === "F2" && e.target.closest(".project-file-tree"))) return;
       if (key === "Ctrl+Shift+P") {
         e.preventDefault();
         setPalette("commands");
@@ -897,12 +1018,12 @@ export default function App({
     await searchRef.current?.cancel();
     setSearching(true);
     const op = operation<Hit[]>("workspace.search", {
-      path: workspace,
+      path: searchRoot,
       query: search,
       regex,
       matchCase,
       buffers: Object.fromEntries(
-        tabs.filter((t) => t.path).map((t) => [t.path!, textOf(t)]),
+        tabs.filter((t) => t.path && pathIsWithin(t.path, searchRoot)).map((t) => [t.path!, textOf(t)]),
       ),
     });
     searchRef.current = op;
@@ -992,11 +1113,11 @@ export default function App({
   }
   const flatCommands = (nodes: CommandNode[]): CommandNode[] =>
     nodes.flatMap((n) => [n, ...flatCommands(n.children)]);
-  const matches = flatCommands(commands).filter((n) =>
+  const matches = useMemo(() => flatCommands(commands).filter((n) =>
     [n.entry.caption, n.entry.sysId, n.entry.commandId, n.entry.id].some((v) =>
       v.toLowerCase().includes(menuQuery.toLowerCase()),
     ),
-  );
+  ), [commands, menuQuery]);
   function nextMenu() {
     const index =
       menuLast.current === menuQuery
@@ -1010,35 +1131,37 @@ export default function App({
         : "Không tìm thấy chức năng",
     );
   }
-  async function openController(node: CommandNode) {
+  async function openController(link: string) {
     const root = workspace;
-    const key = JSON.stringify([root, node.entry.link]);
+    const generation = controllerRequest.current;
+    const selection = ++controllerSelection.current;
+    const key = JSON.stringify([root, link]);
     const cache = controllerCache.current;
     let found = cache.get(key);
     if (!found) {
       setControllerRequests((count) => count + 1);
       try {
         found = await operation<{ file: string; files: string[] }>(
-          "project.controller", { root, link: node.entry.link }, 20_000,
+          "project.controller", { root, link }, 20_000,
         ).promise;
       } finally {
         setControllerRequests((count) => count - 1);
       }
     }
-    if (root !== latest.current.settings.workspace) return;
+    if (generation !== controllerRequest.current || root !== latest.current.settings.workspace) return;
     if (cache.size >= 64) {
       const oldest = cache.keys().next().value;
       if (oldest !== undefined) cache.delete(oldest);
     }
     cache.set(key, found);
-    const { file, files } = found;
-    setControllerFiles((old) => [
-      ...old.filter((g) => g.name !== file),
-      { name: file, files },
-    ]);
-    setExpandedController(file);
-    setNav("files");
-    setSide(true);
+    const group = { link, ...found };
+    setControllers((current) => current.some((entry) => entry.link === link)
+      ? current.map((entry) => entry.link === link ? group : entry) : [...current, group]);
+    if (selection === controllerSelection.current) {
+      setExpandedController(link);
+      setNav("files");
+      setSide(true);
+    }
   }
   function exportCsv() {
     if (!result?.tables[resultIndex]) return;
@@ -1052,7 +1175,39 @@ export default function App({
       await request("text.export", { name: "results.csv", text: csv });
     });
   }
-  async function openProject(p: Project) {
+  async function openHistoryFile(p: Project, path: string) {
+    if (switchingHistoryProject.current) return;
+    switchingHistoryProject.current = true;
+    try {
+      if (project && project.id !== p.id) {
+        const oldTargetIds = projectTargetIds.current;
+        const closing = latest.current.tabs.filter((tab) => tab.project === project.id ||
+          (!tab.project && ((tab.path && project.sourcePath && pathIsWithin(tab.path, project.sourcePath)) ||
+            (tab.target && oldTargetIds.includes(tab.target.id)))));
+        const edited = closing.filter(dirty);
+        if (edited.length) {
+          const choice = await askUnsaved(edited.map((tab) => tab.name));
+          if (choice === "cancel") return;
+          if (choice === "save")
+            for (const tab of edited) if (!(await save(tab))) return;
+        }
+        await openProject(p, false, oldTargetIds);
+        await Promise.all(closing.map((tab) => request("document.close", { id: tab.id })));
+        const closingIds = new Set(closing.map((tab) => tab.id));
+        setTabs((current) => current.filter((tab) => !closingIds.has(tab.id)));
+        setActiveIdRaw((current) => closingIds.has(current) ? "" : current);
+        setPaneIds((current) => current.map((id) => closingIds.has(id) ? "" : id));
+        closing.forEach(disposeModel);
+      } else if (!project) {
+        await openProject(p, false);
+      }
+      setSelectedTool(undefined);
+      await open(path, undefined, undefined, p.id);
+    } finally {
+      switchingHistoryProject.current = false;
+    }
+  }
+  async function openProject(p: Project, createQuery = true, closingTargets: string[] = []) {
     const opened = await operation<{
       project: Project;
       targets: Target[];
@@ -1072,7 +1227,7 @@ export default function App({
       }),
     }));
     setWorkspace(opened.project.sourcePath);
-    setTargets((old) => [...old, ...opened.targets]);
+    setTargets((old) => [...old.filter((target) => !closingTargets.includes(target.id)), ...opened.targets]);
     setCommands([]);
     const sys =
       opened.targets.find((t) => /_S(?:ys)?$/i.test(t.database)) ??
@@ -1087,8 +1242,11 @@ export default function App({
         })
         .catch((e) => setError(e.message));
     setObjects(undefined);
-    setControllerFiles([]);
+    controllerRequest.current++;
+    setControllers([]);
+    setExpandedController(undefined);
     setDialog("");
+    if (!createQuery) return;
     const d = addDocument(
       {
         id: crypto.randomUUID(),
@@ -1105,6 +1263,33 @@ export default function App({
     setTabs((old) =>
       old.map((t) => (t.id === d.id ? { ...t, project: p.id } : t)),
     );
+  }
+  function runProjectAction(work: () => Promise<void>) {
+    setProjectActionBusy(true);
+    void guard(async () => {
+      try { await work(); }
+      finally { setProjectActionBusy(false); }
+    });
+  }
+  async function renameWorkspaceItem(path: string, name: string) {
+    await Promise.all([...pendingOpens.current.values()]);
+    const destination = await request<string>("workspace.rename", { path, name });
+    const moved = (value: string) => rebasePath(value, path, destination);
+    setTabs((current) => current.map((tab) => {
+      if (!tab.path) return tab;
+      const nextPath = moved(tab.path);
+      return nextPath === tab.path ? tab : {
+        ...tab, path: nextPath, name: nextPath.split(/[\\/]/).at(-1) ?? tab.name,
+      };
+    }));
+    setControllers((current) => current.map((entry) => ({
+      ...entry, file: moved(entry.file), files: entry.files.map(moved),
+    })));
+    setHits((current) => current.map((hit) => ({ ...hit, path: moved(hit.path) })));
+    setExternal((current) => current?.path ? { ...current, path: moved(current.path) } : current);
+    controllerCache.current.clear();
+    setStatus("Đã đổi tên thành " + name);
+    return destination;
   }
   return (
     <div className="studio" data-ready={ready}>
@@ -1123,8 +1308,9 @@ export default function App({
           <kbd>Ctrl Shift P</kbd>
         </button>
         <div className="top-actions">
-          <IconButton
-            label="Mở chương trình"
+          <Button
+            variant="ghost"
+            className="program-button"
             onClick={() =>
               void guard(async () => {
                 if (!project) throw new Error("Chọn dự án trước.");
@@ -1133,7 +1319,8 @@ export default function App({
             }
           >
             <ArrowUpRight size={17} />
-          </IconButton>
+            Mở chương trình
+          </Button>
           <span className="connection-state">
             <i />
             {native ? ".NET Desktop" : "Xem giao diện"}
@@ -1169,15 +1356,44 @@ export default function App({
       </header>
       <div className="contextbar loading-region" aria-busy={openingInitialProject}>
         <LoadingLine busy={openingInitialProject} label="Đang mở dự án…" />
+        <IconButton label="Làm mới web.config" disabled={!project || projectActionBusy} onClick={() => {
+          if (!project) return;
+          runProjectAction(async () => {
+            await request("project.refreshConfig", { id: project.id });
+            setStatus("Đã lưu lại web.config");
+          });
+        }}><RefreshCw size={15} /></IconButton>
+        <IconButton label="Xóa Structure/App" disabled={!project || projectActionBusy} onClick={() => {
+          if (!project) return;
+          runProjectAction(async () => {
+            const preview = await request<{ path: string; count: number }>("project.structure.preview", { id: project.id });
+            if (preview.count) setStructureClear({ id: project.id, ...preview });
+            else setStatus("Structure/App không có file để xóa");
+          });
+        }}><Trash2 size={15} /></IconButton>
         <Button variant="ghost" onClick={() => setDialog("projects")}>
           <FolderOpen size={16} />
           <span className="context-name">{project?.name ?? "Chọn dự án"}</span>
           <ChevronDown size={13} />
         </Button>
         <span className="context-divider" />
-        <span className="workspace-path" title={workspace}>
-          {workspace || "Chưa mở thư mục"}
-        </span>
+        {workspace ? (
+          <button
+            type="button"
+            className="workspace-path workspace-path-action"
+            title={`${workspace}\nNhấp để mở thư mục · Chuột phải để sao chép`}
+            onClick={() => void guard(() => request("workspace.reveal", { path: workspace }))}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              void guard(async () => {
+                await writeClipboard(workspace);
+                setStatus("Đã sao chép đường dẫn thư mục");
+              });
+            }}
+          >
+            {workspace}
+          </button>
+        ) : <span className="workspace-path">Chưa mở thư mục</span>}
         <div className="context-spacer" />
         <Button variant="ghost" onClick={() => void guard(chooseFolder)}>
           Mở thư mục
@@ -1278,6 +1494,7 @@ export default function App({
                     functions: "Chức năng ERP",
                     database: "Database",
                     search: "Tìm kiếm",
+                    history: "Lịch sử file",
                   }[nav]
                 }
               </h2>
@@ -1285,8 +1502,8 @@ export default function App({
                 label="Tải lại"
                 onClick={() =>
                   void guard(async () => {
-                    setRefresh((v) => v + 1);
                     controllerCache.current.clear();
+                    if (nav === "files" && controller) await openController(controller.link);
                     if (nav === "functions") await loadCommands();
                     if (nav === "database") await loadObjects(0, true);
                   })
@@ -1303,6 +1520,7 @@ export default function App({
                 ["files", "File"],
                 ["functions", "Chức năng"],
                 ["database", "DB"],
+                ["history", "Lịch sử"],
               ].map(([id, label]) => (
                 <button
                   key={id}
@@ -1313,6 +1531,28 @@ export default function App({
                 </button>
               ))}
             </div>
+            {nav === "history" && (
+              <>
+              <div className="side-form">
+                <input type="search" aria-label="Tìm file hoặc thư mục trong lịch sử"
+                  placeholder="Tìm tên file hoặc thư mục" value={historySearch}
+                  onChange={(event) => setHistorySearch(event.target.value)} />
+              </div>
+              <div className="side-content project-file-tree">
+                {historyResults?.length ? historyResults.map(({ projectId, files }) => {
+                  const owner = projects.find((entry) => entry.id === projectId);
+                  return owner && <ProjectHistory key={projectId} name={owner.name}
+                    root={owner.sourcePath} files={files} activePath={active?.path}
+                    onOpen={(path) => void guard(() => openHistoryFile(owner, path))}
+                    onRemove={(path) => void guard(async () => {
+                      await request("project.history.remove", { id: projectId, path });
+                      setHistoryRevision((version) => version + 1);
+                    })} />;
+                }) : <div className="explorer-message">{!history ? "Đang tải lịch sử…" : history.length && historySearch.trim()
+                  ? "Không tìm thấy file hoặc thư mục." : "Chưa có file trong lịch sử."}</div>}
+              </div>
+              </>
+            )}
             {nav === "files" && (
               <div className="side-content">
                 {workspace ? (
@@ -1321,18 +1561,41 @@ export default function App({
                       <FolderOpen size={14} />
                       <span>{workspace.split(/[\\/]/).at(-1)}</span>
                     </div>
-                    <ControllerExplorer
-                      groups={controllerFiles}
-                      expandedGroup={expandedController}
-                      onExpandGroup={setExpandedController}
-                      activePath={active?.path}
-                      onOpen={(p) => void guard(() => open(p))}
-                      onClose={(name) =>
-                        setControllerFiles((old) =>
-                          old.filter((g) => g.name !== name),
-                        )
-                      }
-                    />
+                    {!controllers.length && <div className="explorer-message">Mở một chức năng ERP để xem file của controller.</div>}
+                    {controllers.map((group) => {
+                      const expanded = expandedController === group.link;
+                      const label = (group.file || group.link).split(/[\\/]/).at(-1)?.replace(/\.[^.]+$/, "") ?? group.link;
+                      return <div className="controller-group" key={group.link}>
+                        <button className="tree-row folder-row controller-group-title" aria-expanded={expanded} title={group.link}
+                          onClick={() => { controllerSelection.current++; setExpandedController(expanded ? undefined : group.link); }}>
+                          {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                          <Folder size={15} className="folder-icon" /><span>{label}</span>
+                        </button>
+                        {expanded && <div className="tree-children">
+                          <ControllerExplorer
+                            root={workspace}
+                            files={group.files}
+                            emptyMessage="Controller chưa có file."
+                            activePath={active?.path}
+                            onOpen={(p) => void guard(() => open(p))}
+                            onCopy={(text) => void guard(async () => {
+                              await writeClipboard(text);
+                              setStatus("Đã sao chép " + text);
+                            })}
+                            onReveal={(path) => void guard(() => request("workspace.reveal", { path }))}
+                            onDuplicate={(path) => void guard(async () => {
+                              const copied = await request<string>("workspace.duplicate", { path });
+                              setControllers((current) => current.map((entry) => entry.files.includes(path)
+                                ? { ...entry, files: [...entry.files, copied] } : entry));
+                              controllerCache.current.clear();
+                              await open(copied);
+                              setStatus("Đã nhân bản " + copied);
+                            })}
+                            onRename={renameWorkspaceItem}
+                          />
+                        </div>}
+                      </div>;
+                    })}
                   </>
                 ) : (
                   <div className="side-empty">
@@ -1360,6 +1623,18 @@ export default function App({
                     onChange={(e) => setSearch(e.target.value)}
                     placeholder="Tìm trong dự án"
                   />
+                  <Select label="Phạm vi tìm kiếm" value={searchRoot === workspace ? "" : searchRoot}
+                    options={[{ value: "", label: "Toàn dự án" }, ...searchFolders.map((folder) => ({
+                      value: folder, label: folder.slice(workspace.length).replace(/^[\\/]+/, "") || folder,
+                    }))]}
+                    onChange={(folder) => {
+                      const previous = searchRef.current;
+                      searchRef.current = undefined;
+                      void previous?.cancel().catch(() => {});
+                      setSearching(false);
+                      setHits([]);
+                      setSearchFolder(folder);
+                    }} />
                   <div className="inline-checks">
                     <label>
                       <input
@@ -1452,15 +1727,13 @@ export default function App({
                         className="db-row"
                         key={i}
                         onDoubleClick={() =>
-                          void guard(async () =>
-                            newDocument(
-                              await request<string>("schema.script", {
-                                targetId: target?.id,
-                                object: quoteSqlName(r[0] ?? "", r[1] ?? ""),
-                              }),
-                              r[1] + ".sql",
-                            ),
-                          )
+                          void guard(async () => {
+                            const script = await request<string>("schema.script", {
+                              targetId: target?.id,
+                              object: quoteSqlName(r[0] ?? "", r[1] ?? ""),
+                            });
+                            scriptToFocus.current = newDocument(script, r[1] + ".sql", target).id;
+                          })
                         }
                       >
                         <Database size={14} />
@@ -1525,7 +1798,7 @@ export default function App({
                       nodes={commands}
                       selected={selectedCommand}
                       onSelect={setSelectedCommand}
-                      onOpen={(node) => void guard(() => openController(node))}
+                      onOpen={(node) => void guard(() => openController(node.entry.link))}
                     />
                   )}
                   {(menuQuery ? matches : []).map((n, i) => (
@@ -1535,7 +1808,7 @@ export default function App({
                       aria-current={
                         menuQuery && i === menuIndex ? "page" : undefined
                       }
-                      onDoubleClick={() => void guard(() => openController(n))}
+                      onClick={() => n.entry.link && void guard(() => openController(n.entry.link))}
                     >
                       <strong>{n.entry.caption}</strong>
                       <span>
@@ -1565,12 +1838,14 @@ export default function App({
                 <button
                   role="tab"
                   aria-selected={!selectedTool && t.id === activeId}
+                  aria-label={tabDetails.get(t.id)?.label}
                   title={t.path ?? t.name}
                   onClick={() => setActiveId(t.id)}
                 >
                   <FileIcon path={t.name} />
                   <span>{t.name}</span>
-                  {dirty(t) && (
+                  {tabDetails.get(t.id)?.folder && <small className="tab-folder">{tabDetails.get(t.id)?.folder}</small>}
+                  {tabDetails.get(t.id)?.changed && (
                     <span className="dirty-dot" aria-label="Chưa lưu" />
                   )}
                 </button>
@@ -1582,43 +1857,10 @@ export default function App({
                 </IconButton>
               </div>
             ))}
-            {profilerTab && (
-              <div className={`document-tab ${profilerSelected ? "active" : ""}`}>
-                <button id="profiler-tab" role="tab" aria-controls="profiler-panel" aria-selected={profilerSelected} onClick={() => setSelectedTool("profiler")}>
-                  <Activity size={15} />
-                  <span>SQL Profiler</span>
-                </button>
-                <IconButton label="Đóng SQL Profiler" disabled={profilerBusy || closingProfiler} onClick={() => void guard(closeProfilerTab)}>
-                  <X size={13} />
-                </IconButton>
-              </div>
-            )}
-            {tableTab && (
-              <div className={`document-tab ${tableSelected ? "active" : ""}`}>
-                <button id="table-inspection-tab" role="tab" aria-controls="table-inspection-panel" aria-selected={tableSelected} onClick={() => setSelectedTool("table")}>
-                  <Database size={15} />
-                  <span>Cấu trúc và dữ liệu</span>
-                </button>
-                <IconButton label="Đóng Cấu trúc và dữ liệu" onClick={closeTableTab}><X size={13} /></IconButton>
-              </div>
-            )}
             <IconButton label="File mới" onClick={() => newDocument()}>
               <FilePlus2 size={16} />
             </IconButton>
           </div>
-          {profilerTab && (
-            <section id="profiler-panel" className="profiler-panel" role="tabpanel" aria-labelledby="profiler-tab" hidden={!profilerSelected}>
-              <ProfilerTool target={profilerTab.target ?? target} visible={profilerSelected} closing={closingProfiler} onBusyChange={setProfilerBusy} />
-            </section>
-          )}
-          {tableTab && (
-            <section id="table-inspection-panel" className="profiler-panel" role="tabpanel" aria-labelledby="table-inspection-tab" hidden={!tableSelected}>
-              <TableTool target={tableTab.target ?? target}
-                onText={(text, name) => newDocument(text, name, tableTab.target ?? target)}
-                onConnect={() => setDialog("connection")} />
-            </section>
-          )}
-          <div className="editor-content" hidden={!!selectedTool}>
           <div className="editor-toolbar">
             <div className="breadcrumb">
               <Code2 size={14} />
@@ -1628,8 +1870,30 @@ export default function App({
                   "Không gian làm việc"}
               </span>
             </div>
+            {(profilerTab || tableTabs.length > 0) && (
+              <div className="workspace-tools" role="tablist" aria-label="Công cụ SQL">
+                {profilerTab && (
+                  <div className={`document-tab ${profilerSelected ? "active" : ""}`}>
+                    <button id="profiler-tab" role="tab" aria-controls="profiler-panel" aria-selected={profilerSelected} onClick={() => setSelectedTool("profiler")}>
+                      <Activity size={15} /><span>SQL Profiler</span>
+                    </button>
+                    <IconButton label="Đóng SQL Profiler" disabled={profilerBusy || closingProfiler} onClick={() => void guard(closeProfilerTab)}><X size={13} /></IconButton>
+                  </div>
+                )}
+                {tableTabs.map((tab) => {
+                  const label = "Cấu trúc và dữ liệu" + (tab.number > 1 ? " " + tab.number : "") + (tab.table ? " · " + tab.table : "");
+                  return <div className={`document-tab ${tab.id === selectedTool ? "active" : ""}`} key={tab.id}>
+                    <button id={tab.id + "-tab"} role="tab" aria-controls={tab.id + "-panel"} aria-selected={tab.id === selectedTool}
+                      title={label} aria-label={label} onClick={() => setSelectedTool(tab.id)}>
+                      <Database size={15} /><span>{tab.table ?? label}</span>
+                    </button>
+                    <IconButton label={"Đóng " + label} onClick={() => closeTableTab(tab.id)}><X size={13} /></IconButton>
+                  </div>;
+                })}
+              </div>
+            )}
             <div className="toolbar-spacer" />
-            {active && (
+            {active && !selectedTool && (
               <>
                 <Select
                   label="Database của tab"
@@ -1696,6 +1960,23 @@ export default function App({
               </>
             )}
           </div>
+          {profilerTab && (
+            <section id="profiler-panel" className="profiler-panel" role="tabpanel" aria-labelledby="profiler-tab" hidden={!profilerSelected}>
+              <ProfilerTool target={profilerTab.target ?? target} visible={profilerSelected} closing={closingProfiler} onBusyChange={setProfilerBusy} />
+            </section>
+          )}
+          {tableTabs.map((tab) => (
+            <section key={tab.id} id={tab.id + "-panel"} className="profiler-panel" role="tabpanel" aria-labelledby={tab.id + "-tab"} hidden={tab.id !== selectedTool}>
+              <TableTool scope={tab.id} target={tab.target}
+                onTableChange={(table) => {
+                  if (tab.table !== table)
+                    setTableTabs((current) => current.map((entry) => entry.id === tab.id ? { ...entry, table } : entry));
+                }}
+                onText={(text, name) => newDocument(text, name, tab.target)}
+                onConnect={() => setDialog("connection")} />
+            </section>
+          ))}
+          <div className="editor-content" hidden={!!selectedTool}>
           <div className={`editors ${split ? "split" : ""}`}>
             {active ? (
               <>
@@ -1720,10 +2001,7 @@ export default function App({
                           <Select
                             label={"File editor " + (pane + 1)}
                             value={doc.id}
-                            options={tabs.map((t) => ({
-                              value: t.id,
-                              label: t.name + (dirty(t) ? " •" : ""),
-                            }))}
+                            options={paneOptions}
                             onChange={(id) => {
                               paneRef.current = pane;
                               setFocusedPane(pane);
@@ -1739,6 +2017,13 @@ export default function App({
                         target={doc.target}
                         onMount={(e) => {
                           if (pane === 0) primaryEditor.current = e;
+                          if (scriptToFocus.current === doc.id && paneRef.current === pane) {
+                            scriptToFocus.current = undefined;
+                            const lineNumber = e.getModel()?.getLineCount() ?? 1;
+                            e.setPosition({ lineNumber, column: 1 });
+                            e.revealLine(lineNumber);
+                            e.focus();
+                          }
                           if (e.hasTextFocus()) {
                             editor.current = e;
                             paneRef.current = pane;
@@ -1826,21 +2111,10 @@ export default function App({
                 ))}
               </div>
               <div className="toolbar-spacer" />
-              {panel && result && bottom === "results" && (
-                <>
-                  <Select
-                    label="Bảng kết quả"
-                    value={String(resultIndex)}
-                    options={result.tables.map((t, i) => ({
-                      value: String(i),
-                      label: `Kết quả ${i + 1} · ${t.rows.length} dòng`,
-                    }))}
-                    onChange={(v) => setResultIndex(Number(v))}
-                  />
-                  <Button variant="ghost" onClick={exportCsv}>
-                    Xuất CSV
-                  </Button>
-                </>
+              {panel && result?.tables[resultIndex] && bottom === "results" && (
+                <Button variant="ghost" onClick={exportCsv}>
+                  Xuất CSV
+                </Button>
               )}
               <IconButton
                 label={panel ? "Ẩn panel" : "Hiện panel"}
@@ -1849,6 +2123,20 @@ export default function App({
                 <PanelBottom size={15} />
               </IconButton>
             </div>
+            {panel && bottom === "results" && !running && result && result.tables.length > 1 && (
+              <div className="result-table-picker" role="group" aria-label="Bảng kết quả">
+                {result.tables.map((table, index) => (
+                  <Button
+                    key={index}
+                    variant="ghost"
+                    aria-pressed={resultIndex === index}
+                    onClick={() => setResultIndex(index)}
+                  >
+                    Kết quả {index + 1} · {table.rows.length} dòng
+                  </Button>
+                ))}
+              </div>
+            )}
             {panel &&
               (bottom === "results" ? (
                 running ? (
@@ -1857,7 +2145,7 @@ export default function App({
                     Đang thực thi query…
                   </div>
                 ) : result?.tables[resultIndex] ? (
-                  <DataGrid table={result.tables[resultIndex]} />
+                  <DataGrid key={activeId + ":" + resultIndex} table={result.tables[resultIndex]} rangeSelection />
                 ) : (
                   <div className="panel-empty">
                     <Database size={22} strokeWidth={1.5} />
@@ -1932,10 +2220,10 @@ export default function App({
           onClose={() => setDialog("")}
           onConnected={(t, preferences) => {
             setSettings(preferences);
-            if (!project) defaultTarget.current = t;
+            if (!project && !tableSelected) defaultTarget.current = t;
             setTargets((old) => [...old, t]);
-            if (tableSelected) setTableTab({ target: t });
-            setTabs((old) =>
+            if (tableTab) setTableTabs((current) => current.map((entry) => entry.id === tableTab.id ? { ...entry, target: t } : entry));
+            else setTabs((old) =>
               old.map((d) => (d.id === activeId ? { ...d, target: t } : d)),
             );
             if (!active && !tableSelected)
@@ -1977,7 +2265,42 @@ export default function App({
           }}
         />
       )}
-      {dialog && !["connection", "projects", "settings"].includes(dialog) && (
+      {structureClear && (
+        <Modal title="Xóa file trong Structure/App" onClose={() => {
+          if (!projectActionBusy) setStructureClear(undefined);
+        }}>
+          <div className="tool-body">
+            <p>Xóa {structureClear.count} file trong thư mục sau và các thư mục con?</p>
+            <p className="break-all">{structureClear.path}</p>
+            <div className="inline-checks">
+              <Button disabled={projectActionBusy} onClick={() => setStructureClear(undefined)}>Hủy</Button>
+              <Button disabled={projectActionBusy} onClick={() => runProjectAction(async () => {
+                const count = await request<number>("project.structure.clear", { id: structureClear.id, path: structureClear.path });
+                controllerCache.current.clear();
+                setControllers((current) => current.map((entry) => ({
+                  ...entry, files: entry.files.filter((file) => !pathIsWithin(file, structureClear.path)),
+                })));
+                setStructureClear(undefined);
+                setHistoryRevision((version) => version + 1);
+                setStatus("Đã xóa " + count + " file trong Structure/App");
+              })}>{projectActionBusy ? "Đang xóa…" : "Xóa file"}</Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+      {dialog === "editor.sections" && active && (
+        <FileSections name={active.name} text={textOf(active)} onClose={() => setDialog("")}
+          onJump={(offset) => {
+            const position = modelFor(active).getPositionAt(offset);
+            setDialog("");
+            requestAnimationFrame(() => {
+              editor.current?.setPosition(position);
+              editor.current?.revealLineInCenter(position.lineNumber);
+              editor.current?.focus();
+            });
+          }} />
+      )}
+      {dialog && !["connection", "projects", "settings", "editor.sections"].includes(dialog) && (
         <ToolDialog
           onDirtyChange={(dirty) => {
             toolDirty.current = dirty;
@@ -2182,6 +2505,7 @@ function FunctionTree({
                 .join(" · ")}
               onClick={() => {
                 onSelect(node.entry.id);
+                if (!node.children.length && node.entry.link) onOpen(node);
                 if (node.children.length)
                   setExpanded((old) => {
                     const next = new Set(old);
@@ -2191,7 +2515,7 @@ function FunctionTree({
                   });
               }}
               onDoubleClick={() => {
-                if (node.entry.link) onOpen(node);
+                if (node.children.length && node.entry.link) onOpen(node);
               }}
             >
               {node.children.length ? (

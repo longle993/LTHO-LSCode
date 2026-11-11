@@ -5,7 +5,7 @@ public sealed record SqlSymbol(string Schema, string Table, string? Column, stri
 public sealed record SqlSuggestion(string Text, string InsertText, string Description, bool IsSnippet = false);
 public static class SqlSuggestions
 {
-    public static readonly string[] Keywords = ["SELECT", "FROM", "WHERE", "INNER JOIN", "LEFT JOIN", "RIGHT JOIN", "GROUP BY", "ORDER BY", "HAVING", "INSERT INTO", "UPDATE", "DELETE FROM", "CREATE PROCEDURE", "ALTER PROCEDURE", "DECLARE", "BEGIN", "END", "EXEC", "CASE", "WHEN", "THEN", "ELSE", "IS NULL", "ISNULL", "COALESCE", "COUNT", "SUM", "AVG", "MIN", "MAX", "TOP", "DISTINCT", "GETDATE", "DATEADD", "DATEDIFF", "CAST", "CONVERT", "EXISTS", "NOT EXISTS", "UNION ALL", "OVER", "PARTITION BY", "ROW_NUMBER", "WITH", "SET", "VALUES"];
+    public static readonly string[] Keywords = ["SELECT", "FROM", "WHERE", "INNER JOIN", "LEFT JOIN", "RIGHT JOIN", "GROUP BY", "ORDER BY", "HAVING", "INSERT INTO", "UPDATE", "DELETE FROM", "CREATE PROCEDURE", "ALTER PROCEDURE", "DECLARE", "BEGIN", "END", "EXEC", "AS", "CASE", "WHEN", "THEN", "ELSE", "AND", "OR", "NOT", "IN", "NOT IN", "LIKE", "BETWEEN", "NULL", "IS NULL", "IS NOT NULL", "ASC", "DESC", "ISNULL", "COALESCE", "COUNT", "SUM", "AVG", "MIN", "MAX", "TOP", "DISTINCT", "GETDATE", "DATEADD", "DATEDIFF", "CAST", "CONVERT", "EXISTS", "NOT EXISTS", "UNION ALL", "OVER", "PARTITION BY", "ROW_NUMBER", "WITH", "SET", "VALUES"];
     public static IReadOnlyList<SqlSuggestion> Get(string beforeCaret, IEnumerable<SqlSymbol> symbols, string? fullSql = null)
     {
         const string identifier = @"(?:\[(?:[^\]]|\]\])+\]|\w+)";

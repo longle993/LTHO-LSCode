@@ -15,7 +15,7 @@ namespace LSCode.Infrastructure;
 
 public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
 {
-    private readonly ConcurrentDictionary<string, SqlTarget> targets = new();
+    private readonly ConcurrentDictionary<string, (SqlTarget Connection, bool IsProjectSys)> targets = new();
     private readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(25) };
     private TranslationClient? translator;
     private SqlTraceSession? trace;
@@ -25,11 +25,19 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
     private readonly SemaphoreSlim persistenceGate = new(1);
     private readonly CatalogWorkspace catalog = new();
     private sealed record TableSnapshot(string Id, SqlTarget Target, string Qualified, DataTable Data);
-    private volatile TableSnapshot? tableSnapshot;
+    private readonly ConcurrentDictionary<string, TableSnapshot> tableSnapshots = new();
     public DeveloperTools() => http.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "Mozilla/5.0");
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
-    private SqlTarget Target(JsonElement p) => targets.TryGetValue(p.GetProperty("targetId").GetString() ?? "", out var t) ? t : throw new InvalidOperationException("Chọn kết nối cho tab hiện tại.");
-    private TargetInfo Register(SqlTarget t) { var id = Guid.NewGuid().ToString("N"); targets[id] = t; return new(id, t.Server, t.Database); }
+    private (SqlTarget Connection, bool IsProjectSys) RegisteredTarget(JsonElement p) =>
+        targets.TryGetValue(p.GetProperty("targetId").GetString() ?? "", out var t)
+            ? t : throw new InvalidOperationException("Chọn kết nối cho tab hiện tại.");
+    private SqlTarget Target(JsonElement p) => RegisteredTarget(p).Connection;
+    private TargetInfo Register(SqlTarget t, bool isProjectSys = false)
+    {
+        var id = Guid.NewGuid().ToString("N");
+        targets[id] = (t, isProjectSys);
+        return new(id, t.Server, t.Database);
+    }
     private static ProjectInfo Project(LegacyProject p) => new(p.Id, p.Name, p.Server, p.Database, p.SourcePath);
     private static string Identifier(string name) =>
         string.IsNullOrWhiteSpace(name) || name.Length > 128 || name.Contains('\0')
@@ -90,6 +98,47 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                     var updated = ProjectImporter.Read(element.ToString())[0];
                     ProjectStore.Save(all.Select(x => x.Id == previous.Id ? updated : x).ToList()); return Project(updated);
                 } finally { persistenceGate.Release(); }
+            case "project.history.list":
+                await persistenceGate.WaitAsync(ct);
+                try
+                {
+                    return ProjectStore.Load().Select(project =>
+                        new { projectId = project.Id, files = ProjectFileActions.ReadHistory(project) })
+                        .Where(entry => entry.files.Length > 0).ToArray();
+                }
+                finally { persistenceGate.Release(); }
+            case "project.history":
+            case "project.history.record":
+            case "project.history.remove":
+            case "project.refreshConfig":
+            case "project.structure.preview":
+            case "project.structure.clear":
+                var actionProject = ProjectStore.Load().First(x => x.Id == S("id"));
+                await persistenceGate.WaitAsync(ct);
+                try
+                {
+                    if (method == "project.history") return ProjectFileActions.ReadHistory(actionProject);
+                    if (method == "project.history.remove")
+                    {
+                        ProjectFileActions.RemoveHistory(actionProject, S("path"));
+                        return true;
+                    }
+                    if (method == "project.history.record")
+                    {
+                        ProjectFileActions.RecordHistory(actionProject, S("path"));
+                        return true;
+                    }
+                    if (method == "project.refreshConfig") return await ProjectFileActions.RefreshConfigAsync(actionProject, ct);
+                    var structureFolder = ProjectFileActions.StructureFolder(actionProject);
+                    if (method == "project.structure.preview")
+                        return new { path = structureFolder, count = ProjectFileActions.StructureFiles(structureFolder).Count() };
+                    if (!structureFolder.Equals(S("path"), StringComparison.OrdinalIgnoreCase))
+                        throw new IOException("Đường dẫn Structure/App đã thay đổi. Hãy mở lại hộp xác nhận.");
+                    var deletedCount = ProjectFileActions.ClearStructure(structureFolder, ct);
+                    ProjectFileActions.RemoveStructureHistory(actionProject, structureFolder);
+                    return deletedCount;
+                }
+                finally { persistenceGate.Release(); }
             case "project.program":
                 var programProject = ProjectStore.Load().First(x => x.Id == S("id"));
                 var programPath = programProject.Field("ProgramPath");
@@ -103,7 +152,8 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                 var project = ProjectStore.Load().First(x => x.Id == S("id"));
                 var available = new List<TargetInfo>();
                 if (!string.IsNullOrWhiteSpace(project.Field("SysConnectionString")) || !string.IsNullOrWhiteSpace(project.Field("WebConfigPath")))
-                    available.AddRange((await ProjectDatabase.ConfiguredTargetsAsync(project).WaitAsync(TimeSpan.FromSeconds(30), ct)).Select(Register));
+                    available.AddRange((await ProjectDatabase.ConfiguredTargetsAsync(project).WaitAsync(TimeSpan.FromSeconds(30), ct))
+                        .Select((target, index) => Register(target, isProjectSys: index == 1)));
                 else if (!string.IsNullOrWhiteSpace(project.Server) && !string.IsNullOrWhiteSpace(project.Database)) {
                     var legacyConnection = new SqlConnectionStringBuilder { DataSource = project.Server, InitialCatalog = project.Database, IntegratedSecurity = string.IsNullOrWhiteSpace(project.User), UserID = project.User, Password = project.Field("Password"), Encrypt = SqlConnectionEncryptOption.Optional, ConnectTimeout = 12, ApplicationName = "LS Code" };
                     available.Add(Register(new(project.Server, project.Database, legacyConnection.ConnectionString)));
@@ -111,6 +161,15 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                 var state = SettingsStore.Load(); state.ActiveProjectId = project.Id; state.ProjectLastAccess[project.Id] = DateTimeOffset.Now;
                 state.Workspace = project.SourcePath; SettingsStore.Save(state);
                 return new { project = Project(project), targets = available };
+            case "workspace.reveal":
+                var folder = S("path");
+                if (!Path.IsPathFullyQualified(folder) ||
+                    !await Task.Run(() => Directory.Exists(folder), ct))
+                    throw new DirectoryNotFoundException("Không tìm thấy thư mục dự án.");
+                Process.Start(new ProcessStartInfo(folder) { UseShellExecute = true });
+                return true;
+            case "workspace.duplicate":
+                return await WorkspaceFiles.DuplicateAsync(S("path"), ct);
             case "project.discover": return await Task.Run(() => ProjectDiscovery.Find(S("root", @"\\172.168.5.14\CustomerPro"), S("name"), ct), ct);
             case "project.sync":
                 var config = S("configPath"); var connections = await Task.Run(() => ProjectDiscovery.ReadConnections(config), ct);
@@ -170,29 +229,52 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                     WHERE t.is_ms_shipped=0 AND (@q='' OR CHARINDEX(@q,t.name)>0 OR CHARINDEX(@q,s.name+'.'+t.name)>0)
                     ORDER BY CASE WHEN CHARINDEX(@q,t.name)=1 THEN 0 ELSE 1 END, s.name, t.name
                     """, ct, new SqlParameter("@q", S("query").Trim())));
+            case "table.catalog":
+                return Table(await ProjectDatabase.ReadAllAsync(Target(p), """
+                    SELECT s.name AS [Schema], t.name AS [Name]
+                    FROM sys.tables t JOIN sys.schemas s ON s.schema_id=t.schema_id
+                    WHERE t.is_ms_shipped=0
+                    ORDER BY t.name, s.name
+                    """, ct));
             case "table.structure": return await TableInspection.StructureAsync(Target(p), QualifiedTable(), ct);
             case "table.createScript": return await TableDefinition.ReadAsync(Target(p), QualifiedTable(), ct);
             case "table.insertScript":
-                var snapshot = tableSnapshot;
-                if (snapshot == null || snapshot.Id != S("snapshotId"))
+                if (!tableSnapshots.TryGetValue(S("scope"), out var snapshot) || snapshot.Id != S("snapshotId"))
                     throw new InvalidOperationException("Dữ liệu đã thay đổi. Hãy đọc lại bảng.");
                 return await TableInspection.InsertScriptAsync(snapshot.Target, snapshot.Qualified, snapshot.Data, ct);
-            case "table.addScript": return await TableInspection.AddColumnsAsync(Target(p), QualifiedTable(), RequiredColumns(ColumnNames()), ct);
+            case "table.releaseSnapshot":
+                tableSnapshots.TryRemove(S("scope"), out _);
+                return true;
+            case "table.addScript":
+            case "table.alterScript":
+                var columnTarget = RegisteredTarget(p);
+                return await TableInspection.ColumnScriptAsync(columnTarget.Connection, Identifier(S("schema", "dbo")),
+                    Identifier(S("table")), RequiredColumns(ColumnNames()), method == "table.alterScript",
+                    !columnTarget.IsProjectSys, ct);
             case "table.dropColumns":
-                await TableInspection.DropColumnsAsync(Target(p), QualifiedTable(), RequiredColumns(ColumnNames()), ct);
-                tableSnapshot = null;
+                var dropTarget = Target(p);
+                var dropTable = QualifiedTable();
+                await TableInspection.DropColumnsAsync(dropTarget, dropTable, RequiredColumns(ColumnNames()), ct);
+                foreach (var entry in tableSnapshots)
+                {
+                    var saved = entry.Value;
+                    if (saved.Target.Server.Equals(dropTarget.Server, StringComparison.OrdinalIgnoreCase) &&
+                        saved.Target.Database.Equals(dropTarget.Database, StringComparison.OrdinalIgnoreCase) &&
+                        saved.Qualified.Equals(dropTable, StringComparison.Ordinal))
+                        tableSnapshots.TryRemove(entry);
+                }
                 return true;
             case "schema.script":
-                var definition = await ProjectDatabase.ReadAsync(Target(p), "SELECT OBJECT_DEFINITION(OBJECT_ID(@object)) AS [Text]", ct, new SqlParameter("@object", S("object")));
-                if (definition.Rows.Count > 0 && definition.Rows[0][0] is string script) return script;
-                return await TableDefinition.ReadAsync(Target(p), S("object"), ct);
+                return await DatabaseObjectScript.ReadAsync(Target(p), S("object"), ct);
             case "table.read":
             case "table.view":
                 // SELECT clauses are intentionally a developer SQL surface, executed with this target's permissions.
                 // Object identifiers are always quoted independently of those expressions.
                 var qualified = QualifiedTable();
                 var columns = ColumnNames();
-                var select = columns.Length == 0 ? "*" : string.Join(",", columns.Select(ProjectDatabase.Quote));
+                var select = S("select").Trim();
+                if (select.Length == 0)
+                    select = columns.Length == 0 ? "*" : string.Join(",", columns.Select(ProjectDatabase.Quote));
                 var readSql = "SELECT TOP (1000) " + select + " FROM " + qualified
                     + (S("where").Length > 0 ? " WHERE " + S("where") : "") + (S("orderBy").Length > 0 ? " ORDER BY " + S("orderBy") : "");
                 var readTarget = Target(p);
@@ -201,24 +283,35 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                 var preview = TableInspection.Preview(data);
                 ct.ThrowIfCancellationRequested();
                 var snapshotId = Guid.NewGuid().ToString("N");
-                tableSnapshot = new(snapshotId, readTarget, qualified, data);
+                tableSnapshots[S("scope")] = new(snapshotId, readTarget, qualified, data);
                 return new { data = preview, snapshotId };
             case "project.commands": return await ProjectDatabase.CommandsAsync(Target(p), ct, S("appDatabase"));
             case "project.controller":
                 return await Task.Run(async () =>
                 {
-                    var root = S("root"); var file = ProjectConventions.ResolveMenuFile(root, S("link")) ?? throw new FileNotFoundException("Không tìm thấy file menu.");
-                    var names = ProjectConventions.Controllers(await File.ReadAllTextAsync(file, ct));
-                    var controllerRoot=Path.Combine(root,"App_Data");
-                    var files = WorkspaceFileIndex.Files(Directory.Exists(controllerRoot)?controllerRoot:root, ct,false).Take(100001).ToArray();
+                    var root = S("root");
+                    var link = S("link");
+                    var file = ProjectConventions.ResolveMenuFile(root, link);
+                    var names = file != null && Path.GetExtension(file).Equals(".aspx", StringComparison.OrdinalIgnoreCase)
+                        ? ProjectConventions.Controllers(await File.ReadAllTextAsync(file, ct))
+                        : Array.Empty<string>();
+                    var controllerRoots = new[] { Path.Combine(root, "App_Data"), Path.Combine(root, "AppData") }
+                        .Where(Directory.Exists).ToArray();
+                    var files = (controllerRoots.Length == 0 ? [root] : controllerRoots)
+                        .SelectMany(folder => WorkspaceFileIndex.Files(folder, ct, false)).Take(100001).ToArray();
                     if(files.Length>100000)throw new IOException("Project vượt 100000 file; cần thu hẹp thư mục.");
-                    var related = new HashSet<string>(names.Count == 0 ? [Path.GetFileNameWithoutExtension(file)] : names, StringComparer.OrdinalIgnoreCase);
+                    var stem = Path.GetFileNameWithoutExtension(file ?? Uri.UnescapeDataString(link.Split('?', '#')[0]));
+                    var related = new HashSet<string>(names.Count == 0 ? [stem] : names, StringComparer.OrdinalIgnoreCase);
                     var byName = files.ToLookup(f => Path.GetFileNameWithoutExtension(f), StringComparer.OrdinalIgnoreCase);
                     var pending = new Queue<string>(related);
                     while (pending.TryDequeue(out var name))
-                        foreach (var xmlFile in byName[name].Where(f => Path.GetExtension(f).Equals(".xml", StringComparison.OrdinalIgnoreCase)))
-                            foreach (var child in ProjectConventions.GridControllers(await File.ReadAllTextAsync(xmlFile, ct))) if (related.Add(child)) pending.Enqueue(child);
-                    return new { file, files = files.Where(f => related.Contains(Path.GetFileNameWithoutExtension(f))).Prepend(file).Distinct(StringComparer.OrdinalIgnoreCase).ToArray() };
+                        foreach (var definition in byName[name].Where(f => Path.GetExtension(f).ToLowerInvariant() is ".xml" or ".f"))
+                            foreach (var child in ProjectConventions.GridControllers(await File.ReadAllTextAsync(definition, ct)))
+                                if (related.Add(child)) pending.Enqueue(child);
+                    var matches = files.Where(f => related.Contains(Path.GetFileNameWithoutExtension(f))).ToArray();
+                    if (file == null && matches.Length == 0) throw new FileNotFoundException("Không tìm thấy file controller.");
+                    var entry = file ?? matches[0];
+                    return new { file = entry, files = matches.Prepend(entry).Distinct(StringComparer.OrdinalIgnoreCase).ToArray() };
                 }, ct);
             case "text.format":
                 return S("language") switch { "sql" => SqlLanguageService.Format(S("text")), "xml" => XmlTools.Format(S("text")), "json" => JsonSerializer.Serialize(JsonDocument.Parse(S("text")).RootElement, new JsonSerializerOptions { WriteIndented = true }), _ => S("text") };

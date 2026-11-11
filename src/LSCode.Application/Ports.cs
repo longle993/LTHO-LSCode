@@ -15,6 +15,7 @@ public interface IDocumentWorkspace
     Task<object> SearchAsync(string path, string query, bool regex, bool matchCase, Dictionary<string, string> buffers, CancellationToken ct);
     Task<object> RecoverAsync(CancellationToken ct);
     Task StoreRecoveryAsync(JsonElement documents, CancellationToken ct);
+    Task<string> RenameAsync(string path, string name, CancellationToken ct);
 }
 public interface IDeveloperTools
 {
@@ -60,6 +61,7 @@ public sealed class StudioCommands(IDocumentWorkspace documents, IDeveloperTools
             case "document.close": documents.Release(S("id")); return true;
             case "document.restore": return documents.Restore(p.Deserialize<DocumentInfo>(new JsonSerializerOptions(JsonSerializerDefaults.Web)) ?? throw new ArgumentException("Recovery không hợp lệ."));
             case "workspace.folder": return dialogs.OpenFolder();
+            case "workspace.rename": return await Task.Run(() => documents.RenameAsync(S("path"), S("name"), ct), ct);
             case "workspace.list": return await documents.ListAsync(S("path"), ct);
             case "workspace.files": return await documents.FilesAsync(S("path"), ct);
             case "workspace.search":

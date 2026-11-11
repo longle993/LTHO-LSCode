@@ -15,6 +15,7 @@ export const commands = [
   ["sql.export", "Xuất kết quả CSV", ""],
   ["editor.split", "Chia editor", "Ctrl+\\"],
   ["editor.find", "Tìm trong file", "Ctrl+F"],
+  ["editor.sections", "Đi đến phần trong file", "Ctrl+G"],
   ["editor.replace", "Thay thế trong file", "Ctrl+H"],
   ["editor.format", "Định dạng SQL / XML / JSON", ""],
   ["workspace.files", "File dự án", ""],

@@ -31,6 +31,23 @@ await workspace.StoreRecoveryAsync(JsonSerializer.SerializeToElement(new[] { new
 var recovery = (JsonElement)await workspace.RecoverAsync(default);
 Check(recovery[0].GetProperty("text").GetString() == "SELECT N'Việt';", "Recovery round-trip");
 Check(!Directory.GetFiles(root).Any(p => p.EndsWith(".tmp")), "No temporary files left after recovery");
+var renameFolder = Directory.CreateDirectory(Path.Combine(root, "rename-source")).FullName;
+var renameSource = Path.Combine(renameFolder, "original.xml");
+await File.WriteAllBytesAsync(renameSource, encoding.GetPreamble().Concat(encoding.GetBytes("<root/>")).ToArray());
+var renameDocument = await workspace.OpenAsync(renameSource, default);
+var renamedFile = await workspace.RenameAsync(renameSource, "changed.xml", default);
+var renamedFolder = await workspace.RenameAsync(renameFolder, "rename-target", default);
+var renamedPath = Path.Combine(renamedFolder, Path.GetFileName(renamedFile));
+Check(!File.Exists(renameSource) && !Directory.Exists(renameFolder) && File.Exists(renamedPath) &&
+    !await workspace.ChangedAsync(renameDocument.Id, default), "Rename rebinds an open document through both file and folder moves");
+var savedAfterRename = await workspace.SaveAsync(renameDocument.Id, renamedPath, "<root>Dirty buffer</root>", 2, default);
+Check(savedAfterRename.Bom && savedAfterRename.Encoding == "utf-16" &&
+    (await File.ReadAllTextAsync(renamedPath)).Contains("Dirty buffer"), "Dirty document saves to its renamed path with original encoding and BOM");
+var caseRenamed = await workspace.RenameAsync(renamedPath, "Changed.xml", default);
+Check(File.Exists(caseRenamed) && Directory.EnumerateFiles(renamedFolder).Single() == caseRenamed, "Case-only rename changes the on-disk name");
+await File.WriteAllTextAsync(Path.Combine(renamedFolder, "occupied.xml"), "keep");
+await Reject<IOException>(() => workspace.RenameAsync(caseRenamed, "occupied.xml", default), "Rename refuses to overwrite an existing file");
+await Reject<ArgumentException>(() => workspace.RenameAsync(caseRenamed, "../outside.xml", default), "Rename rejects a name containing a path");
 Directory.CreateDirectory(Path.Combine(root, "node_modules"));
 await File.WriteAllTextAsync(Path.Combine(root, "node_modules", "hidden.sql"), "SELECT hidden");
 var hits = (List<LSCode.Core.SearchHit>)await workspace.SearchAsync(root, "unsaved", false, false, new() { [copy] = "unsaved buffer" }, default);
@@ -75,6 +92,68 @@ Check(XmlViewWidths.Find("", 0) == null && XmlViewWidths.Find("<view id='x'><ite
 Check(XmlViewWidths.Find("<!--"+viewXml+"-->", viewXml.IndexOf("[ten]")+6) == null, "View ignores XML comments");
 var multipleViews="<views><view id='a'><item value='20,40'/><item value='10: [x]'/></view><view id='b'><item value='50,70'/><item value='10: [x]'/></view></views>";
 Check(XmlViewWidths.Find(multipleViews,multipleViews.LastIndexOf("[x]")+1)?.Width==120,"View widths use current view rather than previous view");
+await using (var projectTools = new DeveloperTools())
+{
+    Task<object?> CallProject(string method, object payload) =>
+        projectTools.ExecuteAsync(method, JsonSerializer.SerializeToElement(payload, Protocol.Json), default);
+    var duplicatePaths = await Task.WhenAll(
+        CallProject("workspace.duplicate", new { path }),
+        CallProject("workspace.duplicate", new { path }));
+    Check(duplicatePaths.Cast<string>().Distinct(StringComparer.OrdinalIgnoreCase).Count() == 2 &&
+        duplicatePaths.Cast<string>().All(file => File.ReadAllBytes(file).SequenceEqual(File.ReadAllBytes(path))),
+        "Concurrent file duplication creates separate copies preserving every byte and BOM");
+    Check(duplicatePaths.Cast<string>().All(file => Path.GetDirectoryName(file) == Path.GetDirectoryName(path) &&
+        Path.GetExtension(file) == Path.GetExtension(path)), "File copies stay beside the source with the same extension");
+    var configPath = Path.Combine(root, "erp", "web.config");
+    Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
+    Task WriteConfig(string app, string sys) => File.WriteAllTextAsync(configPath, $"""
+        <configuration><connectionStrings>
+          <add name="appConnectionString" connectionString="Server=.;Database={app};Integrated Security=True" />
+          <add name="sysConnectionString" connectionString="Server=.;Database={sys};Integrated Security=True" />
+        </connectionStrings></configuration>
+        """);
+    await WriteConfig("Saved_App", "Saved_Sys");
+    var syncedProject = (ProjectInfo)(await CallProject("project.sync", new { name = "ERP startup fixture", configPath }))!;
+    async Task<IEnumerable<string?>> OpenDatabases()
+    {
+        var opened = await CallProject("project.open", new { id = syncedProject.Id });
+        return JsonSerializer.SerializeToElement(opened, Protocol.Json).GetProperty("targets")
+            .EnumerateArray().Select(target => target.GetProperty("database").GetString()).ToArray();
+    }
+    await WriteConfig("Current_App", "Current_Sys");
+    Check((await OpenDatabases()).SequenceEqual(new[] { "Current_App", "Current_Sys" }),
+        "Opening ERP uses current App/SYS when web.config is readable");
+    var originalConfig = await File.ReadAllBytesAsync(configPath);
+    File.SetLastWriteTimeUtc(configPath, DateTime.UtcNow.AddDays(-1));
+    var oldWriteTime = File.GetLastWriteTimeUtc(configPath);
+    await CallProject("project.refreshConfig", new { id = syncedProject.Id });
+    Check((await File.ReadAllBytesAsync(configPath)).SequenceEqual(originalConfig) &&
+        File.GetLastWriteTimeUtc(configPath) > oldWriteTime, "Refresh rewrites web.config without changing its bytes");
+    var structure = Directory.CreateDirectory(Path.Combine(syncedProject.SourcePath, "Controller", "Structure", "App")).FullName;
+    var nested = Directory.CreateDirectory(Path.Combine(structure, "child")).FullName;
+    var generated = Path.Combine(nested, "cached.xml");
+    var neighbor = Path.Combine(structure, "..", "keep.xml");
+    await File.WriteAllTextAsync(generated, "<cache/>");
+    await File.WriteAllTextAsync(neighbor, "<keep/>");
+    await CallProject("project.history.record", new { id = syncedProject.Id, path = generated });
+    await CallProject("project.history.record", new { id = syncedProject.Id, path = generated });
+    Check(((string[])(await CallProject("project.history", new { id = syncedProject.Id }))!).SequenceEqual([generated]),
+        "Project history persists and deduplicates file paths");
+    await CallProject("project.history.remove", new { id = syncedProject.Id, path = generated });
+    var emptyHistory = JsonSerializer.SerializeToElement(await CallProject("project.history.list", new { }), Protocol.Json);
+    Check(emptyHistory.GetArrayLength() == 0 && File.Exists(generated) &&
+        !Directory.EnumerateFiles(Path.Combine(root, "file-history"), "*.json").Any(),
+        "Removing the last history entry removes the group and preserves the source file");
+    await CallProject("project.history.record", new { id = syncedProject.Id, path = generated });
+    await Reject<IOException>(() => CallProject("project.structure.clear", new { id = syncedProject.Id, path = nested }),
+        "Clear Structure rejects a different path");
+    var cleared = await CallProject("project.structure.clear", new { id = syncedProject.Id, path = structure });
+    Check(cleared is 1 && !File.Exists(generated) && File.Exists(neighbor) && Directory.Exists(nested),
+        "Clear Structure deletes nested files and preserves folders and siblings");
+    File.Delete(configPath);
+    Check((await OpenDatabases()).SequenceEqual(new[] { "Saved_App", "Saved_Sys" }),
+        "Opening ERP registers saved App/SYS when web.config is unavailable");
+}
 if (args.Contains("--sql"))
 {
     await using var tools = new DeveloperTools();
@@ -89,6 +168,93 @@ if (args.Contains("--sql"))
         var target = (TargetInfo)(await Call("sql.connect", new { server, database, integratedSecurity = true, trustCertificate = true }))!;
         var batch = (ExecutionResult)(await Call("sql.execute", new { targetId = target.Id, sql = "CREATE TABLE #test(value int);\nGO\nINSERT INTO #test VALUES (42);\nGO\nSELECT value FROM #test;" }))!;
         Check(batch.Tables[0].Rows[0][0] == "42", "SQL keeps connection/temp table across GO batches");
+        await Call("sql.execute", new { targetId = target.Id, sql = """
+            CREATE TABLE dbo.sysgendata (basetable char(30));
+            INSERT dbo.sysgendata VALUES ('d46$000000');
+            CREATE TABLE dbo.dmstt (ngay_gh1 smalldatetime, ngay_gh2 smalldatetime);
+            INSERT dbo.dmstt VALUES ('20260101', '20260131'), ('20260201', '20260228');
+            CREATE TABLE dbo.[d46$000000] (ngay_ct date, ky_hieu_nhap varchar(24) NULL);
+            INSERT dbo.[d46$000000] (ngay_ct) VALUES ('20260101');
+            CREATE TABLE dbo.[d46$log] (ngay_ct date);
+            CREATE TABLE dbo.[d46$202601] (ngay_ct date);
+            CREATE TABLE dbo.[d46$202602] (ngay_ct date);
+            CREATE TABLE dbo.[d46$202603] (ngay_ct date);
+            INSERT dbo.[d46$log] VALUES ('20260101');
+            INSERT dbo.[d46$202601] VALUES ('20260101');
+            INSERT dbo.[d46$202602] VALUES ('20260201');
+            GO
+            CREATE PROCEDURE dbo.[FastBusiness$Partition$Execute]
+                @sql nvarchar(4000), @filter nvarchar(200), @dateField sysname,
+                @from smalldatetime, @to smalldatetime, @user int, @admin int
+            AS
+            BEGIN
+                IF @dateField <> 'ngay_ct' OR @user <> 1 OR @admin <> 1
+                    THROW 50000, 'Incorrect ERP procedure arguments', 1;
+                DECLARE @day date = DATEFROMPARTS(YEAR(@from), MONTH(@from), 1);
+                WHILE @day <= @to
+                BEGIN
+                    DECLARE @statement nvarchar(4000) = REPLACE(REPLACE(REPLACE(
+                        @sql, '%Partition', CONVERT(char(6), @day, 112)), '%[', ''), ']%', '');
+                    EXEC sys.sp_executesql @statement;
+                    SET @day = DATEADD(month, 1, @day);
+                END
+            END
+            """ });
+        var partitionColumn = new { targetId = target.Id, table = "d46$000000", columns = new[] { "ky_hieu_nhap" } };
+        var partitionAdd = (string)(await Call("table.addScript", partitionColumn))!;
+        await Call("sql.execute", new { targetId = target.Id, sql = partitionAdd });
+        await Call("sql.execute", new { targetId = target.Id, sql = partitionAdd });
+        var filled = (ExecutionResult)(await Call("sql.execute", new { targetId = target.Id, sql = """
+            SELECT (SELECT ky_hieu_nhap FROM dbo.[d46$000000]), (SELECT ky_hieu_nhap FROM dbo.[d46$log]),
+                (SELECT ky_hieu_nhap FROM dbo.[d46$202601]), (SELECT ky_hieu_nhap FROM dbo.[d46$202602]),
+                COL_LENGTH(N'dbo.d46$202603', N'ky_hieu_nhap');
+            """ }))!;
+        Check(filled.Tables[0].Rows[0].SequenceEqual(new string?[] { "", "", "", "", null }),
+            "Partition ADD backfills template, log and both ERP months, supports rerun and skips the outside month");
+        await Call("sql.execute", new { targetId = target.Id, sql = "ALTER TABLE dbo.[d46$000000] ALTER COLUMN ky_hieu_nhap varchar(32) NULL;" });
+        var partitionAlter = (string)(await Call("table.alterScript", partitionColumn))!;
+        await Call("sql.execute", new { targetId = target.Id, sql = partitionAlter });
+        var lengths = (ExecutionResult)(await Call("sql.execute", new { targetId = target.Id, sql = """
+            SELECT COL_LENGTH(N'dbo.d46$log', N'ky_hieu_nhap'), COL_LENGTH(N'dbo.d46$202601', N'ky_hieu_nhap'),
+                COL_LENGTH(N'dbo.d46$202602', N'ky_hieu_nhap'), COL_LENGTH(N'dbo.d46$202603', N'ky_hieu_nhap');
+            """ }))!;
+        Check(lengths.Tables[0].Rows[0].SequenceEqual(new string?[] { "32", "32", "32", null }),
+            "Partition ALTER applies template type to log and in-range months only");
+        await Call("sql.execute", new { targetId = target.Id, sql = "CREATE TABLE dbo.viewer_fixture (value int); INSERT dbo.viewer_fixture VALUES (1),(2),(3);" });
+        var tableCatalog = (ResultSet)(await Call("table.catalog", new { targetId = target.Id }))!;
+        Check(tableCatalog.Rows.Any(row => row.SequenceEqual(new[] { "dbo", "viewer_fixture" })), "Table catalog returns the new table and its schema");
+        var expressionPreview = JsonSerializer.SerializeToElement(await Call("table.view", new
+        {
+            targetId = target.Id, schema = "dbo", table = "viewer_fixture",
+            select = "SUM(value) AS total", where = "value BETWEEN 1 AND 2", orderBy = "total DESC",
+        }), Protocol.Json);
+        Check(expressionPreview.GetProperty("data").GetProperty("rows")[0][0].GetString() == "3",
+            "Table viewer executes SELECT expressions with WHERE and ORDER BY syntax");
+        await Reject<ArgumentException>(async () => await Call("table.view", new
+        {
+            targetId = target.Id, schema = "dbo", table = "viewer_fixture",
+            select = "value FROM dbo.viewer_fixture; DROP TABLE dbo.viewer_fixture; SELECT value",
+        }), "Table SELECT expressions still reject additional SQL statements");
+        await Call("sql.execute", new { targetId = target.Id, sql = "/* header */ CREATE OR ALTER PROC dbo.script_fixture @value int AS SELECT @value AS value;" });
+        var procedureScript = (string)(await Call("schema.script", new { targetId = target.Id, @object = "[dbo].[script_fixture]" }))!;
+        Check(procedureScript.Contains("IF OBJECT_ID(N'[dbo].[script_fixture]', N'P') IS NULL") &&
+            Regex.IsMatch(procedureScript, @"ALTER\s+PROC dbo\.script_fixture") &&
+            !procedureScript.Contains("CREATE OR ALTER", StringComparison.OrdinalIgnoreCase) &&
+            procedureScript.TrimEnd().EndsWith("\nGO"), "DB Object generates a guarded stub and an ALTER batch");
+        await Call("sql.execute", new { targetId = target.Id, sql = "DROP PROCEDURE dbo.script_fixture;" });
+        var replay = (ExecutionResult)(await Call("sql.execute", new
+        {
+            targetId = target.Id,
+            sql = procedureScript + "EXEC dbo.script_fixture @value = 42;"
+        }))!;
+        Check(replay.Tables[0].Rows[0][0] == "42", "Generated script recreates a missing procedure and accepts a following command");
+        await Call("sql.execute", new { targetId = target.Id, sql = "CREATE TABLE dbo.script_table_fixture (id int);\nGO\nCREATE VIEW dbo.script_view_fixture AS SELECT 1 AS id;" });
+        foreach (var objectName in new[] { "dbo.script_table_fixture", "dbo.script_view_fixture" })
+        {
+            var objectScript = (string)(await Call("schema.script", new { targetId = target.Id, @object = objectName }))!;
+            Check(objectScript.TrimEnd().EndsWith("\nGO") && !objectScript.TrimEnd().EndsWith("\nGO\nGO"),
+                $"DB Object terminates {objectName} with one final GO");
+        }
         using (var cts = new CancellationTokenSource(300))
             await Reject<OperationCanceledException>(async () => await tools.ExecuteAsync("sql.execute", JsonSerializer.SerializeToElement(new { targetId = target.Id, sql = "WAITFOR DELAY '00:00:10'; SELECT 1" }), cts.Token), "SQL cancellation reaches SqlCommand");
         var previewObject = await Call("catalog.preview", new { targetId = target.Id, schema = "dbo", table = "catalog", creating = true, fields = new[] { new CatalogField("code", "nvarchar", "20", Key: true), new CatalogField("label", "nvarchar", "100") }, rows = Array.Empty<string[]>() });
@@ -119,6 +285,15 @@ if (args.Contains("--sql"))
         await File.WriteAllTextAsync(Path.Combine(root,"App_Data","detail.f"),"<controller/>");
         var related=JsonSerializer.SerializeToElement(await Call("project.controller",new{root,link="menu.aspx"}),Protocol.Json);
         Check(related.GetProperty("files").GetArrayLength()==3,"Controller explorer includes ASPX and child grid files");
+        var fOnly = Path.Combine(root, "App_Data", "legacy.f");
+        await File.WriteAllTextAsync(fOnly, "<controller><items style='Grid' controller='legacyGrid'/></controller>");
+        var fGrid = Path.Combine(root, "App_Data", "legacyGrid.f");
+        await File.WriteAllTextAsync(fGrid, "<controller/>");
+        var legacyController = JsonSerializer.SerializeToElement(
+            await Call("project.controller", new { root, link = "legacy.aspx" }), Protocol.Json);
+        Check(legacyController.GetProperty("files").EnumerateArray()
+            .Select(item => item.GetString()).ToHashSet().SetEquals(new[] { fOnly, fGrid }),
+            "Controller discovery follows grid references in an F-only controller without an ASPX");
         var syncConfig = Path.Combine(root, "web.config");
         await File.WriteAllTextAsync(syncConfig, """
             <configuration><connectionStrings>
@@ -177,6 +352,20 @@ if (args.Contains("--sql"))
         var insert = (string)(await Call("table.insertScript", new { snapshotId = view.GetProperty("snapshotId").GetString() }))!;
         Check(view.GetProperty("data").GetProperty("rows").GetArrayLength() == 1 && insert.Contains("N'Việt'' Nam'")
             && insert.Contains("0x0AFF") && insert.Contains("IDENTITY_INSERT") && !insert.Contains("[version]"), "Insert script uses the filtered snapshot and skips rowversion");
+        var secondView = JsonSerializer.SerializeToElement(await Call("table.view", new
+        {
+            scope = "inspection-2", targetId = target.Id, table = "insert_fixture", where = "id=2",
+        }), Protocol.Json);
+        var secondSnapshot = secondView.GetProperty("snapshotId").GetString();
+        var firstSnapshot = view.GetProperty("snapshotId").GetString();
+        Check((string?)await Call("table.insertScript", new { snapshotId = firstSnapshot }) == insert &&
+            ((string)(await Call("table.insertScript", new { scope = "inspection-2", snapshotId = secondSnapshot }))!).Contains("0x00"),
+            "Independent inspection tabs generate INSERT from their own filtered previews");
+        await Call("table.releaseSnapshot", new { scope = "inspection-2" });
+        await Reject<InvalidOperationException>(() => Call("table.insertScript", new { scope = "inspection-2", snapshotId = secondSnapshot }),
+            "Closing an inspection tab releases its preview");
+        Check((string?)await Call("table.insertScript", new { snapshotId = firstSnapshot }) == insert,
+            "Closing one inspection tab preserves other previews");
         await Reject<Microsoft.Data.SqlClient.SqlException>(async () => await Call("table.dropColumns", new { targetId = target.Id, table = "insert_fixture", columns = new[] { "spare", "id" } }), "Dependent column drop is rejected atomically");
         await Call("table.dropColumns", new { targetId = target.Id, table = "insert_fixture", columns = new[] { "spare" } });
         var afterDrop = (ResultSet)(await Call("table.structure", new { targetId = target.Id, table = "insert_fixture" }))!;

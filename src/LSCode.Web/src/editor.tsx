@@ -107,7 +107,8 @@ export const modelFor = (d: DocumentInfo) => {
   return model;
 };
 export const textOf = (d: DocumentInfo) =>
-  modelFor(d).getValue(monaco.editor.EndOfLinePreference.TextDefined);
+  monaco.editor.getModel(monaco.Uri.parse("lscode://document/" + d.id))
+    ?.getValue(monaco.editor.EndOfLinePreference.TextDefined) ?? d.text;
 export const disposeModel = (d: DocumentInfo) => {
   const uri = monaco.Uri.parse("lscode://document/" + d.id);
   targetByModel.delete(uri.toString());

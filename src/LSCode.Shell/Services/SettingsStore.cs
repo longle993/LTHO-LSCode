@@ -6,6 +6,7 @@ namespace LSCode.Shell.Services;
 public sealed class StudioSettings
 {
     public string Theme { get; set; } = "Dark";
+    public string? AccentColor { get; set; }
     public List<string>? ActivityCommands { get; set; }
     public Dictionary<string, string[]> Shortcuts { get; set; } = [];
     public string? Workspace { get; set; }

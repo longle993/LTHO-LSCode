@@ -8,10 +8,7 @@ public static class ProjectDatabase
 {
     public static async Task<IReadOnlyList<SqlTarget>> ConfiguredTargetsAsync(LegacyProject project)
     {
-        var path = project.Field("WebConfigPath");
-        IEnumerable<ProjectDiscovery.ConfiguredConnection> connections = !string.IsNullOrWhiteSpace(path)
-            ? await Task.Run(() => ProjectDiscovery.ReadAllConnections(path))
-            : [new("appConnectionString", project.Field("AppConnectionString"), ""), new("sysConnectionString", project.Field("SysConnectionString"), "")];
+        var connections = await ReadProjectConnectionsAsync(project);
         return await ResolveTargetsAsync(connections, async (target, candidates) =>
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
@@ -20,6 +17,27 @@ public static class ProjectDatabase
                 timeout.Token, new SqlParameter("@a", candidates[0]), new SqlParameter("@app", candidates[1]));
             return result.Rows.Cast<DataRow>().Select(r => (string)r[0]).ToList();
         });
+    }
+
+    private static async Task<IReadOnlyList<ProjectDiscovery.ConfiguredConnection>> ReadProjectConnectionsAsync(LegacyProject project)
+    {
+        var path = project.Field("WebConfigPath");
+        var app = project.Field("AppConnectionString");
+        var sys = project.Field("SysConnectionString");
+        if (!string.IsNullOrWhiteSpace(path))
+        {
+            try
+            {
+                return await Task.Run(() => ProjectDiscovery.ReadAllConnections(path));
+            }
+            catch (Exception ex) when ((ex is IOException or UnauthorizedAccessException) &&
+                !string.IsNullOrWhiteSpace(app) && !string.IsNullOrWhiteSpace(sys))
+            {
+                // A synced profile can still connect to SQL when its source share is unavailable.
+            }
+        }
+
+        return [new("appConnectionString", app, ""), new("sysConnectionString", sys, "")];
     }
 
     internal static async Task<IReadOnlyList<SqlTarget>> ResolveTargetsAsync(IEnumerable<ProjectDiscovery.ConfiguredConnection> connections,

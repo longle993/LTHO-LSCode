@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Play, Square } from "lucide-react";
 import { Button, DataGrid, Select } from "../ui";
-import { request } from "../bridge";
+import { request, writeClipboard } from "../bridge";
 import type { Target } from "../bridge";
 import { useTask } from "./useTask";
 export function ProfilerTool({ target, visible, closing, onBusyChange }: {
@@ -75,6 +75,7 @@ export function ProfilerTool({ target, visible, closing, onBusyChange }: {
     columns: ["Thời gian", "Event", "Database", "Login", "Duration ms", "Reads", "SQL"],
     rows: rows.map((r) => [r.time, r.event, r.database, r.login, String(r.durationMs), String(r.reads), r.text]),
   }), [rows]);
+  const sqlText = (followLatest ? rows.at(-1)?.text : selected) ?? "";
   return (
     <div className="tool-body profiler-body" ref={(element) => { if (element) element.inert = closing; }}>
       <p className="muted">
@@ -255,12 +256,39 @@ export function ProfilerTool({ target, visible, closing, onBusyChange }: {
           }}
           onRow={(r) => setSelected(r[6] ?? "")}
         />
-        <pre
-          className="trace-sql"
-          style={layout ? { flex: 1, maxHeight: "none" } : undefined}
-        >
-          {(followLatest ? rows.at(-1)?.text : selected) || "Chọn một dòng để xem SQL."}
-        </pre>
+        <div className="trace-detail" style={layout ? { flex: 1, maxHeight: "none" } : undefined}>
+          <div className="trace-detail-toolbar">
+            <span>SQL đang chọn</span>
+            <Button
+              variant="ghost"
+              disabled={!sqlText || task.busy}
+              onClick={() => void task.run(() => writeClipboard(sqlText))}
+            >Sao chép SQL</Button>
+          </div>
+          <textarea
+            className="trace-sql"
+            aria-label="Nội dung SQL Profiler"
+            readOnly
+            spellCheck={false}
+            placeholder="Chọn một dòng để xem SQL."
+            value={sqlText}
+            onFocus={() => {
+              if (followLatest) {
+                setSelected(sqlText);
+                setFollowLatest(false);
+              }
+            }}
+            onKeyDown={(event) => {
+              if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c") {
+                event.preventDefault();
+                event.stopPropagation();
+                const { selectionStart, selectionEnd } = event.currentTarget;
+                const text = selectionStart === selectionEnd ? sqlText : sqlText.slice(selectionStart, selectionEnd);
+                void task.run(() => writeClipboard(text));
+              }
+            }}
+          />
+        </div>
       </div>
       <p className="form-error">{task.error || pollError}</p>
     </div>

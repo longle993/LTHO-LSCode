@@ -324,10 +324,12 @@ export function DataGrid({
       ref={grid}
       className={rangeSelection ? "data-grid data-grid-range" : "data-grid"}
       tabIndex={0}
-      aria-label={rangeSelection ? "Bảng sự kiện · Kéo chọn vùng, Ctrl+C sao chép" : "Bảng dữ liệu · Chọn ô, Shift chọn vùng, Ctrl+C sao chép"}
+      aria-label={rangeSelection
+        ? (onInspect ? "Bảng sự kiện" : "Bảng dữ liệu") + " · Kéo chọn vùng, Ctrl+C sao chép"
+        : "Bảng dữ liệu · Chọn ô, Shift chọn vùng, Ctrl+C sao chép"}
       onWheel={onInspect}
       onPointerDown={(e) => {
-        if (!rangeSelection || e.button !== 0) return;
+        if (!rangeSelection || e.button !== 0 || (e.target as Element).closest("button")) return;
         onInspect?.();
         const cell = cellAt(e.target as Element);
         if (!cell) return;
@@ -444,7 +446,7 @@ export function DataGrid({
                 data-grid-row={rangeSelection ? first + i : undefined}
                 data-grid-column={rangeSelection ? -1 : undefined}
                 title="Chọn dòng · Ctrl+C sao chép"
-                onClick={(e) => { if (!rangeSelection) select(first + i, 0, e.shiftKey, "row"); }}
+                onClick={(e) => { if (!rangeSelection || onSelectionChange) select(first + i, 0, e.shiftKey, "row"); }}
               >
                 {onSelectionChange ? (
                   <button

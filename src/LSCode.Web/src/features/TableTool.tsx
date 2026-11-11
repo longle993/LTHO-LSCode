@@ -1,13 +1,18 @@
-import { useEffect, useId, useRef, useState } from "react";
-import { Play } from "lucide-react";
-import { Button, DataGrid, Modal } from "../ui";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { Play, RefreshCw } from "lucide-react";
+import { Button, DataGrid, IconButton, Modal } from "../ui";
 import { operation, quoteSqlName, request, writeClipboard } from "../bridge";
 import type { Table, Target } from "../bridge";
 import { useTask } from "./useTask";
 
 type TableName = { schema: string; table: string };
+const tableCatalogCache = new Map<string, { tables: TableName[]; expires: number }>();
+const tableNames = (result: Table) => result.rows.flatMap(([schema, table]) =>
+  schema && table ? [{ schema, table }] : []);
 type Preview = { data: Table; snapshotId: string };
 type ColumnMenu = { x: number; y: number; columns: string[] };
+type Suggestion = { label: string; value: string; caret?: number };
+type Clause = "select" | "where" | "order";
 const ident = /^(?:\[((?:[^\]]|\]\])+)\]|([^.[\]]+))(?:\s*\.\s*(?:\[((?:[^\]]|\]\])+)\]|([^.[\]]+)))?$/u;
 const parseTable = (input: string): TableName | undefined => {
   const match = ident.exec(input.trim());
@@ -18,54 +23,92 @@ const parseTable = (input: string): TableName | undefined => {
   return second ? { schema: first, table: second } : { schema: "dbo", table: first };
 };
 const quote = (name: string) => "[" + name.replaceAll("]", "]]") + "]";
-const unquote = (name: string) => name.startsWith("[") && name.endsWith("]")
-  ? name.slice(1, -1).replaceAll("]]", "]") : name;
-function columnSuggestions(input: string, columns: string[]) {
-  const tail = input.match(/(?:\[[^\]]*|[\p{L}\p{N}_$#@]*)$/u)?.[0] ?? "";
-  const prefix = input.slice(0, input.length - tail.length);
+const functions = new Set(["ISNULL", "COALESCE", "COUNT", "SUM", "AVG", "MIN", "MAX", "GETDATE", "DATEADD", "DATEDIFF", "CAST", "CONVERT", "ROW_NUMBER"]);
+const clauseKeywords: Record<Clause, string[]> = {
+  select: ["AS", "CASE", "WHEN", "THEN", "ELSE", "END", "NULL", "OVER", "PARTITION BY"],
+  where: ["AND", "OR", "NOT", "IN", "NOT IN", "LIKE", "BETWEEN", "IS NULL", "IS NOT NULL", "NULL", "EXISTS", "NOT EXISTS", "CASE", "WHEN", "THEN", "ELSE", "END"],
+  order: ["ASC", "DESC", "CASE", "WHEN", "THEN", "ELSE", "END"],
+};
+function clauseSuggestions(input: string, caret: number, columns: string[], syntax: string[], clause: Clause): Suggestion[] {
+  const before = input.slice(0, caret);
+  if ((before.match(/'/g)?.length ?? 0) % 2 !== 0) return [];
+  const tail = before.match(/(?:\[[^\]]*|[\p{L}\p{N}_$#@]*)$/u)?.[0] ?? "";
+  const prefix = before.slice(0, before.length - tail.length);
   const search = tail.replace(/^\[/, "").toLowerCase();
-  return columns.filter((name) => name.toLowerCase().includes(search))
-    .slice(0, 24).map((name) => prefix + quote(name));
+  const after = input.slice(caret);
+  const suffix = (tail.startsWith("[") ? after.match(/^(?:[^\]]|\]\])*\]/)?.[0] : undefined)
+    ?? after.match(/^[\p{L}\p{N}_$#@]*/u)?.[0] ?? "";
+  const rest = input.slice(caret + suffix.length);
+  const phrase = before.match(/\b(?:IS(?:\s+NOT)?|NOT|PARTITION)\s+[a-z]*$/i)?.[0];
+  const candidates = [
+    ...columns.map((name) => ({ match: name, label: quote(name), text: quote(name), inside: false })),
+    ...syntax.filter((keyword) => functions.has(keyword) || clauseKeywords[clause].includes(keyword))
+      .map((keyword) => ({ match: keyword, label: keyword, text: functions.has(keyword) ? keyword + "()" : keyword, inside: functions.has(keyword) })),
+  ];
+  return candidates.filter(({ match }) => match.toLowerCase().includes(search))
+    .sort((a, b) => Number(b.match.toLowerCase().startsWith(search)) - Number(a.match.toLowerCase().startsWith(search)))
+    .slice(0, 40)
+    .map(({ label, text, inside }) => {
+      const head = phrase && label.startsWith(phrase.toUpperCase()) ? before.slice(0, -phrase.length) : prefix;
+      return { label, value: head + text + rest, caret: head.length + text.length - Number(inside) };
+    });
 }
 
-function SuggestedInput({ label, placeholder, value, options, disabled, onChange, onSubmit, className }: {
-  label: string; placeholder?: string; value: string; options: string[]; disabled: boolean;
-  onChange: (value: string) => void; onSubmit?: () => void; className?: string;
+function SuggestedInput({ label, placeholder, value, options, disabled, onChange, onChoose, onSubmit, onCaret, className }: {
+  label: string; placeholder?: string; value: string; options: Suggestion[]; disabled: boolean;
+  onChange: (value: string) => void; onChoose?: (value: string) => void;
+  onSubmit?: () => void; onCaret?: (position: number) => void; className?: string;
 }) {
   const id = useId();
+  const inputElement = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false), [active, setActive] = useState(-1);
   const visible = open && options.length > 0 && !disabled;
   const current = active < options.length ? active : -1;
-  function choose(option: string) {
-    onChange(option);
+  useEffect(() => {
+    if (visible && current >= 0) document.getElementById(id + "-" + current)?.scrollIntoView({ block: "nearest" });
+  }, [visible, current, id]);
+  function choose(option: Suggestion) {
+    onChange(option.value);
+    onChoose?.(option.value);
     setOpen(false);
     setActive(-1);
+    if (option.caret !== undefined) requestAnimationFrame(() => {
+      inputElement.current?.setSelectionRange(option.caret!, option.caret!);
+      onCaret?.(option.caret!);
+    });
   }
   return (
     <div className={`relative ${className ?? ""}`}>
-      <input role="combobox" aria-label={label} aria-autocomplete="list"
+      <input ref={inputElement} role="combobox" aria-label={label} aria-autocomplete="list"
         aria-expanded={visible} aria-controls={visible ? id : undefined}
         aria-activedescendant={visible && current >= 0 ? id + "-" + current : undefined}
         placeholder={placeholder ?? label} value={value} disabled={disabled}
         onFocus={() => setOpen(true)} onBlur={() => setOpen(false)}
-        onChange={(event) => { setOpen(true); setActive(-1); onChange(event.target.value); }}
+        onSelect={(event) => onCaret?.(event.currentTarget.selectionStart ?? 0)}
+        onChange={(event) => {
+          setOpen(true);
+          setActive(-1);
+          onCaret?.(event.currentTarget.selectionStart ?? event.target.value.length);
+          onChange(event.target.value);
+        }}
         onKeyDown={(event) => {
+          if (event.ctrlKey && event.code === "Space") { event.preventDefault(); setOpen(true); }
           if (event.key === "Escape") { setOpen(false); setActive(-1); }
           if ((event.key === "ArrowDown" || event.key === "ArrowUp") && options.length) {
             event.preventDefault();
             setOpen(true);
             setActive((event.key === "ArrowDown" ? current + 1 : current <= 0 ? options.length - 1 : current - 1) % options.length);
           }
-          if (event.key === "Enter" && visible && current >= 0) {
+          if (event.key === "Enter" && visible && (current >= 0 || onChoose)) {
             event.preventDefault();
-            choose(options[current]);
+            choose(options[Math.max(0, current)]);
           } else if (event.key === "Enter") onSubmit?.();
         }} />
       {visible && <ul id={id} role="listbox" className="table-suggestions">
         {options.map((option, index) => (
-          <li key={option} id={id + "-" + index} role="option" aria-selected={index === current}
+          <li key={option.label} id={id + "-" + index} role="option" aria-selected={index === current}
             onPointerDown={(event) => event.preventDefault()} onClick={() => choose(option)}>
-            {option}
+            {option.label}
           </li>
         ))}
       </ul>}
@@ -73,15 +116,22 @@ function SuggestedInput({ label, placeholder, value, options, disabled, onChange
   );
 }
 
-export function TableTool({ target, onText, onConnect }: {
+export function TableTool({ scope, target, onText, onConnect, onTableChange }: {
+  scope: string;
   target?: Target;
   onText: (text: string, name: string) => void;
   onConnect: () => void;
+  onTableChange: (table: string) => void;
 }) {
   const [input, setInput] = useState(""), [where, setWhere] = useState(""),
     [orderBy, setOrderBy] = useState(""), [columns, setColumns] = useState(""),
     [mode, setMode] = useState<"data" | "structure">("data"),
-    [names, setNames] = useState<string[]>([]),
+    [catalog, setCatalog] = useState<{ targetId: string; tables: TableName[] }>(),
+    [catalogRevision, setCatalogRevision] = useState(0),
+    [quickCatalog, setQuickCatalog] = useState<{ targetId: string; query: string; tables: TableName[] }>(),
+    [catalogError, setCatalogError] = useState(""),
+    [syntax, setSyntax] = useState<string[]>([]),
+    [carets, setCarets] = useState<Record<Clause, number>>({ select: 0, where: 0, order: 0 }),
     [structure, setStructure] = useState<{ key: string; data: Table }>(),
     [preview, setPreview] = useState<{ key: string; result: Preview }>(),
     [selectedRows, setSelectedRows] = useState<number[]>([]),
@@ -97,34 +147,89 @@ export function TableTool({ target, onText, onConnect }: {
   const targetId = target?.id;
   const schema = name?.schema, table = name?.table;
   const key = JSON.stringify([targetId, schema, table]);
+  const tables = catalog?.targetId === targetId ? catalog?.tables : undefined;
+  const query = input.replace(/[\[\]]/g, "").trim().toLowerCase();
+  const candidates = tables ?? (quickCatalog?.targetId === targetId && quickCatalog?.query === query ? quickCatalog.tables : undefined);
+  const knownTable = !!candidates?.some((entry) =>
+    entry.schema.toLowerCase() === schema?.toLowerCase() && entry.table.toLowerCase() === table?.toLowerCase());
+  const names = useMemo(() => {
+    const terms = query.split(/\s+/).filter(Boolean);
+    const ranked: Suggestion[][] = [[], [], []];
+    for (const { schema, table } of candidates ?? []) {
+      const short = table.toLowerCase();
+      const qualified = schema.toLowerCase() + "." + short;
+      if (!terms.every((term) => qualified.includes(term))) continue;
+      const rank = short === query || qualified === query ? 0 : short.startsWith(query) || qualified.startsWith(query) ? 1 : 2;
+      if (ranked[rank].length >= 40) continue;
+      const value = schema === "dbo" && /^[\p{L}\p{N}_$#@]+$/u.test(table) ? table : quoteSqlName(schema, table);
+      ranked[rank].push({ label: value, value });
+      if (!query && ranked[rank].length === 40) break;
+    }
+    return ranked.flat().slice(0, 40);
+  }, [candidates, query]);
   const currentStructure = structure?.key === key ? structure.data : undefined;
   const currentPreview = preview?.key === key ? preview.result : undefined;
   const fieldNames = currentStructure?.rows.flatMap((row) => row[0] ? [row[0]] : []) ?? [];
   const payload = { targetId, schema, table };
   const canRead = !!targetId && !!name && !task.busy;
   useEffect(() => {
-    if (!targetId) { setNames([]); return; }
+    setCatalog(undefined);
+    setCatalogError("");
+    if (!targetId) return;
+    const cached = tableCatalogCache.get(targetId);
+    if (cached && cached.expires > Date.now()) {
+      setCatalog({ targetId, tables: cached.tables });
+      return;
+    }
+    let current = true;
+    const pending = operation<Table>("table.catalog", { targetId });
+    void pending.promise.then((result) => {
+      if (!current) return;
+      const tables = tableNames(result);
+      if (tableCatalogCache.size >= 16) {
+        const oldest = tableCatalogCache.keys().next().value;
+        if (oldest) tableCatalogCache.delete(oldest);
+      }
+      tableCatalogCache.set(targetId, { tables, expires: Date.now() + 300_000 });
+      setCatalog({ targetId, tables });
+    }).catch((error) => { if (current) setCatalogError((error as Error).message); });
+    return () => {
+      current = false;
+      void pending.cancel().catch(() => {});
+    };
+  }, [targetId, catalogRevision]);
+  useEffect(() => {
+    if (!targetId || tables) return;
+    const cached = tableCatalogCache.get(targetId);
+    if (cached && cached.expires > Date.now()) return;
     let current = true;
     let pending: ReturnType<typeof operation<Table>> | undefined;
     const timer = window.setTimeout(() => {
-      pending = operation<Table>("table.names", { targetId, query: input.replace(/[\[\]]/g, "").trim() });
+      pending = operation<Table>("table.names", { targetId, query });
       void pending.promise.then((result) => {
-        if (current) setNames(result.rows.flatMap(([s, n]) => s && n
-          ? [s === "dbo" && /^[\p{L}\p{N}_$#@]+$/u.test(n) ? n : quoteSqlName(s, n)] : []));
-      }).catch(() => { if (current) setNames([]); });
-    }, 220);
+        if (current) setQuickCatalog({ targetId, query, tables: tableNames(result) });
+      }).catch(() => {});
+    }, query ? 90 : 0);
     return () => {
       current = false;
       window.clearTimeout(timer);
       void pending?.cancel().catch(() => {});
     };
-  }, [targetId, input]);
+  }, [targetId, tables, query, catalogRevision]);
+  useEffect(() => {
+    let current = true;
+    void request<{ text: string; isSnippet: boolean }[]>("sql.complete", { text: "", beforeCaret: "" })
+      .then((items) => {
+        if (current) setSyntax(items.filter((item) => !item.isSnippet).map((item) => item.text));
+      }).catch(() => {});
+    return () => { current = false; };
+  }, []);
   useEffect(() => {
     setSelectedRows([]);
     setMenu(undefined);
     setDrop(undefined);
     setStatus("");
-    if (!targetId || !schema || !table) return;
+    if (!targetId || !schema || !table || !knownTable) return;
     let current = true;
     let pending: ReturnType<typeof operation<Table>> | undefined;
     const timer = window.setTimeout(() => {
@@ -132,14 +237,19 @@ export function TableTool({ target, onText, onConnect }: {
       void pending.promise.then((data) => {
         if (current) setStructure({ key, data });
       }).catch(() => {});
-    }, 220);
+    }, 80);
     return () => {
       current = false;
       window.clearTimeout(timer);
       void pending?.cancel().catch(() => {});
     };
-  }, [key, targetId, schema, table]);
-  useEffect(() => () => { void reading.current?.cancel().catch(() => {}); }, []);
+  }, [key, targetId, schema, table, knownTable]);
+  useEffect(() => () => {
+    const pending = reading.current;
+    if (pending) void pending.cancel().catch(() => {});
+    void (pending?.promise.catch(() => {}) ?? Promise.resolve())
+      .then(() => request("table.releaseSnapshot", { scope })).catch(() => {});
+  }, [scope]);
   useEffect(() => {
     if (!menu && !scriptMenu) return;
     function dismiss(event: PointerEvent) {
@@ -159,29 +269,41 @@ export function TableTool({ target, onText, onConnect }: {
     };
   }, [menu, scriptMenu]);
 
-  const readStructure = async () => {
-    const data = await request<Table>("table.structure", payload);
-    setStructure({ key, data });
+  const readStructure = async (chosen = name) => {
+    if (!chosen || !targetId) return;
+    onTableChange(chosen.schema === "dbo" ? chosen.table : chosen.schema + "." + chosen.table);
+    const data = await request<Table>("table.structure", { targetId, ...chosen });
+    setStructure({ key: JSON.stringify([targetId, chosen.schema, chosen.table]), data });
     setSelectedRows([]);
   };
-  const readData = () => task.run(async () => {
-    if (!canRead) return;
-    const op = operation<Preview>("table.view", {
-      ...payload, where, orderBy,
-      columns: (columns.match(/(?:\[(?:[^\]]|\]\])*\]|[^,\[])+/gu) ?? [])
-        .map((column) => unquote(column.trim())).filter(Boolean),
-    });
+  const readData = (chosen = name, filters = { where, orderBy, select: columns }) => task.run(async () => {
+    if (!chosen || !targetId) return;
+    onTableChange(chosen.schema === "dbo" ? chosen.table : chosen.schema + "." + chosen.table);
+    const op = operation<Preview>("table.view", { scope, targetId, ...chosen, ...filters });
     reading.current = op;
-    try { setPreview({ key, result: await op.promise }); }
+    try { setPreview({ key: JSON.stringify([targetId, chosen.schema, chosen.table]), result: await op.promise }); }
     finally { if (reading.current === op) reading.current = undefined; }
   });
+  function chooseTable(value: string) {
+    const chosen = parseTable(value);
+    if (!chosen) return;
+    const changing = chosen.schema !== schema || chosen.table !== table;
+    if (changing) {
+      setWhere("");
+      setOrderBy("");
+      setColumns("");
+      setCarets({ select: 0, where: 0, order: 0 });
+    }
+    if (mode === "data") void readData(chosen, changing ? { where: "", orderBy: "", select: "" } : undefined);
+    else void task.run(() => readStructure(chosen));
+  }
   function generateScript(kind: "create" | "insert") {
     setScriptMenu(false);
     void task.run(async () => {
       if (!table || !schema || !targetId) return;
       if (kind === "insert") {
         if (currentPreview?.data.rows.length) {
-          const script = await request<string>("table.insertScript", { snapshotId: currentPreview.snapshotId });
+          const script = await request<string>("table.insertScript", { scope, snapshotId: currentPreview.snapshotId });
           onText(script, table + "-insert.sql");
         }
         return;
@@ -195,8 +317,13 @@ export function TableTool({ target, onText, onConnect }: {
     <div className="table-inspection flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-hidden p-3">
       <div className="flex shrink-0 flex-wrap items-center gap-2">
         <SuggestedInput label="Bảng" placeholder="Tên bảng hoặc schema.bảng" options={names} value={input}
-          onChange={setInput} disabled={task.busy} className="table-name-input"
+          onChange={setInput} onChoose={chooseTable} disabled={task.busy} className="table-name-input"
           onSubmit={() => { if (canRead) void (mode === "data" ? readData() : task.run(readStructure)); }} />
+        {targetId && <IconButton label="Tải lại danh sách bảng" onClick={() => {
+          tableCatalogCache.delete(targetId);
+          setQuickCatalog(undefined);
+          setCatalogRevision((version) => version + 1);
+        }}><RefreshCw size={15} /></IconButton>}
         <Button aria-pressed={mode === "data"} variant={mode === "data" ? "secondary" : "ghost"} onClick={() => setMode("data")}>Dữ liệu</Button>
         <Button aria-pressed={mode === "structure"} variant={mode === "structure" ? "secondary" : "ghost"} onClick={() => setMode("structure")}>Cấu trúc</Button>
         <div ref={scriptControls} className="relative">
@@ -211,13 +338,18 @@ export function TableTool({ target, onText, onConnect }: {
         {target ? <span className="muted truncate" title={target.server + " / " + target.database}>{target.database} · {view?.rows.length ?? 0} dòng</span>
           : <Button onClick={onConnect}>Kết nối SQL</Button>}
       </div>
+      {targetId && (!tables || !names.length) && <p className={catalogError ? "form-error" : "muted"} role={catalogError ? "alert" : "status"}>
+        {catalogError || (tables ? "Không tìm thấy bảng phù hợp." : "Đang tải danh sách bảng…")}
+      </p>}
       <div className="flex shrink-0 flex-wrap items-center gap-2">
         {mode === "data" && ([
-          ["columns", "Cột SELECT", columns, setColumns],
+          ["select", "Cột SELECT", columns, setColumns],
           ["where", "WHERE", where, setWhere],
           ["order", "ORDER BY", orderBy, setOrderBy],
         ] as const).map(([field, label, value, setValue]) => (
-          <SuggestedInput key={field} label={label} value={value} options={columnSuggestions(value, fieldNames)}
+          <SuggestedInput key={field} label={label} value={value}
+            options={clauseSuggestions(value, Math.min(carets[field], value.length), fieldNames, syntax, field)}
+            onCaret={(position) => setCarets((old) => old[field] === position ? old : { ...old, [field]: position })}
             onChange={setValue} disabled={task.busy} className="table-filter flex-1" />
         ))}
         <Button variant="primary" disabled={!canRead} onClick={() => void (mode === "data" ? readData() : task.run(readStructure))}>
@@ -229,7 +361,7 @@ export function TableTool({ target, onText, onConnect }: {
       {task.error && <p className="form-error" role="alert">{task.error}</p>}
       {status && <span className="muted" role="status">{status}</span>}
       {view ? (
-        <DataGrid key={mode + key} table={view}
+        <DataGrid key={mode + key} table={view} rangeSelection
           selectedRows={mode === "structure" ? selectedRows : undefined}
           onSelectionChange={mode === "structure" ? setSelectedRows : undefined}
           onRowContextMenu={mode === "structure" && !task.busy ? (row, event) => {
@@ -238,21 +370,22 @@ export function TableTool({ target, onText, onConnect }: {
             setSelectedRows(rows);
             setMenu({
               x: Math.max(8, Math.min(event.clientX, innerWidth - 224)),
-              y: Math.max(8, Math.min(event.clientY, innerHeight - 96)),
+              y: Math.max(8, Math.min(event.clientY, innerHeight - 132)),
               columns: rows.flatMap((index) => view.rows[index]?.[0] ? [view.rows[index][0]!] : []),
             });
           } : undefined} />
       ) : <div className="empty">{task.busy ? "Đang đọc bảng…" : "Chọn bảng để xem cấu trúc hoặc đọc tối đa 1.000 dòng dữ liệu."}</div>}
       {menu && (
         <div ref={contextMenu} className="table-action-menu fixed z-20" style={{ left: menu.x, top: menu.y }} aria-label="Thao tác cột">
-          <Button variant="ghost" onClick={() => {
-            setMenu(undefined);
-            void task.run(async () => {
-              const script = await request<string>("table.addScript", { ...payload, columns: menu.columns });
-              await writeClipboard(script);
-              setStatus("Đã sao chép script ALTER TABLE … ADD.");
-            });
-          }}>Gen ALTER / ADD COLUMN</Button>
+          {([["addScript", "ADD COLUMN"], ["alterScript", "ALTER COLUMN"]] as const).map(([method, label]) =>
+            <Button key={method} variant="ghost" onClick={() => {
+              setMenu(undefined);
+              void task.run(async () => {
+                const script = await request<string>("table." + method, { ...payload, columns: menu.columns });
+                await writeClipboard(script);
+                setStatus("Đã sao chép script " + label + ".");
+              });
+            }}>Gen {label}</Button>)}
           <Button variant="ghost" className="table-drop-action" onClick={() => {
             setMenu(undefined); setDrop(menu.columns);
           }}>DROP COLUMN</Button>

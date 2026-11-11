@@ -33,6 +33,7 @@ export type QueryResult = {
 };
 export type Settings = {
   theme: string;
+  accentColor?: string | null;
   workspace: string | null;
   server: string;
   database: string;

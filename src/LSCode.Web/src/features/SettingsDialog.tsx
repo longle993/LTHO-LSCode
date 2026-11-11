@@ -70,6 +70,17 @@ export function SettingsDialog({
                 onChange={(v) => setDraft({ ...draft, theme: v })}
               />
             </label>
+            <div className="inline-checks">
+              <label>
+                Màu nhấn
+                <input type="color" aria-label="Màu nhấn" value={draft.accentColor || (
+                  draft.theme === "Light" ? "#2563a6" : draft.theme === "High Contrast" ? "#ffff00" : "#88b9ef"
+                )}
+                  onChange={(event) => setDraft({ ...draft, accentColor: event.target.value })} />
+              </label>
+              <Button type="button" variant="ghost" disabled={!draft.accentColor}
+                onClick={() => setDraft({ ...draft, accentColor: null })}>Màu mặc định</Button>
+            </div>
             <label>
               Crystal Reports executable
               <input
