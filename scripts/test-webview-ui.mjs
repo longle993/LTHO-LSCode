@@ -42,8 +42,14 @@ await page.addInitScript(()=>{
       case 'project.refreshConfig':result=projectRoot+'\\web.config';break;
       case 'project.structure.preview':result={path:projectRoot+'\\Controller\\Structure\\App',count:2};break;
       case 'project.structure.clear':result=2;break;
-      case 'project.commands':result=[{entry:{id:'menu1',caption:'Nhân viên',sysId:'HR',commandId:'Dir',link:'nhanvien.aspx'},children:[]},{entry:{id:'menu2',caption:'Bộ phận',sysId:'HR',commandId:'Dept',link:'bophan.aspx'},children:[]},{entry:{id:'separator',caption:'-',sysId:'',commandId:'',link:''},children:[]}];break;
-      case 'project.controller':{const files=controllerFiles(request.payload.link==='bophan.aspx'?'bophan':'nhanvien');result={file:files[0],files};break;}
+      case 'project.commands':result=[{entry:{id:'menu1',caption:'Nhân viên',sysId:'HR',commandId:'Dir',link:'nhanvien.aspx'},children:[]},{entry:{id:'menu2',caption:'Bộ phận',sysId:'HR',commandId:'Dept',link:'bophan.aspx'},children:[]},{entry:{id:'menu3',caption:'Thông tin nhân viên',sysId:'HR',commandId:'Info',link:'hrEmployeeInformation.aspx'},children:[]},{entry:{id:'separator',caption:'-',sysId:'',commandId:'',link:''},children:[]}];break;
+      case 'project.employeeTabs':result=[{sysId:'hrPIGeneralInformation',caption:'Thông tin chung'},{sysId:'hrPIPassportVisa',caption:'Hộ chiếu, thị thực'}];break;
+      case 'project.controller':{
+        const link=request.payload.link;
+        const files=controllerFiles(link==='hrEmployeeInformation.aspx'?'hrPIGeneralInformation':link.replace(/\.aspx$/,''));
+        if(link==='hrEmployeeInformation.aspx') files[0]=projectRoot+'\\Main\\hrEmployeeInformation.aspx';
+        result={file:files[0],files};break;
+      }
       case 'project.details':result={programPath:'C:\\Fixture\\program.exe',updatePath:'C:\\Fixture\\update',metadata:'<project><FolderName>Dự án thử UI</FolderName></project>'};break;
       case 'window.new':result=true;break;
       case 'recovery.load':result=[];break;
@@ -87,7 +93,14 @@ await page.addInitScript(()=>{
         views:[{name:'Dir', columns:[], layout:{widths:[120,40,60,320],rows:[
           [{name:'nam',label:'Năm',isLabel:true,column:1,span:1},{name:'nam',label:'Năm',isLabel:false,column:2,span:2}],
           [{name:'ma_nv',label:'Mã nhân viên',isLabel:false,column:4,span:1}]
-        ]}}]
+        ],categories:[{label:'Chi tiết',widths:[540],rows:[
+          [{name:'method',label:'Cách tính',description:'1 - Theo thời gian',column:1,span:1}],
+          [{name:'salary',label:'Bảng lương',column:1,span:1,detail:{controller:'SalaryDetail',columns:[
+            {name:'rate',label:'Mức lương',width:90}
+          ]}}]
+        ]},{label:'Phụ cấp',widths:[540],rows:[
+          [{name:'allowance',label:'Mức phụ cấp',column:1,span:1}]
+        ]}]}}]
       } : {kind:'grid',title:'Cập nhật thông tin lương nhân viên',subtitle:'Cập nhật thông tin lương, tài khoản ngân hàng…',
         toolbar:['Sửa','Tìm','Xem'],views:[{name:'Grid',columns:[{name:'ma_nv',label:'Mã nhân viên',width:110},
           {name:'ten',label:'Họ và tên',width:160},{name:'ma_bp',label:'Bộ phận',width:240}]}]};break;
@@ -183,12 +196,16 @@ try{
   check(await profiler.isVisible() && await page.locator('.editor-toolbar').getByRole('tab',{name:'SQL Profiler'}).isVisible()
     && !(await page.locator('dialog[open]').count()),'Profiler opens on the editor toolbar without a dialog');
   check(await profiler.getByRole('textbox',{name:'Profiler user'}).inputValue()==='profile'&&await profiler.locator('input[type=password]').inputValue()==='fsd','Profiler defaults to dedicated SQL login');
-  check(await profiler.getByRole('button',{name:'Profiler engine'}).count()===1,'Profiler provider selector available');
+  check(await profiler.getByRole('button',{name:/^(Profiler engine|Lưu trace|Mở trace)$/}).count()===0 &&
+    await profiler.getByRole('textbox',{name:'Đường dẫn template'}).count()===0,
+    'Profiler hides the engine selector, template field and trace file buttons');
   const executions=await page.evaluate(()=>window.__nativeCalls.filter(c=>c.method==='sql.execute').length);
   await page.keyboard.press('F5');
   check(await page.evaluate(before=>window.__nativeCalls.filter(c=>c.method==='sql.execute').length===before,executions),'Profiler tab shortcuts do not run the hidden editor query');
   await page.evaluate(()=>window.__traceBatch.push(...Array.from({length:60},(_,i)=>({time:String(i),event:'Event '+i,database:'Fixture_App',login:'profile',durationMs:1,reads:0,text:'SELECT '+i}))));
   await profiler.getByRole('button',{name:'Chạy',exact:true}).click();
+  await page.waitForFunction(()=>window.__nativeCalls.some(c=>c.method==='profiler.start' &&
+    c.payload.engine==='ssms18' && !Object.hasOwn(c.payload,'templatePath')));
   await page.waitForFunction(()=>document.querySelector('.trace-sql')?.value==='SELECT 59');
   check(await profiler.locator('.trace-sql').evaluate(element=>element.clientHeight>=110),'Profiler SQL area has room for more lines');
   const traceGrid=profiler.locator('.data-grid');
@@ -240,7 +257,10 @@ try{
   await page.getByRole('button').filter({hasText:'Dự án thử UI'}).waitFor();
   check(await page.evaluate(()=>window.__nativeCalls.some(c=>c.method==='project.sync'&&c.payload.name==='Project Fixture')),'Project picker syncs and returns to the catalog');
   await page.getByRole('button',{name:'Đóng',exact:true}).click();
+  const openTabsBeforeProject=await page.locator('.document-tabs [role="tab"]').count();
   await page.getByRole('button',{name:'Chọn dự án',exact:true}).click();await page.getByRole('button').filter({hasText:'Dự án thử UI'}).click({button:'right'});await page.getByRole('textbox',{name:'Đường dẫn chương trình',exact:true}).waitFor();check(await page.getByRole('textbox',{name:'Đường dẫn chương trình',exact:true}).inputValue().then(v=>v.endsWith('program.exe')),'Project right click opens editable details');await page.getByRole('button',{name:'Danh sách',exact:true}).click();await page.getByRole('button').filter({hasText:'Dự án thử UI'}).click();await page.locator('dialog').waitFor({state:'detached'});await page.waitForTimeout(150);
+  check(await page.locator('.document-tabs [role="tab"]').count()===openTabsBeforeProject &&
+    await page.getByRole('button',{name:'SQL mới',exact:true}).isVisible(),'Opening a project starts with an empty editor and creates no query tab');
   check(await page.evaluate(()=>window.__nativeCalls.some(c=>c.method==='project.commands'&&c.payload.targetId==='project-sys')),'Project selection automatically loads SYS functions');
   await page.getByRole('button',{name:'Làm mới web.config',exact:true}).click();
   await page.getByText('Đã lưu lại web.config',{exact:true}).waitFor();
@@ -260,6 +280,7 @@ try{
   check(await page.evaluate(()=>!window.__nativeCalls.some(c=>c.method==='schema.objects'&&c.payload.targetId==='project-app')),'DB stays unloaded until its sidebar is opened');
   await page.getByRole('button',{name:'DB',exact:true}).click();await page.waitForTimeout(100);check(await page.evaluate(()=>window.__nativeCalls.some(c=>c.method==='schema.objects'&&c.payload.targetId==='project-app')),'Opening DB lazily loads current App target');
   const countBefore=await page.evaluate(()=>window.__nativeCalls.filter(c=>c.method==='schema.objects').length);await page.getByRole('button',{name:'File',exact:true}).click();await page.getByRole('button',{name:'DB',exact:true}).click();await page.waitForTimeout(50);check(await page.evaluate(()=>window.__nativeCalls.filter(c=>c.method==='schema.objects').length)===countBefore,'Reopening DB retains already loaded objects');
+  await page.getByRole('button',{name:'SQL mới',exact:true}).click();
   await page.keyboard.press('Control+Alt+d');await page.waitForTimeout(100);check((await page.getByRole('button',{name:'Database của tab',exact:true}).textContent()).includes('Fixture_Sys'),'Ctrl+Alt+D switches to SYS');check(await page.evaluate(()=>window.__nativeCalls.some(c=>c.method==='schema.objects'&&c.payload.targetId==='project-sys')),'Visible DB follows the current database after switching');
   const objectSearch=page.getByRole('textbox',{name:'Tên hoặc nội dung object'});
   await objectSearch.fill('D');await objectSearch.fill('Da');await objectSearch.fill('Danh');
@@ -275,6 +296,27 @@ try{
   const dirFile=fileTree.getByTitle(dirPath+'\\nhanvien.xml',{exact:true});
   const gridFile=fileTree.getByTitle(gridPath+'\\nhanvien.xml',{exact:true});
   await dirFile.waitFor();await gridFile.waitFor();
+  const workspaceResize=page.getByRole('separator',{name:'Đổi chiều rộng Không gian dự án'});
+  const sidebar=page.locator('#project-sidebar');
+  const initialWidth=(await sidebar.boundingBox()).width;
+  const grip=await workspaceResize.boundingBox();
+  await page.mouse.move(grip.x+3,grip.y+80);
+  await page.mouse.down();
+  await page.mouse.move(grip.x+83,grip.y+80,{steps:4});
+  await page.mouse.up();
+  await page.waitForFunction(width=>document.querySelector('#project-sidebar').getBoundingClientRect().width>=width+70,initialWidth);
+  await workspaceResize.press('ArrowLeft');
+  await page.waitForFunction(()=>window.__nativeCalls.some(call=>call.method==='settings.save'&&call.payload.settings.explorerWidth));
+  check(true,'Workspace width supports pointer, keyboard and saved settings');
+  await page.getByRole('button',{name:'Cài đặt',exact:true}).click();
+  await page.getByRole('button',{name:'Cỡ chữ Không gian dự án',exact:true}).click();
+  await page.getByRole('option',{name:'14 px',exact:true}).click();
+  await page.getByRole('button',{name:'Cỡ chữ editor',exact:true}).click();
+  await page.getByRole('option',{name:'18 px',exact:true}).click();
+  await page.getByRole('button',{name:'Lưu cài đặt',exact:true}).click();
+  await page.locator('dialog[open]').waitFor({state:'detached'});
+  check(await dirFile.evaluate(row=>getComputedStyle(row).fontSize==='14px'),
+    'Workspace font size applies to the file tree');
   check(await fileTree.getByRole('button',{name:'App_Data',exact:true}).getAttribute('aria-expanded')==='true' &&
     await fileTree.getByRole('button',{name:'Controllers',exact:true}).getAttribute('aria-expanded')==='true',
     'ERP function reveals actual App_Data and Controllers ancestors');
@@ -288,6 +330,9 @@ try{
   check(await fileTree.locator('.category-heading').first().evaluate(element => getComputedStyle(element).borderTopWidth==='2px'),
     'The category color stripe sits above the folder heading');
   await dirFile.click();await gridFile.click();
+  check(await page.locator('.monaco-editor .view-lines').first().evaluate(lines=>getComputedStyle(lines).fontSize==='18px'),
+    'Editor font size applies to Monaco');
+  await sidebar.screenshot({path:out+'/workspace-tree-design.png'});
   check(await page.locator('.document-tabs .document-tab.active').evaluate(element => {
     const style = getComputedStyle(element);
     return style.borderBottomWidth === '2px' && style.borderTopWidth === '0px';
@@ -312,6 +357,19 @@ try{
     await dirDialog.getByRole('textbox',{name:'Năm',exact:true}).evaluate(input=>input.parentElement.style.gridColumn==='2 / span 2') &&
     await dirDialog.getByRole('textbox',{name:'Mã nhân viên',exact:true}).evaluate(input=>input.parentElement.style.gridColumn==='4 / span 1'),
     'Dir preview shows labels and keeps field spans and positions');
+  const dirTabs=dirDialog.getByRole('tablist',{name:'Nhóm Dir'});
+  check((await dirTabs.getByRole('tab').allTextContents()).join('|')==='Chi tiết|Phụ cấp',
+    'Dir categories follow view order');
+  await dirTabs.getByRole('tab',{name:'Chi tiết'}).click();
+  check(await dirDialog.getByText('1 - Theo thời gian',{exact:true}).isVisible() &&
+    await dirDialog.getByRole('textbox',{name:'Năm',exact:true}).isVisible() &&
+    await dirDialog.getByRole('table',{name:'Bảng lương'}).getByRole('columnheader',{name:'Mức lương'}).isVisible(),
+    'Dir preview shows only the active category fields and detail Grid');
+  await dirTabs.getByRole('tab',{name:'Chi tiết'}).press('ArrowRight');
+  check(await dirDialog.getByRole('textbox',{name:'Mức phụ cấp'}).isVisible() &&
+    await dirDialog.getByRole('textbox',{name:'Năm',exact:true}).isVisible() &&
+    !await dirDialog.getByRole('table',{name:'Bảng lương'}).count(),
+    'Keyboard switches Dir categories without retaining the previous Grid');
   await dirDialog.getByRole('button',{name:'Đóng',exact:true}).click();
   const colored=()=>page.evaluate(()=>{
     const lines=[...document.querySelectorAll('.editor-group.focused .view-line')];
@@ -328,6 +386,23 @@ try{
   check(await page.locator('.editor-group.focused .view-line').evaluateAll(lines => lines.some(line =>
     [...line.querySelectorAll('span')].some(span => span.textContent === '<![CDATA[' && /rgb\(99, 217, 144\)/.test(getComputedStyle(span).color)))),
     'CDATA opening delimiter is highlighted in green');
+  const xmlEditor=page.locator('.editor-group.focused .monaco-editor').first();
+  await xmlEditor.click({position:{x:125,y:25}});
+  await page.keyboard.press('Control+Home');
+  for(let i=0;i<3;i++) await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Home');
+  for(let i=0;i<'<command><text><![CDATA[SELECT '.length;i++) await page.keyboard.press('ArrowRight');
+  await page.keyboard.type('@@');
+  const partitionSuggestion=xmlEditor.locator('.suggest-widget .monaco-list-row').filter({hasText:'@@prime$partition$current'});
+  await partitionSuggestion.waitFor();
+  await page.keyboard.type('prime$partition$c');
+  await xmlEditor.locator('.suggest-widget .monaco-list-row.focused').filter({hasText:'@@prime$partition$current'}).waitFor();
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(()=>document.querySelector('.editor-group.focused .view-lines')?.textContent.includes('@@prime$partition$current'));
+  check(await xmlEditor.locator('.view-lines').textContent().then(text=>text.includes('@@prime$partition$current')),
+    'Embedded XML SQL suggests and inserts FAST session variables with dollar signs');
+  await page.keyboard.press('Control+z');
+  await page.keyboard.press('Control+z');
   await page.getByRole('button',{name:/^Vấn đề/}).click();
   await page.getByText(/Cảnh báo · Field 'missing'/).waitFor();
   check(true,'ERP XML warnings are listed with their severity');
@@ -395,6 +470,20 @@ try{
   check(await employeeGroup.count()===0 && await page.getByRole('tab',{name:'nhanvien-doi.xml',exact:true}).count()===1,
     'Closing a controller removes its group and preserves its editor tabs');
   await page.screenshot({path:out+'/erp-controller-groups.png'});
+  await page.getByRole('button',{name:'Chức năng',exact:true}).click();
+  await page.getByRole('button',{name:'Thông tin nhân viên',exact:true}).click();
+  const functionTabs=sidebar.getByRole('button',{name:'Tab chức năng',exact:true});
+  await functionTabs.click();
+  const passport=sidebar.getByRole('button',{name:'Hộ chiếu, thị thực',exact:true});
+  await passport.click();
+  await fileTree.getByTitle(dirPath+'\\hrPIPassportVisa.xml',{exact:true}).waitFor();
+  check(await passport.getAttribute('aria-current')==='true' &&
+    await page.evaluate(()=>window.__nativeCalls.some(c=>c.method==='project.employeeTabs'&&c.payload.targetId==='project-sys')),
+    'Employee tabs load from the project SYS connection and switch the file tree by sysid');
+  await sidebar.getByRole('button',{name:'Thông tin chung',exact:true}).click();
+  await fileTree.getByTitle(dirPath+'\\hrPIGeneralInformation.xml',{exact:true}).waitFor();
+  await departmentGroup.click();
+  check(await functionTabs.count()===0,'Employee tabs hide when a different ERP function is selected');
   await page.keyboard.press('Control+Shift+f');
   await page.getByRole('button',{name:'Phạm vi tìm kiếm',exact:true}).click();
   await page.getByRole('option',{name:/Controllers.*Dir$/}).click();
@@ -411,6 +500,12 @@ try{
     'Table tool tab is on the editor toolbar next to the breadcrumb');
   check(!(await page.locator('dialog[open]').count())&&!(await tablePanel.getByLabel('Schema',{exact:true}).count()),'Table inspection opens as a tab with a single table field');
   const tableInput=tablePanel.getByRole('combobox',{name:'Bảng',exact:true});
+  check(await tableInput.evaluate(input=>input===document.activeElement),'Opening table inspection focuses the table field');
+  for(const name of ['Cột SELECT','WHERE','ORDER BY']){
+    await page.keyboard.press('Tab');
+    check(await tablePanel.getByRole('combobox',{name,exact:true}).evaluate(input=>input===document.activeElement),
+      'Tab focuses '+name+' in input order');
+  }
   await tableInput.fill('danh');
   await tablePanel.getByRole('option',{name:'DanhMuc',exact:true}).waitFor();
   check(await page.evaluate(()=>window.__nativeCalls.some(call=>call.method==='table.names'&&call.payload.query==='danh')),
@@ -434,9 +529,12 @@ try{
     !window.__nativeCalls.some(c=>c.method==='table.structure'&&c.payload.table==='danh')),
     'Table search reuses one catalog and opens the selected table immediately');
   await tablePanel.getByRole('combobox',{name:'WHERE',exact:true}).fill('co');
-  await tablePanel.getByRole('option',{name:'[code]',exact:true}).waitFor();
-  await tablePanel.getByRole('combobox',{name:'WHERE',exact:true}).fill('');
-  check(true,'Table and column suggestions are populated');
+  await tablePanel.getByRole('option',{name:'code',exact:true}).waitFor();
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Tab');
+  check(await tablePanel.getByRole('combobox',{name:'WHERE',exact:true}).inputValue()==='code' &&
+    await tablePanel.getByRole('combobox',{name:'ORDER BY',exact:true}).evaluate(input=>input===document.activeElement),
+    'Tab inserts a selected ordinary column without brackets and moves to the next field');
   const selectInput=tablePanel.getByRole('combobox',{name:'Cột SELECT',exact:true});
   await selectInput.fill('cou');
   await selectInput.press('Escape');
@@ -446,7 +544,7 @@ try{
   check(await selectInput.inputValue()==='COUNT()','SQL function completion inserts parentheses and places the caret inside');
   await selectInput.fill('COUNT(*) AS total');
   const whereInput=tablePanel.getByRole('combobox',{name:'WHERE',exact:true});
-  await whereInput.fill('[code] IS');
+  await whereInput.fill('code IS NOT N');
   await tablePanel.getByRole('option',{name:'IS NOT NULL',exact:true}).click();
   const orderInput=tablePanel.getByRole('combobox',{name:'ORDER BY',exact:true});
   await orderInput.fill('total DE');
@@ -454,7 +552,7 @@ try{
   await page.screenshot({path:out+'/table-catalog-sql.png'});
   await tablePanel.getByRole('button',{name:'Đọc dữ liệu',exact:true}).click();
   await page.waitForFunction(()=>window.__nativeCalls.some(c=>c.method==='table.view' &&
-    c.payload.select==='COUNT(*) AS total' && c.payload.where==='[code] IS NOT NULL' && c.payload.orderBy==='total DESC'));
+    c.payload.select==='COUNT(*) AS total' && c.payload.where==='code IS NOT NULL' && c.payload.orderBy==='total DESC'));
   check(true,'SELECT, WHERE and ORDER BY suggestions produce SQL expressions in the query');
   await tablePanel.getByRole('button',{name:'Cấu trúc',exact:true}).click();
   await tablePanel.getByText('PK · PK_DanhMuc',{exact:true}).waitFor();
@@ -502,6 +600,16 @@ try{
     'Inspection tabs reuse the cached catalog for the same connection');
   await page.getByRole('button',{name:'SQL Profiler',exact:true}).click();
   await secondTableTab.click();
+  const tableDatabase=secondTablePanel.getByRole('button',{name:'Database của cấu trúc và dữ liệu',exact:true});
+  const nextDb=(await tableDatabase.textContent()).includes('Fixture_App')?'Fixture_Sys':'Fixture_App';
+  await tableDatabase.click();
+  await secondTablePanel.getByRole('option',{name:new RegExp(nextDb)}).click();
+  check(await secondTablePanel.locator('.data-grid').count()===0 &&
+    await secondTableInput.inputValue()==='DanhMuc_Archive','Switching App/Sys keeps the table name and clears the old preview');
+  await secondTablePanel.getByRole('button',{name:'Đọc dữ liệu',exact:true}).click();
+  await page.waitForFunction(db=>window.__nativeCalls.filter(c=>c.method==='table.view').at(-1)?.payload.targetId===db,
+    nextDb==='Fixture_Sys'?'project-sys':'project-app');
+  check(true,'Table inspection reads from the selected App or Sys connection');
   await page.screenshot({path:out+'/sql-workspace-tabs.png'});
   await page.setViewportSize({width:375,height:600});
   check(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),

@@ -4,8 +4,10 @@ public sealed record ViewWidth(string Field, int Width, int[] Columns);
 public static class XmlViewWidths
 {
     internal static readonly Regex LayoutMask = new(@"^\s*(?<slots>[01-]+)\s*:");
-    internal static readonly Regex LayoutFields = new(@"\[(?<name>[^\]\r\n]+)\](?<label>\s*\.Label\b)?",
+    internal static readonly Regex LayoutFields = new(@"\[(?<name>[^\]\r\n]+)\](?:\s*\.(?:(?<label>Label)|(?<description>Description))\b)?",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    internal static bool IsField(Match reference) =>
+        !reference.Groups["label"].Success && !reference.Groups["description"].Success;
     internal static string FieldName(string name) =>
         name.Trim().EndsWith("%l", StringComparison.OrdinalIgnoreCase) ? name.Trim()[..^2] : name.Trim();
     internal static IEnumerable<(int Start, int Length)> Spans(string slots)

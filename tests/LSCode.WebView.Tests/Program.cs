@@ -148,6 +148,36 @@ Check(dirPreview is { Kind: "dir", Title: "Khai báo nhân viên", Subtitle: "Th
         new DirPreviewCell("nam", "Năm", true, 1, 1), new DirPreviewCell("nam", "Năm", false, 2, 2)
     ]) && dirLayout.Rows[1].SequenceEqual([new DirPreviewCell("ma_nv", "Mã nhân viên", false, 4, 1)]),
     "Dir preview honors label cells, zero spans, skipped columns and hidden-field gaps");
+var detailGridDirectory = Directory.CreateDirectory(Path.Combine(controllers, "Grid")).FullName;
+var detailGridFile = Path.Combine(detailGridDirectory, "SalaryDetail.f");
+await File.WriteAllTextAsync(detailGridFile, """
+    <grid><fields><field name="rate" width="90"><header v="Mức lương"/></field></fields>
+    <views><view id="Grid"><field name="rate"/></view></views></grid>
+    """);
+const string dirWithDetail = """
+    <dir>
+      <fields>
+        <field name="method" categoryIndex="1"><footer v="1 - Theo thời gian"/></field>
+        <field name="salary" external="true" categoryIndex="3"><label v="Chi tiết"/>
+          <items style="Grid" controller="SalaryDetail" row="2"/></field>
+      </fields>
+      <views><view id="Dir">
+        <item value="1: [salary]"/>
+        <item value="11: [method], [method].Description"/>
+        <categories>
+          <category index="1" columns="100,150"><header v="Thông tin"/></category>
+          <category index="3" columns="300,400"><header v="Chi tiết"/></category>
+        </categories>
+      </view></views>
+    </dir>
+    """;
+var detailCategories = XmlControllerPreview.Read(dirWithDetail, dirFile).Views.Single().Layout!.Categories;
+Check(XmlTools.InspectEditor(dirWithDetail).Warnings.Count == 0 &&
+    detailCategories.Select(category => category.Label).SequenceEqual(["Thông tin", "Chi tiết"]) &&
+    detailCategories[0].Rows[0][1].Description == "1 - Theo thời gian" &&
+    detailCategories[1].Widths.SequenceEqual([300, 400]) &&
+    detailCategories[1].Rows[0][0] is { Span: 2, Detail.Columns: [{ Label: "Mức lương", Width: 90 }] },
+    "Dir preview excludes descriptions from field counts, uses footers, and renders Grid detail in view category order");
 var xmlDiagnostics = XmlTools.InspectEditor("\uFEFF" + """
     <?xml version="1.0" encoding="utf-8"?>
     <!DOCTYPE dir [<!ENTITY example "ERP">]>
@@ -279,12 +309,55 @@ if (args.Contains("--sql"))
     var admin = (TargetInfo)(await Call("sql.connect", new { server, database = "master", integratedSecurity = true, trustCertificate = true }))!;
     var database = "LSCodeWebViewTest_" + Guid.NewGuid().ToString("N");
     if (!Regex.IsMatch(database, "^LSCodeWebViewTest_[a-f0-9]{32}$")) throw new Exception("Unsafe fixture database name");
+    var menuAppDatabase = database + "_App";
+    var menuAppCreated = false;
     await Call("sql.execute", new { targetId = admin.Id, sql = "CREATE DATABASE [" + database + "]" });
     try
     {
         var target = (TargetInfo)(await Call("sql.connect", new { server, database, integratedSecurity = true, trustCertificate = true }))!;
+        await Call("sql.execute", new { targetId = admin.Id, sql = $"CREATE DATABASE [{menuAppDatabase}]" });
+        menuAppCreated = true;
+        var menuAppTarget = (TargetInfo)(await Call("sql.connect", new { server, database = menuAppDatabase, integratedSecurity = true, trustCertificate = true }))!;
+        await Call("sql.execute", new { targetId = menuAppTarget.Id, sql = """
+            CREATE TABLE dbo.denyunitright (r_deny varchar(100));
+            INSERT dbo.denyunitright VALUES ('root,branch,denied');
+            GO
+            CREATE PROCEDURE dbo.[FastBusiness$App$Startup] AS
+            BEGIN
+                UPDATE #t SET bar = N'Startup' WHERE menu_id = 'leaf';
+                SELECT 'startup-result' AS menu_id, '' AS menu_id0, 'Ignore' AS bar;
+            END;
+            """ });
+        await Call("sql.execute", new { targetId = target.Id, sql = """
+            CREATE TABLE dbo.wcommand (wmenu_id varchar(20), wmenu_id0 varchar(20), bar nvarchar(80),
+                link varchar(80), status char(1), sysid varchar(80));
+            INSERT dbo.wcommand VALUES
+                ('root', '', N'Nhóm', '', '', ''),
+                ('branch', 'root', N'Nhánh', '', '', ''),
+                ('leaf', 'branch', N'Menu', 'leaf.aspx', '', 'ControllerLeaf'),
+                ('denied', 'branch', N'Ẩn theo App', '', '', ''),
+                ('disabled', 'branch', N'Ngừng', '', '9', ''),
+                ('orphan', 'missing', N'Mồ côi', '', '', ''),
+                ('empty', '', N'Nhóm trống', '', '', ''),
+                ('separator', 'empty', N'-', '', '', '');
+            """ });
+        var menu = (List<CommandNode>)(await Call("project.commands", new { targetId = target.Id, appDatabase = menuAppDatabase }))!;
+        Check(menu is [{ Entry.Id: "root", Children: [{ Entry.Id: "branch", Children: [{ Entry: { Id: "leaf", Caption: "Startup", Link: "leaf.aspx", CommandId: "leaf", SysId: "ControllerLeaf" } }] }] }],
+            "Menu loads Sys wcommand without userinfo, uses App deny/Startup and retains the required ancestors");
         var batch = (ExecutionResult)(await Call("sql.execute", new { targetId = target.Id, sql = "CREATE TABLE #test(value int);\nGO\nINSERT INTO #test VALUES (42);\nGO\nSELECT value FROM #test;" }))!;
         Check(batch.Tables[0].Rows[0][0] == "42", "SQL keeps connection/temp table across GO batches");
+        await Call("sql.execute", new { targetId = target.Id, sql = """
+            CREATE TABLE dbo.hrtabinfo (id char(2), sysid char(40), bar nvarchar(80), bar2 nvarchar(80));
+            INSERT dbo.hrtabinfo VALUES ('12', 'hrPIPassportVisa', N' ', N'Passport'),
+                ('10', '', N'Thông tin cá nhân', N'Personal information'),
+                ('11', 'hrPIGeneralInformation', N'Thông tin chung', N'General information');
+            """ });
+        var employeeTabs = JsonSerializer.SerializeToElement(await Call("project.employeeTabs", new { targetId = target.Id }), Protocol.Json);
+        Check(employeeTabs.GetArrayLength() == 2 &&
+            employeeTabs[0].GetProperty("caption").GetString() == "Thông tin chung" &&
+            employeeTabs[1].GetProperty("sysId").GetString() == "hrPIPassportVisa" &&
+            employeeTabs[1].GetProperty("caption").GetString() == "Passport",
+            "Employee function tabs omit heading rows, preserve ERP order and return trimmed sysid and localized captions");
         await Call("sql.execute", new { targetId = target.Id, sql = """
             CREATE TABLE dbo.sysgendata (basetable char(30));
             INSERT dbo.sysgendata VALUES ('d46$000000');
@@ -532,6 +605,8 @@ if (args.Contains("--sql"))
     finally
     {
         // This exact database was created above in this test, never a user-selected database.
+        if (menuAppCreated)
+            await Call("sql.execute", new { targetId = admin.Id, sql = $"ALTER DATABASE [{menuAppDatabase}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{menuAppDatabase}]" });
         await Call("sql.execute", new { targetId = admin.Id, sql = "ALTER DATABASE [" + database + "] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [" + database + "]" });
     }
 }

@@ -137,24 +137,42 @@ public static class ProjectDatabase
         }
         return table;
     }
+    public static async Task<IReadOnlyList<EmployeeFunctionTab>> EmployeeFunctionTabsAsync(SqlTarget target, CancellationToken token)
+    {
+        const string sql = """
+            SELECT LTRIM(RTRIM(sysid)),
+                   COALESCE(NULLIF(LTRIM(RTRIM(bar)), N''), NULLIF(LTRIM(RTRIM(bar2)), N''), LTRIM(RTRIM(sysid)))
+            FROM dbo.hrtabinfo
+            WHERE NULLIF(LTRIM(RTRIM(sysid)), N'') IS NOT NULL
+            ORDER BY id, sysid
+            """;
+        var table = await ReadAsync(target, sql, token).ConfigureAwait(false);
+        return table.Rows.Cast<DataRow>()
+            .Select(row => new EmployeeFunctionTab((string)row[0], (string)row[1]))
+            .ToArray();
+    }
+
+    public sealed record EmployeeFunctionTab(string SysId, string Caption);
+
     public static async Task<List<CommandNode>> CommandsAsync(SqlTarget target, CancellationToken token, string? appDatabase = null)
     {
         appDatabase ??= System.Text.RegularExpressions.Regex.Replace(target.Database, @"_(?:Sys|S)$", "_A", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-        if (appDatabase == target.Database) throw new InvalidOperationException("App database must be configured for menu loading.");
+        if (string.IsNullOrWhiteSpace(appDatabase) || appDatabase.Equals(target.Database, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("App database must be configured for menu loading.");
         var columns = await ReadAsync(target, "SELECT name FROM sys.columns WHERE object_id=OBJECT_ID('dbo.wcommand')", token);
         var names = columns.Rows.Cast<DataRow>().Select(r => Convert.ToString(r[0])!).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (var required in new[] { "wmenu_id", "wmenu_id0", "menu_id", "bar" })
+        foreach (var required in new[] { "wmenu_id", "wmenu_id0", "bar" })
             if (!names.Contains(required)) throw new InvalidOperationException("wcommand missing required column: " + required);
         string Column(string name) => names.Contains(name) ? "a." + Quote(name) : "CAST('' AS nvarchar(4000))";
         var projection = "a.wmenu_id AS menu_id,a.wmenu_id0 AS menu_id0,RTRIM(a.bar) AS bar," + Column("link") + " AS link,CASE WHEN " + Column("icon") + "='' THEN " + Column("icon_url") + " ELSE '' END AS icon_url," + Column("icon") + " AS icon," + Column("status") + " AS status,RTRIM(" + Column("target") + ") AS target";
         var app = Quote(appDatabase);
-        var metadata = await ReadAsync(target, "SELECT a.wmenu_id,a.menu_id," + Column("sysid") + " AS sysid FROM dbo.wcommand a", token);
+        var commandId = names.Contains("menu_id") ? "a.menu_id" : "a.wmenu_id";
+        var metadata = await ReadAsync(target, "SELECT a.wmenu_id," + commandId + "," + Column("sysid") + " AS sysid FROM dbo.wcommand a", token);
         var details = metadata.Rows.Cast<DataRow>().GroupBy(r => Convert.ToString(r[0])?.Trim() ?? "")
             .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
         var sql = $"""
             SET NOCOUNT ON;
-            SELECT {projection} INTO #t FROM dbo.wcommand a JOIN dbo.userinfo b ON b.id='2'
-            WHERE PATINDEX('%'+RTRIM(a.menu_id)+'%',b.r_access)<>0 OR b.admin=1;
+            SELECT {projection} INTO #t FROM dbo.wcommand a;
             DELETE #t WHERE status='9';
             DELETE a FROM #t a WHERE menu_id0='' AND NOT EXISTS(SELECT 1 FROM #t WHERE menu_id0=a.menu_id AND bar<>'-');
             SELECT {projection} INTO #z FROM dbo.wcommand a JOIN {app}..denyunitright b ON PATINDEX('%'+RTRIM(a.wmenu_id)+'%',b.r_deny)>0;

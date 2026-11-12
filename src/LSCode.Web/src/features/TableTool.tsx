@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Play, RefreshCw } from "lucide-react";
-import { Button, DataGrid, IconButton, Modal } from "../ui";
+import { Button, DataGrid, IconButton, Modal, Select } from "../ui";
 import { operation, quoteSqlName, request, writeClipboard } from "../bridge";
 import type { Table, Target } from "../bridge";
 import { useTask } from "./useTask";
@@ -25,11 +25,11 @@ const parseTable = (input: string): TableName | undefined => {
 const quote = (name: string) => "[" + name.replaceAll("]", "]]") + "]";
 const functions = new Set(["ISNULL", "COALESCE", "COUNT", "SUM", "AVG", "MIN", "MAX", "GETDATE", "DATEADD", "DATEDIFF", "CAST", "CONVERT", "ROW_NUMBER"]);
 const clauseKeywords: Record<Clause, string[]> = {
-  select: ["AS", "CASE", "WHEN", "THEN", "ELSE", "END", "NULL", "OVER", "PARTITION BY"],
+  select: ["AS", "DISTINCT", "CASE", "WHEN", "THEN", "ELSE", "END", "NULL", "OVER", "PARTITION BY"],
   where: ["AND", "OR", "NOT", "IN", "NOT IN", "LIKE", "BETWEEN", "IS NULL", "IS NOT NULL", "NULL", "EXISTS", "NOT EXISTS", "CASE", "WHEN", "THEN", "ELSE", "END"],
   order: ["ASC", "DESC", "CASE", "WHEN", "THEN", "ELSE", "END"],
 };
-function clauseSuggestions(input: string, caret: number, columns: string[], syntax: string[], clause: Clause): Suggestion[] {
+function clauseSuggestions(input: string, caret: number, columns: string[], clause: Clause): Suggestion[] {
   const before = input.slice(0, caret);
   if ((before.match(/'/g)?.length ?? 0) % 2 !== 0) return [];
   const tail = before.match(/(?:\[[^\]]*|[\p{L}\p{N}_$#@]*)$/u)?.[0] ?? "";
@@ -40,22 +40,32 @@ function clauseSuggestions(input: string, caret: number, columns: string[], synt
     ?? after.match(/^[\p{L}\p{N}_$#@]*/u)?.[0] ?? "";
   const rest = input.slice(caret + suffix.length);
   const phrase = before.match(/\b(?:IS(?:\s+NOT)?|NOT|PARTITION)\s+[a-z]*$/i)?.[0];
+  const phrasePrefix = phrase?.toLowerCase().replace(/\s+/g, " ");
   const candidates = [
-    ...columns.map((name) => ({ match: name, label: quote(name), text: quote(name), inside: false })),
-    ...syntax.filter((keyword) => functions.has(keyword) || clauseKeywords[clause].includes(keyword))
-      .map((keyword) => ({ match: keyword, label: keyword, text: functions.has(keyword) ? keyword + "()" : keyword, inside: functions.has(keyword) })),
+    ...columns.map((name) => ({
+      match: name, label: name,
+      text: tail.startsWith("[") || !/^[\p{L}_][\p{L}\p{N}_$#@]*$/u.test(name) ? quote(name) : name,
+      inside: false, phraseMatch: false,
+    })),
+    ...[...clauseKeywords[clause], ...functions].map((keyword) => ({
+      match: keyword, label: keyword, text: functions.has(keyword) ? keyword + "()" : keyword,
+      inside: functions.has(keyword), phraseMatch: !!phrasePrefix && keyword.toLowerCase().startsWith(phrasePrefix),
+    })),
   ];
-  return candidates.filter(({ match }) => match.toLowerCase().includes(search))
-    .sort((a, b) => Number(b.match.toLowerCase().startsWith(search)) - Number(a.match.toLowerCase().startsWith(search)))
+  const rank = (candidate: typeof candidates[number]) =>
+    candidate.phraseMatch ? 0 : candidate.match.toLowerCase().startsWith(search) ? 1 : 2;
+  return candidates.filter(({ match, phraseMatch }) => phraseMatch || match.toLowerCase().includes(search))
+    .sort((a, b) => rank(a) - rank(b))
     .slice(0, 40)
-    .map(({ label, text, inside }) => {
-      const head = phrase && label.startsWith(phrase.toUpperCase()) ? before.slice(0, -phrase.length) : prefix;
+    .map(({ label, text, inside, phraseMatch }) => {
+      const head = phrase && phraseMatch ? before.slice(0, -phrase.length) : prefix;
       return { label, value: head + text + rest, caret: head.length + text.length - Number(inside) };
     });
 }
 
-function SuggestedInput({ label, placeholder, value, options, disabled, onChange, onChoose, onSubmit, onCaret, className }: {
+function SuggestedInput({ label, placeholder, value, options, disabled, focus, onChange, onChoose, onSubmit, onCaret, className }: {
   label: string; placeholder?: string; value: string; options: Suggestion[]; disabled: boolean;
+  focus?: boolean;
   onChange: (value: string) => void; onChoose?: (value: string) => void;
   onSubmit?: () => void; onCaret?: (position: number) => void; className?: string;
 }) {
@@ -64,6 +74,9 @@ function SuggestedInput({ label, placeholder, value, options, disabled, onChange
   const [open, setOpen] = useState(false), [active, setActive] = useState(-1);
   const visible = open && options.length > 0 && !disabled;
   const current = active < options.length ? active : -1;
+  useEffect(() => {
+    if (focus) inputElement.current?.focus();
+  }, [focus]);
   useEffect(() => {
     if (visible && current >= 0) document.getElementById(id + "-" + current)?.scrollIntoView({ block: "nearest" });
   }, [visible, current, id]);
@@ -82,8 +95,8 @@ function SuggestedInput({ label, placeholder, value, options, disabled, onChange
       <input ref={inputElement} role="combobox" aria-label={label} aria-autocomplete="list"
         aria-expanded={visible} aria-controls={visible ? id : undefined}
         aria-activedescendant={visible && current >= 0 ? id + "-" + current : undefined}
-        placeholder={placeholder ?? label} value={value} disabled={disabled}
-        onFocus={() => setOpen(true)} onBlur={() => setOpen(false)}
+        placeholder={placeholder ?? label} value={value} readOnly={disabled}
+        onBlur={() => { setOpen(false); setActive(-1); }}
         onSelect={(event) => onCaret?.(event.currentTarget.selectionStart ?? 0)}
         onChange={(event) => {
           setOpen(true);
@@ -92,6 +105,7 @@ function SuggestedInput({ label, placeholder, value, options, disabled, onChange
           onChange(event.target.value);
         }}
         onKeyDown={(event) => {
+          if (disabled || event.nativeEvent.isComposing) return;
           if (event.ctrlKey && event.code === "Space") { event.preventDefault(); setOpen(true); }
           if (event.key === "Escape") { setOpen(false); setActive(-1); }
           if ((event.key === "ArrowDown" || event.key === "ArrowUp") && options.length) {
@@ -99,14 +113,16 @@ function SuggestedInput({ label, placeholder, value, options, disabled, onChange
             setOpen(true);
             setActive((event.key === "ArrowDown" ? current + 1 : current <= 0 ? options.length - 1 : current - 1) % options.length);
           }
-          if (event.key === "Enter" && visible && (current >= 0 || onChoose)) {
+          if (event.key === "Tab" && !event.shiftKey && visible && current >= 0) {
+            choose(options[current]);
+          } else if (event.key === "Enter" && visible && (current >= 0 || onChoose)) {
             event.preventDefault();
             choose(options[Math.max(0, current)]);
           } else if (event.key === "Enter") onSubmit?.();
         }} />
-      {visible && <ul id={id} role="listbox" className="table-suggestions">
+      {visible && <ul id={id} role="listbox" className="table-suggestions" tabIndex={-1}>
         {options.map((option, index) => (
-          <li key={option.label} id={id + "-" + index} role="option" aria-selected={index === current}
+          <li key={option.value + "-" + index} id={id + "-" + index} role="option" aria-selected={index === current}
             onPointerDown={(event) => event.preventDefault()} onClick={() => choose(option)}>
             {option.label}
           </li>
@@ -116,9 +132,12 @@ function SuggestedInput({ label, placeholder, value, options, disabled, onChange
   );
 }
 
-export function TableTool({ scope, target, onText, onConnect, onTableChange }: {
+export function TableTool({ scope, target, targets, visible, onTargetChange, onText, onConnect, onTableChange }: {
   scope: string;
   target?: Target;
+  targets: Target[];
+  visible: boolean;
+  onTargetChange: (target: Target) => void;
   onText: (text: string, name: string) => void;
   onConnect: () => void;
   onTableChange: (table: string) => void;
@@ -130,7 +149,6 @@ export function TableTool({ scope, target, onText, onConnect, onTableChange }: {
     [catalogRevision, setCatalogRevision] = useState(0),
     [quickCatalog, setQuickCatalog] = useState<{ targetId: string; query: string; tables: TableName[] }>(),
     [catalogError, setCatalogError] = useState(""),
-    [syntax, setSyntax] = useState<string[]>([]),
     [carets, setCarets] = useState<Record<Clause, number>>({ select: 0, where: 0, order: 0 }),
     [structure, setStructure] = useState<{ key: string; data: Table }>(),
     [preview, setPreview] = useState<{ key: string; result: Preview }>(),
@@ -217,13 +235,14 @@ export function TableTool({ scope, target, onText, onConnect, onTableChange }: {
     };
   }, [targetId, tables, query, catalogRevision]);
   useEffect(() => {
-    let current = true;
-    void request<{ text: string; isSnippet: boolean }[]>("sql.complete", { text: "", beforeCaret: "" })
-      .then((items) => {
-        if (current) setSyntax(items.filter((item) => !item.isSnippet).map((item) => item.text));
-      }).catch(() => {});
-    return () => { current = false; };
-  }, []);
+    setStructure(undefined);
+    setPreview(undefined);
+    setWhere("");
+    setOrderBy("");
+    setColumns("");
+    setCarets({ select: 0, where: 0, order: 0 });
+    setScriptMenu(false);
+  }, [targetId]);
   useEffect(() => {
     setSelectedRows([]);
     setMenu(undefined);
@@ -317,8 +336,38 @@ export function TableTool({ scope, target, onText, onConnect, onTableChange }: {
     <div className="table-inspection flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-hidden p-3">
       <div className="flex shrink-0 flex-wrap items-center gap-2">
         <SuggestedInput label="Bảng" placeholder="Tên bảng hoặc schema.bảng" options={names} value={input}
-          onChange={setInput} onChoose={chooseTable} disabled={task.busy} className="table-name-input"
+          onChange={setInput} onChoose={chooseTable} disabled={task.busy} focus={visible} className="table-name-input"
           onSubmit={() => { if (canRead) void (mode === "data" ? readData() : task.run(readStructure)); }} />
+        {mode === "data" && ([
+          ["select", "Cột SELECT", columns, setColumns],
+          ["where", "WHERE", where, setWhere],
+          ["order", "ORDER BY", orderBy, setOrderBy],
+        ] as const).map(([field, label, value, setValue]) => (
+          <SuggestedInput key={field} label={label} value={value}
+            options={clauseSuggestions(value, Math.min(carets[field], value.length), fieldNames, field)}
+            onCaret={(position) => setCarets((old) => old[field] === position ? old : { ...old, [field]: position })}
+            onChange={setValue} disabled={false} className="table-filter flex-1"
+            onSubmit={() => { if (canRead) void readData(); }} />
+        ))}
+      </div>
+      {targetId && (!tables || !names.length) && <p className={catalogError ? "form-error" : "muted"} role={catalogError ? "alert" : "status"}>
+        {catalogError || (tables ? "Không tìm thấy bảng phù hợp." : "Đang tải danh sách bảng…")}
+      </p>}
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <Button variant="primary" disabled={!canRead} onClick={() => void (mode === "data" ? readData() : task.run(readStructure))}>
+          <Play size={14} />{mode === "data" ? "Đọc dữ liệu" : "Đọc cấu trúc"}
+        </Button>
+        {task.busy && reading.current && <Button onClick={() => void reading.current?.cancel()}>Dừng</Button>}
+        {targets.length > 0 && <Select label="Database của cấu trúc và dữ liệu" value={targetId ?? ""} disabled={task.busy || !!drop}
+          options={targets.map((entry) => ({
+            value: entry.id,
+            label: (/_S(?:ys)?$/i.test(entry.database) ? "Sys · " : /_A(?:pp)?$/i.test(entry.database) ? "App · " : "")
+              + entry.database,
+          }))}
+          onChange={(id) => {
+            const next = targets.find((entry) => entry.id === id);
+            if (next && next.id !== targetId) onTargetChange(next);
+          }} />}
         {targetId && <IconButton label="Tải lại danh sách bảng" onClick={() => {
           tableCatalogCache.delete(targetId);
           setQuickCatalog(undefined);
@@ -335,27 +384,8 @@ export function TableTool({ scope, target, onText, onConnect, onTableChange }: {
             </div>
           )}
         </div>
-        {target ? <span className="muted truncate" title={target.server + " / " + target.database}>{target.database} · {view?.rows.length ?? 0} dòng</span>
+        {target ? <span className="muted truncate" title={target.server + " / " + target.database}>{view?.rows.length ?? 0} dòng</span>
           : <Button onClick={onConnect}>Kết nối SQL</Button>}
-      </div>
-      {targetId && (!tables || !names.length) && <p className={catalogError ? "form-error" : "muted"} role={catalogError ? "alert" : "status"}>
-        {catalogError || (tables ? "Không tìm thấy bảng phù hợp." : "Đang tải danh sách bảng…")}
-      </p>}
-      <div className="flex shrink-0 flex-wrap items-center gap-2">
-        {mode === "data" && ([
-          ["select", "Cột SELECT", columns, setColumns],
-          ["where", "WHERE", where, setWhere],
-          ["order", "ORDER BY", orderBy, setOrderBy],
-        ] as const).map(([field, label, value, setValue]) => (
-          <SuggestedInput key={field} label={label} value={value}
-            options={clauseSuggestions(value, Math.min(carets[field], value.length), fieldNames, syntax, field)}
-            onCaret={(position) => setCarets((old) => old[field] === position ? old : { ...old, [field]: position })}
-            onChange={setValue} disabled={task.busy} className="table-filter flex-1" />
-        ))}
-        <Button variant="primary" disabled={!canRead} onClick={() => void (mode === "data" ? readData() : task.run(readStructure))}>
-          <Play size={14} />{mode === "data" ? "Đọc dữ liệu" : "Đọc cấu trúc"}
-        </Button>
-        {task.busy && reading.current && <Button onClick={() => void reading.current?.cancel()}>Dừng</Button>}
         {mode === "structure" && fieldNames.length > 0 && <span className="muted">Chọn cột rồi nhấn chuột phải.</span>}
       </div>
       {task.error && <p className="form-error" role="alert">{task.error}</p>}

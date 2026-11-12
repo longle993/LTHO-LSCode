@@ -41,7 +41,7 @@ public static class XmlTools
                 var value = (string?)item.Attribute("value") ?? "";
                 var mask = XmlViewWidths.LayoutMask.Match(value);
                 return mask.Success ? XmlViewWidths.LayoutFields.Matches(value[mask.Length..])
-                    .Where(match => !match.Groups["label"].Success).Select(match => match.Groups["name"].Value) : [];
+                    .Where(XmlViewWidths.IsField).Select(match => match.Groups["name"].Value) : [];
             }))
             .Select(XmlViewWidths.FieldName).Where(name => name.Length > 0 && name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
             .Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).Take(100)
@@ -119,13 +119,13 @@ public static class XmlTools
                     var row = XmlViewWidths.LayoutMask.Match(value.Value);
                     if (!row.Success) continue;
                     var references = XmlViewWidths.LayoutFields.Matches(value.Value[row.Length..]);
-                    var fieldCount = references.Count(reference => !reference.Groups["label"].Success);
-                    var labelCount = references.Count - fieldCount;
-                    var fieldSlots = Math.Max(0, row.Groups["slots"].Value.Count(slot => slot == '1') - labelCount);
-                    if ((fieldCount > 0 || labelCount == 0) && fieldSlots != fieldCount)
+                    var fieldCount = references.Count(XmlViewWidths.IsField);
+                    var textCount = references.Count - fieldCount;
+                    var fieldSlots = Math.Max(0, row.Groups["slots"].Value.Count(slot => slot == '1') - textCount);
+                    if ((fieldCount > 0 || textCount == 0) && fieldSlots != fieldCount)
                         Warn(value, $"Layout có {fieldSlots} ô dành cho field và {fieldCount} field.");
                     foreach (Match reference in references)
-                        if (!reference.Groups["label"].Success) CheckReference(reference.Groups["name"].Value, value);
+                        if (XmlViewWidths.IsField(reference)) CheckReference(reference.Groups["name"].Value, value);
                 }
             }
             var declared = new HashSet<string>(comparer);

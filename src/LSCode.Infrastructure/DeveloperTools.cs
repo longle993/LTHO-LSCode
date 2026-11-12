@@ -322,6 +322,7 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                 tableSnapshots[S("scope")] = new(snapshotId, readTarget, qualified, data);
                 return new { data = preview, snapshotId };
             case "project.commands": return await ProjectDatabase.CommandsAsync(Target(p), ct, S("appDatabase"));
+            case "project.employeeTabs": return await ProjectDatabase.EmployeeFunctionTabsAsync(Target(p), ct);
             case "project.controller":
                 return await Task.Run(async () =>
                 {

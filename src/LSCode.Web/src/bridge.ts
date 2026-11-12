@@ -34,6 +34,9 @@ export type QueryResult = {
 export type Settings = {
   theme: string;
   accentColor?: string | null;
+  explorerFontSize?: number;
+  editorFontSize?: number;
+  explorerWidth?: number;
   workspace: string | null;
   server: string;
   database: string;

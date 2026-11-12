@@ -158,6 +158,51 @@ export function markSqlErrors(
   );
 }
 const targetByModel = new Map<string, Target | undefined>();
+const fastSessionVariables = [
+  ["@@id", "Mã chứng từ (ví dụ PND)"],
+  ["@@unit", "Mã đơn vị hiện tại"],
+  ["@@userID", "ID người dùng"],
+  ["@@admin", "1 = admin, 0 = user"],
+  ["@@language", "Ngôn ngữ V hoặc E"],
+  ["@@action", "Thao tác New, Edit hoặc View"],
+  ["@@master", "Tên bảng master (cXX$000000)"],
+  ["@@prime$partition$current", "Bảng master kỳ hiện tại (ví dụ m74$202601)"],
+  ["@@prime$partition$previous", "Bảng master kỳ trước"],
+  ["@@inquiry$partition$current", "Bảng inquiry kỳ hiện tại"],
+  ["@@partition", "Thông tin partition"],
+  ["@@expression", "Biểu thức partition"],
+  ["@@sysDatabaseName", "Tên DB hệ thống"],
+];
+monaco.languages.registerCompletionItemProvider(xmlLanguage, {
+  triggerCharacters: ["@"],
+  provideCompletionItems(model, position) {
+    const line = model.getLineContent(position.lineNumber);
+    const before = line.slice(0, position.column - 1);
+    const prefix = before.match(/(?<![\w@#$])@@[\w$]*$/);
+    if (!prefix) return;
+    const start = prefix.index!;
+    const text = model.getValueInRange({
+      startLineNumber: 1, startColumn: 1,
+      endLineNumber: position.lineNumber, endColumn: position.column,
+    });
+    const token = monaco.editor.tokenize(text, xmlLanguage).at(-1)
+      ?.reverse().find((candidate) => candidate.offset <= start);
+    if (token?.language !== "sql" || !/^(identifier|predefined)\.sql$/.test(token.type)) return;
+    const suffix = line.slice(position.column - 1).match(/^[\w$]*/)?.[0] ?? "";
+    return {
+      suggestions: fastSessionVariables.map(([label, detail]) => ({
+        label,
+        detail,
+        insertText: label,
+        kind: monaco.languages.CompletionItemKind.Variable,
+        range: {
+          startLineNumber: position.lineNumber, endLineNumber: position.lineNumber,
+          startColumn: start + 1, endColumn: position.column + suffix.length,
+        },
+      })),
+    };
+  },
+});
 monaco.languages.registerCompletionItemProvider("sql", {
   triggerCharacters: ["."],
   provideCompletionItems: async (model, position, _, token) => {
@@ -290,6 +335,7 @@ export function CodeEditor({
   document,
   theme,
   target,
+  fontSize = 14,
   onChange,
   onMount,
   onCursor,
@@ -299,6 +345,7 @@ export function CodeEditor({
 }: {
   document: DocumentInfo;
   theme: string;
+  fontSize?: number;
   target?: Target;
   readOnly?: boolean;
   onDiagnostics?: (
@@ -318,8 +365,8 @@ export function CodeEditor({
       readOnly,
       automaticLayout: true,
       fontFamily: "Cascadia Code, Consolas, monospace",
-      fontSize: 14,
-      lineHeight: 23,
+      fontSize,
+      lineHeight: Math.round(fontSize * 23 / 14),
       padding: { top: 18 },
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
@@ -435,6 +482,9 @@ export function CodeEditor({
     if (previous !== model) modelSources.get(model.uri.toString())?.validate();
     callbacks.current.onMount(instance.current!);
   }, [document.id, document.name, document.path, target?.id]);
+  useEffect(() => {
+    instance.current?.updateOptions({ fontSize, lineHeight: Math.round(fontSize * 23 / 14) });
+  }, [fontSize]);
   useEffect(() => {
     const base = theme === "High Contrast" ? "hc-black" : theme === "Dark" ? "vs-dark" : "vs";
     monaco.editor.defineTheme("lscode-" + base, {

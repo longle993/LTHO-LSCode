@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Play, Square } from "lucide-react";
-import { Button, DataGrid, Select } from "../ui";
+import { Button, DataGrid } from "../ui";
 import { request, writeClipboard } from "../bridge";
 import type { Target } from "../bridge";
 import { useTask } from "./useTask";
@@ -13,13 +13,11 @@ export function ProfilerTool({ target, visible, closing, onBusyChange }: {
   const [user, setUser] = useState("profile"),
     [password, setPassword] = useState("fsd"),
     [profilerPath, setProfilerPath] = useState("");
-  const [engine, setEngine] = useState("ssms18");
   const [running, setRunning] = useState(false),
     [{ rows, offset }, setBuffer] = useState<{ rows: TraceEvent[]; offset: number }>({ rows: [], offset: 0 }),
     [gridVersion, setGridVersion] = useState(0),
     [followLatest, setFollowLatest] = useState(true),
     [filter, setFilter] = useState(""),
-    [templatePath, setTemplatePath] = useState(""),
     [selected, setSelected] = useState(""),
     [dropped, setDropped] = useState(0),
     [layout, setLayout] = useState(false);
@@ -117,29 +115,12 @@ export function ProfilerTool({ target, visible, closing, onBusyChange }: {
         >
           Chọn Profiler.exe
         </Button>
-        <Select
-          label="Profiler engine"
-          disabled={running}
-          value={engine}
-          options={[
-            { value: "ssms18", label: "SSMS 18 Trace" },
-            { value: "extendedEvents", label: "Extended Events" },
-          ]}
-          onChange={setEngine}
-        />
         <input
           aria-label="Bộ lọc database"
           placeholder="Database prefix (trống: theo target)"
           value={filter}
           disabled={running}
           onChange={(e) => setFilter(e.target.value)}
-        />
-        <input
-          aria-label="Đường dẫn template"
-          placeholder="Template .tdf (trống: SQL2014 đi kèm)"
-          value={templatePath}
-          disabled={running}
-          onChange={(e) => setTemplatePath(e.target.value)}
         />
         <Button
           variant="primary"
@@ -149,8 +130,7 @@ export function ProfilerTool({ target, visible, closing, onBusyChange }: {
               await request("profiler.start", {
                 targetId: target?.id,
                 filter,
-                templatePath,
-                engine,
+                engine: "ssms18",
                 user,
                 password,
                 profilerPath,
@@ -187,53 +167,6 @@ export function ProfilerTool({ target, visible, closing, onBusyChange }: {
           Theo dõi cuối lưới
         </Button>
         <Button onClick={() => setLayout(!layout)}>Đổi bố cục</Button>
-        <Button
-          onClick={() =>
-            void task.run(async () => {
-              await request("text.export", {
-                name: "trace.json",
-                text: JSON.stringify(rows, null, 2),
-              });
-            })
-          }
-        >
-          Lưu trace
-        </Button>
-        <Button
-          disabled={running}
-          onClick={() =>
-            void task.run(async () => {
-              const opened = await request<
-                import("../bridge").DocumentInfo | null
-              >("document.open");
-              if (!opened) return;
-              try {
-                const parsed = JSON.parse(opened.text);
-                const values = Array.isArray(parsed)
-                  ? parsed
-                  : (parsed.events ?? parsed.Events);
-                if (!Array.isArray(values))
-                  throw new Error("Trace JSON không có danh sách sự kiện.");
-                const normalized = values
-                  .slice(-5000)
-                  .map((value) =>
-                    Object.fromEntries(
-                      Object.entries(value).map(([key, v]) => [
-                        key[0].toLowerCase() + key.slice(1),
-                        v,
-                      ]),
-                    ),
-                  ) as TraceEvent[];
-                replaceRows(normalized);
-                setFollowLatest(true);
-              } finally {
-                await request("document.close", { id: opened.id });
-              }
-            })
-          }
-        >
-          Mở trace
-        </Button>
       </div>
       <div
         className={layout ? "profiler-results tool-columns" : "profiler-results"}

@@ -6,7 +6,7 @@ Phạm vi triển khai: sửa các component hiện có, không đổi bố cụ
 - Tab DB bỏ hướng dẫn “Mở nhóm để tải App DB • 200 đối tượng mỗi lượt”; giữ tải từng nhóm.
 - Cây dùng đường dọc liền, chỉ hiện khi hover nhánh hoặc nhánh có lựa chọn.
 - XML tăng độ rõ màu trên nền sáng và tối, giữ parser/highlighting hiện có.
-- Menu đọc SYS của dự án, áp quyền user 2, denyunitright và Startup trong App DB của dự án theo batch được yêu cầu. Thiếu cột tùy phiên bản dùng giá trị mặc định; lỗi quyền/kết nối không bị che.
+- Menu đọc toàn bộ `dbo.wcommand` từ DB Sys của dự án. Batch loại trạng thái `9`, lọc theo `denyunitright`, bổ sung lại nhóm cha cần hiển thị, gọi `FastBusiness$App$Startup` trong DB App rồi loại các mục mồ côi. Cột tùy phiên bản dùng giá trị mặc định khi thiếu.
 - Không hardcode tên DB mẫu; tên DB được quote, dùng App đã cấu hình/lưu hoặc giải quyết placeholder theo cấu hình dự án.
 
 Kiểm chứng dự kiến: build Release, bộ kiểm tra hiện có và render WPF. Tích hợp DB thật chỉ có kết luận khi thực sự chạy được trên kết nối dự án.

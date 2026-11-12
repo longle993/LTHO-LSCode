@@ -3,9 +3,10 @@ import { pathIsWithin, rebasePath, tabFolderLabel } from "./fileLabels";
 import { FileSections } from "./features/FileSections";
 import { ControllerPreview } from "./features/ControllerPreview";
 import { ProjectHistory } from "./features/ProjectHistory";
+import { EmployeeFunctionTabs } from "./features/EmployeeFunctionTabs";
 import logo from "../../../assets/logo2.png";
 import { LoadingLine } from "./LoadingLine";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   SunMoon,
   Minus,
@@ -40,7 +41,7 @@ import {
   ArrowUpRight,
 } from "lucide-react";
 import { native, request, operation, subscribe, quoteSqlName, notifyWindowReady, writeClipboard } from "./bridge";
-import { PanelResizeHandle } from "./PanelResizeHandle";
+import { PanelResizeHandle, WorkspaceResizeHandle } from "./PanelResizeHandle";
 import { ProfilerTool } from "./features/ProfilerTool";
 import { TableTool } from "./features/TableTool";
 import type {
@@ -73,7 +74,11 @@ import {
 
 type Tab = DocumentInfo & { saved: string; target?: Target; project?: string };
 type TableTab = { id: string; number: number; target?: Target; table?: string };
-type ControllerGroup = { link: string; file: string; files: string[] };
+type ControllerGroup = { link: string; file: string; files: string[]; employeeTab?: boolean };
+const employeeController = "hrpigeneralinformation";
+function isEmployeeController(group: ControllerGroup) {
+  return group.files.some((path) => /(?:^|[\\/])hrpigeneralinformation\.(xml|f)$/i.test(path));
+}
 type Entry = { path: string; name: string; directory: boolean };
 type Hit = { path: string; line: number; column: number; preview: string };
 const initialSettings: Settings = {
@@ -221,6 +226,7 @@ export default function App({
     dbCache = useRef(new Map<string, { table: Table; expires: number }>()),
     controllerCache = useRef(new Map<string, { file: string; files: string[] }>()),
     defaultTarget = useRef<Target>(),
+    projectSysTarget = useRef<Target>(),
     projectTargetIds = useRef<string[]>([]),
     pendingOpens = useRef(new Map<string, Promise<void>>());
   latest.current = { tabs, activeId, settings };
@@ -1130,7 +1136,7 @@ export default function App({
         : "Không tìm thấy chức năng",
     );
   }
-  async function openController(link: string) {
+  async function openController(link: string, employeeTab = false) {
     const root = workspace;
     const generation = controllerRequest.current;
     const selection = ++controllerSelection.current;
@@ -1153,9 +1159,9 @@ export default function App({
       if (oldest !== undefined) cache.delete(oldest);
     }
     cache.set(key, found);
-    const group = { link, ...found };
+    const group = { link, ...found, employeeTab };
     setControllers((current) => current.some((entry) => entry.link === link)
-      ? current.map((entry) => entry.link === link ? group : entry) : [...current, group]);
+      ? current.map((entry) => entry.link === link ? { ...group, employeeTab: employeeTab || entry.employeeTab } : entry) : [...current, group]);
     if (selection === controllerSelection.current) {
       setExpandedController(link);
       setNav("files");
@@ -1190,7 +1196,7 @@ export default function App({
           if (choice === "save")
             for (const tab of edited) if (!(await save(tab))) return;
         }
-        await openProject(p, false, oldTargetIds);
+        await openProject(p, oldTargetIds);
         await Promise.all(closing.map((tab) => request("document.close", { id: tab.id })));
         const closingIds = new Set(closing.map((tab) => tab.id));
         setTabs((current) => current.filter((tab) => !closingIds.has(tab.id)));
@@ -1198,7 +1204,7 @@ export default function App({
         setPaneIds((current) => current.map((id) => closingIds.has(id) ? "" : id));
         closing.forEach(disposeModel);
       } else if (!project) {
-        await openProject(p, false);
+        await openProject(p);
       }
       setSelectedTool(undefined);
       await open(path, undefined, undefined, p.id);
@@ -1206,12 +1212,13 @@ export default function App({
       switchingHistoryProject.current = false;
     }
   }
-  async function openProject(p: Project, createQuery = true, closingTargets: string[] = []) {
+  async function openProject(p: Project, closingTargets: string[] = []) {
     const opened = await operation<{
       project: Project;
       targets: Target[];
     }>("project.open", { id: p.id }, 31_000).promise;
     setProject(opened.project);
+    setActiveId("");
     defaultTarget.current = opened.targets[0];
     projectTargetIds.current = opened.targets.map((t) => t.id);
     setSettings((old) => ({
@@ -1231,6 +1238,7 @@ export default function App({
     const sys =
       opened.targets.find((t) => /_S(?:ys)?$/i.test(t.database)) ??
       opened.targets[1];
+    projectSysTarget.current = sys;
     if (sys)
       void request<CommandNode[]>("project.commands", {
         targetId: sys.id,
@@ -1245,23 +1253,6 @@ export default function App({
     setControllers([]);
     setExpandedController(undefined);
     setDialog("");
-    if (!createQuery) return;
-    const d = addDocument(
-      {
-        id: crypto.randomUUID(),
-        path: null,
-        name: "Query.sql",
-        text: "",
-        encoding: "utf-8",
-        bom: false,
-        newline: "CRLF",
-        version: 1,
-      },
-      opened.targets[0],
-    );
-    setTabs((old) =>
-      old.map((t) => (t.id === d.id ? { ...t, project: p.id } : t)),
-    );
   }
   function runProjectAction(work: () => Promise<void>) {
     setProjectActionBusy(true);
@@ -1417,7 +1408,10 @@ export default function App({
           </IconButton>
         </div>
       )}
-      <div className={`workbench ${side ? "" : "side-closed"}`}>
+      <div className={`workbench ${side ? "" : "side-closed"}`} style={{
+        "--workspace-width": (settings.explorerWidth ?? 264) + "px",
+        "--explorer-font-size": (settings.explorerFontSize ?? 12) + "px",
+      } as CSSProperties}>
         <nav className="activity-rail" aria-label="Điều hướng">
           {[
             { id: "files", label: "File dự án", icon: Files },
@@ -1555,6 +1549,7 @@ export default function App({
               </>
             )}
             {nav === "files" && (
+              <>
               <div className="side-content side-wide">
                 {workspace ? (
                   <>
@@ -1614,6 +1609,19 @@ export default function App({
                   </div>
                 )}
               </div>
+              {controller && (controller.employeeTab || isEmployeeController(controller)) && (
+                <EmployeeFunctionTabs
+                  key={JSON.stringify([workspace, projectSysTarget.current?.id])}
+                  targetId={projectSysTarget.current?.id}
+                  selected={isEmployeeController(controller) ? employeeController : controller.link.toLowerCase()}
+                  onOpen={(sysId) => void guard(() => {
+                    const general = sysId.toLowerCase() === employeeController
+                      ? controllers.find(isEmployeeController) : undefined;
+                    return openController(general?.link ?? sysId, true);
+                  })}
+                />
+              )}
+              </>
             )}
             {nav === "search" && (
               <>
@@ -1829,6 +1837,12 @@ export default function App({
                 </div>
               </>
             )}
+            <WorkspaceResizeHandle width={settings.explorerWidth ?? 264} onCommit={(explorerWidth) => {
+              const next = { ...latest.current.settings, explorerWidth };
+              latest.current.settings = next;
+              setSettings(next);
+              if (native) void guard(() => request("settings.save", { settings: next }));
+            }} />
           </aside>
         )}
         <main className="editor-area">
@@ -1977,7 +1991,10 @@ export default function App({
           )}
           {tableTabs.map((tab) => (
             <section key={tab.id} id={tab.id + "-panel"} className="profiler-panel" role="tabpanel" aria-labelledby={tab.id + "-tab"} hidden={tab.id !== selectedTool}>
-              <TableTool scope={tab.id} target={tab.target}
+              <TableTool scope={tab.id} target={tab.target} visible={tab.id === selectedTool}
+                targets={project ? targets.filter((entry) => projectTargetIds.current.includes(entry.id) || entry.id === tab.target?.id) : targets}
+                onTargetChange={(target) => setTableTabs((current) => current.map((entry) =>
+                  entry.id === tab.id ? { ...entry, target, table: undefined } : entry))}
                 onTableChange={(table) => {
                   if (tab.table !== table)
                     setTableTabs((current) => current.map((entry) => entry.id === tab.id ? { ...entry, table } : entry));
@@ -2024,6 +2041,7 @@ export default function App({
                         viewId={String(pane)}
                         document={doc}
                         theme={settings.theme}
+                        fontSize={settings.editorFontSize}
                         target={doc.target}
                         onMount={(e) => {
                           if (pane === 0) primaryEditor.current = e;
@@ -2232,7 +2250,7 @@ export default function App({
             setSettings(preferences);
             if (!project && !tableSelected) defaultTarget.current = t;
             setTargets((old) => [...old, t]);
-            if (tableTab) setTableTabs((current) => current.map((entry) => entry.id === tableTab.id ? { ...entry, target: t } : entry));
+            if (tableTab) setTableTabs((current) => current.map((entry) => entry.id === tableTab.id ? { ...entry, target: t, table: undefined } : entry));
             else setTabs((old) =>
               old.map((d) => (d.id === activeId ? { ...d, target: t } : d)),
             );
@@ -2403,6 +2421,7 @@ export default function App({
             <CodeEditor
               document={peek.document}
               theme={settings.theme}
+              fontSize={settings.editorFontSize}
               readOnly
               onChange={() => {}}
               onCursor={() => {}}

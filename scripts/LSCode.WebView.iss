@@ -5,7 +5,7 @@
 [Setup]
 AppId=LSCode.WebView
 AppName=LSCode WebView
-AppVersion=1.0.0
+AppVersion=1.0.3
 DefaultDirName={localappdata}\Programs\LSCode WebView
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest

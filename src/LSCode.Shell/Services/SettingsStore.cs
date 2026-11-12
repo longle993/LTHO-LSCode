@@ -7,6 +7,9 @@ public sealed class StudioSettings
 {
     public string Theme { get; set; } = "Dark";
     public string? AccentColor { get; set; }
+    public int ExplorerFontSize { get; set; } = 12;
+    public int EditorFontSize { get; set; } = 14;
+    public int ExplorerWidth { get; set; } = 264;
     public List<string>? ActivityCommands { get; set; }
     public Dictionary<string, string[]> Shortcuts { get; set; } = [];
     public string? Workspace { get; set; }

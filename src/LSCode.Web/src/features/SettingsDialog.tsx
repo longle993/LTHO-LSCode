@@ -82,6 +82,18 @@ export function SettingsDialog({
                 onClick={() => setDraft({ ...draft, accentColor: null })}>Màu mặc định</Button>
             </div>
             <label>
+              Cỡ chữ Không gian dự án
+              <Select label="Cỡ chữ Không gian dự án" value={String(draft.explorerFontSize ?? 12)}
+                options={Array.from({ length: 9 }, (_, index) => ({ value: String(index + 11), label: (index + 11) + " px" }))}
+                onChange={(value) => setDraft({ ...draft, explorerFontSize: Number(value) })} />
+            </label>
+            <label>
+              Cỡ chữ editor
+              <Select label="Cỡ chữ editor" value={String(draft.editorFontSize ?? 14)}
+                options={Array.from({ length: 15 }, (_, index) => ({ value: String(index + 10), label: (index + 10) + " px" }))}
+                onChange={(value) => setDraft({ ...draft, editorFontSize: Number(value) })} />
+            </label>
+            <label>
               Crystal Reports executable
               <input
                 value={draft.crystalPath}

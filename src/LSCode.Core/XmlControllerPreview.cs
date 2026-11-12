@@ -4,8 +4,12 @@ using System.Xml.Linq;
 namespace LSCode.Core;
 
 public sealed record GridPreviewColumn(string Name, string Label, int Width);
-public sealed record DirPreviewCell(string Name, string Label, bool IsLabel, int Column, int Span);
-public sealed record DirPreviewLayout(int[] Widths, IReadOnlyList<DirPreviewCell[]> Rows);
+public sealed record DirPreviewDetail(string Controller, GridPreviewColumn[] Columns, string? Error);
+public sealed record DirPreviewCell(string Name, string Label, bool IsLabel, int Column, int Span,
+    string? Description = null, DirPreviewDetail? Detail = null);
+public sealed record DirPreviewCategory(string Label, int[] Widths, IReadOnlyList<DirPreviewCell[]> Rows);
+public sealed record DirPreviewLayout(int[] Widths, IReadOnlyList<DirPreviewCell[]> Rows,
+    IReadOnlyList<DirPreviewCategory> Categories);
 public sealed record ControllerPreviewView(string Name, IReadOnlyList<GridPreviewColumn> Columns, DirPreviewLayout? Layout = null);
 public sealed record XmlControllerPreview(string Kind, string Title, string Subtitle, IReadOnlyList<string?> Toolbar,
     IReadOnlyList<ControllerPreviewView> Views)
@@ -14,6 +18,9 @@ public sealed record XmlControllerPreview(string Kind, string Title, string Subt
     private static readonly Regex BareField = new(@"^[\p{L}_][\p{L}\p{N}_.$]*(?:%l)?$", RegexOptions.IgnoreCase);
 
     public static XmlControllerPreview Read(string text, string? path = null, IReadOnlyDictionary<string, string>? buffers = null)
+        => Read(text, path, buffers, true);
+
+    private static XmlControllerPreview Read(string text, string? path, IReadOnlyDictionary<string, string>? buffers, bool includeDetails)
     {
         if (text.Length > 1_000_000)
             throw new ArgumentException("XML vượt quá 1 triệu ký tự.");
@@ -21,6 +28,13 @@ public sealed record XmlControllerPreview(string Kind, string Title, string Subt
         var grid = root?.DescendantsAndSelf().FirstOrDefault(node => Is(node, "grid") || Is(node, "dir"))
             ?? throw new ArgumentException("File này chưa có thẻ <grid> hoặc <dir>.");
         var isDir = Is(grid, "dir");
+        var details = new Dictionary<string, DirPreviewDetail>(Names);
+        DirPreviewDetail Detail(string controller)
+        {
+            if (!details.TryGetValue(controller, out var detail))
+                details[controller] = detail = ReadDetail(controller, path, buffers);
+            return detail;
+        }
         var fields = Children(grid, "fields").SelectMany(section => Children(section, "field"))
             .Where(field => Attribute(field, "name").Length > 0)
             .ToLookup(field => XmlViewWidths.FieldName(Attribute(field, "name")), Names);
@@ -39,8 +53,8 @@ public sealed record XmlControllerPreview(string Kind, string Title, string Subt
                         var width = int.TryParse(Attribute(field, "width"), out var pixels) && pixels > 0 ? pixels : 120;
                         return new GridPreviewColumn(entry.Name, FieldCaption(field, entry.Name), width);
                     }).ToArray(),
-                isDir ? DirLayout(view, fields) : null))
-            .Where(view => view.Columns.Count > 0 || view.Layout?.Rows.Count > 0).ToArray();
+                isDir ? DirLayout(view, fields, includeDetails ? Detail : null) : null))
+            .Where(view => view.Columns.Count > 0 || view.Layout?.Rows.Count > 0 || view.Layout?.Categories.Count > 0).ToArray();
         var toolbar = Children(grid, "toolbar").SelectMany(section => section.Elements())
             .Where(item => !Hidden(item))
             .Select(item => Is(item, "separator") || Attribute(item, "id") == "-" ? null :
@@ -51,24 +65,60 @@ public sealed record XmlControllerPreview(string Kind, string Title, string Subt
         return new(isDir ? "dir" : "grid", Caption(Child(grid, "title")), Caption(Child(grid, "subtitle")), toolbar, views);
     }
 
-    private static DirPreviewLayout DirLayout(XElement view, ILookup<string, XElement> fields)
+    private static DirPreviewDetail ReadDetail(string controller, string? path, IReadOnlyDictionary<string, string>? buffers)
+    {
+        if (path is not null && Path.IsPathFullyQualified(path) && BareField.IsMatch(controller) && !controller.Contains('%'))
+        {
+            var directory = new DirectoryInfo(Path.GetDirectoryName(path)!);
+            var parent = directory;
+            while (parent is not null && !Names.Equals(parent.Name, "Dir")) parent = parent.Parent;
+            if (parent?.Parent is { } controllers)
+                foreach (var extension in new[] { ".f", ".xml" })
+                {
+                    var file = Path.Combine(controllers.FullName, "Grid", controller + extension);
+                    var buffered = buffers?.TryGetValue(file, out var buffer) == true ? buffer : null;
+                    if (buffered is null && !File.Exists(file)) continue;
+                    try
+                    {
+                        var preview = Read(buffered ?? File.ReadAllText(file), file, buffers, false);
+                        if (preview.Kind != "grid") continue;
+                        var grid = preview.Views.FirstOrDefault(view => Names.Equals(view.Name, "Grid")) ?? preview.Views.FirstOrDefault();
+                        return new(controller, grid?.Columns.ToArray() ?? [], null);
+                    }
+                    catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.Xml.XmlException or ArgumentException)
+                    {
+                        return new(controller, [], $"Không đọc được Grid: {error.Message}");
+                    }
+                }
+        }
+        return new(controller, [], $"Không tìm thấy Grid cho {controller}.");
+    }
+
+    private static int[] ReadWidths(string value)
+    {
+        var parts = value.Split(',');
+        return parts.All(part => int.TryParse(part, out var pixels) && pixels >= 0) ? parts.Select(int.Parse).ToArray() : [];
+    }
+
+    private static DirPreviewLayout DirLayout(XElement view, ILookup<string, XElement> fields,
+        Func<string, DirPreviewDetail>? detailFor)
     {
         var widths = Array.Empty<int>();
-        var rows = new List<DirPreviewCell[]>();
-        var columnCount = 0;
+        var categories = Children(view, "categories").SelectMany(section => Children(section, "category"))
+            .Where(category => Attribute(category, "index").Length > 0).ToArray();
+        var categoryTracks = categories.ToLookup(category => Attribute(category, "index"), Names);
+        var rows = new Dictionary<string, List<DirPreviewCell[]>>(Names) { [""] = [] };
+        var maskLengths = new Dictionary<string, int>(Names);
         foreach (var item in Children(view, "item").Where(item => !Hidden(item)))
         {
             var value = Attribute(item, "value");
             var mask = XmlViewWidths.LayoutMask.Match(value);
             if (!mask.Success)
             {
-                var parts = value.Split(',');
-                if (widths.Length == 0 && parts.All(part => int.TryParse(part, out var pixels) && pixels >= 0))
-                    widths = parts.Select(int.Parse).ToArray();
+                if (widths.Length == 0) widths = ReadWidths(value);
                 continue;
             }
             var slots = mask.Groups["slots"].Value;
-            columnCount = Math.Max(columnCount, slots.Length);
             var references = XmlViewWidths.LayoutFields.Matches(value[mask.Length..]);
             var cells = XmlViewWidths.Spans(slots).Zip(references, (span, reference) => (span, reference))
                 .Select(entry =>
@@ -76,14 +126,34 @@ public sealed record XmlControllerPreview(string Kind, string Title, string Subt
                     var name = XmlViewWidths.FieldName(entry.reference.Groups["name"].Value);
                     var field = fields[name].FirstOrDefault();
                     if (field is null || Hidden(field)) return null;
+                    var items = Children(field, "items").FirstOrDefault(node => Names.Equals(Attribute(node, "style"), "Grid"));
+                    var controller = items is null ? "" : Attribute(items, "controller");
+                    var detail = XmlViewWidths.IsField(entry.reference) && controller.Length > 0 ? detailFor?.Invoke(controller) : null;
+                    var category = categoryTracks[Attribute(field, "categoryIndex")].FirstOrDefault();
+                    var categoryWidthCount = category is null ? 0 : ReadWidths(Attribute(category, "columns")).Length;
+                    var span = detail is not null && items is not null && int.TryParse(Attribute(items, "row"), out var row) && row > 0
+                        ? Math.Min(row, Math.Max(1, Math.Max(categoryWidthCount, slots.Length) - entry.span.Start)) : entry.span.Length;
                     return new DirPreviewCell(name, First(Caption(Child(field, "label")), FieldCaption(field, name)),
-                        entry.reference.Groups["label"].Success, entry.span.Start + 1, entry.span.Length);
+                        entry.reference.Groups["label"].Success, entry.span.Start + 1, span,
+                        entry.reference.Groups["description"].Success ? Caption(Child(field, "footer")) : null, detail);
                 }).OfType<DirPreviewCell>().ToArray();
-            rows.Add(cells);
+            var category = cells.Select(cell => fields[cell.Name].FirstOrDefault())
+                .OfType<XElement>().Select(field => Attribute(field, "categoryIndex")).FirstOrDefault(categoryTracks.Contains) ?? "";
+            if (!rows.TryGetValue(category, out var group)) rows[category] = group = [];
+            group.Add(cells);
+            maskLengths[category] = Math.Max(maskLengths.GetValueOrDefault(category), slots.Length);
         }
-        var tracks = Enumerable.Range(0, Math.Max(columnCount, widths.Length))
-            .Select(column => column < widths.Length ? widths[column] : 120).ToArray();
-        return new(tracks, rows);
+        int[] Tracks(int[] configured, string group) => Enumerable.Range(0, Math.Max(maskLengths.GetValueOrDefault(group),
+            Math.Max(configured.Length, rows[group].SelectMany(row => row).Select(cell => cell.Column + cell.Span - 1).DefaultIfEmpty().Max())))
+            .Select(column => column < configured.Length ? configured[column] : 120).ToArray();
+        return new(Tracks(widths, ""), rows[""], categories.Select(category =>
+        {
+            var index = Attribute(category, "index");
+            if (!rows.TryGetValue(index, out var group)) return null;
+            var categoryWidths = ReadWidths(Attribute(category, "columns"));
+            return new DirPreviewCategory(First(Caption(Child(category, "header")), index),
+                Tracks(categoryWidths.Length > 0 ? categoryWidths : widths, index), group);
+        }).OfType<DirPreviewCategory>().ToArray());
     }
 
     private static IEnumerable<string> ColumnNames(XElement view)
@@ -103,7 +173,7 @@ public sealed record XmlControllerPreview(string Kind, string Title, string Subt
             foreach (var part in value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
             {
                 var reference = XmlViewWidths.LayoutFields.Match(part);
-                if (reference.Success && !reference.Groups["label"].Success)
+                if (reference.Success && XmlViewWidths.IsField(reference))
                     yield return reference.Groups["name"].Value;
                 else if (!reference.Success && BareField.IsMatch(part)) yield return part;
             }
