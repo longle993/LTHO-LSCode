@@ -22,7 +22,7 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
     private ProfilerSession? extendedTrace;
     private long lastExtendedSequence;
     private readonly SemaphoreSlim traceGate = new(1);
-    private readonly SemaphoreSlim persistenceGate = new(1);
+    private static readonly SemaphoreSlim persistenceGate = new(1);
     private readonly CatalogWorkspace catalog = new();
     private sealed record TableSnapshot(string Id, SqlTarget Target, string Qualified, DataTable Data);
     private readonly ConcurrentDictionary<string, TableSnapshot> tableSnapshots = new();
@@ -52,6 +52,9 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
         if (method.StartsWith("catalog.", StringComparison.Ordinal)) return await catalog.ExecuteAsync(method, p, Target(p), ct);
         string S(string key, string fallback = "") => p.TryGetProperty(key, out var x) && x.ValueKind == JsonValueKind.String ? x.GetString()! : fallback;
         bool B(string key) => p.TryGetProperty(key, out var x) && x.ValueKind == JsonValueKind.True;
+        Dictionary<string, string> OpenBuffers() => new(
+            p.TryGetProperty("buffers", out var buffers) ? buffers.Deserialize<Dictionary<string, string>>(Json) ?? [] : [],
+            StringComparer.OrdinalIgnoreCase);
         int I(string key, int fallback = 0) => p.TryGetProperty(key, out var x) && x.TryGetInt32(out var n) ? n : fallback;
         string QualifiedTable() => ProjectDatabase.Quote(Identifier(S("schema", "dbo"))) + "." + ProjectDatabase.Quote(Identifier(S("table")));
         string[] ColumnNames() => p.TryGetProperty("columns", out var values)
@@ -69,10 +72,19 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
             case "settings.read": return SettingsStore.Load();
             case "settings.save":
                 await persistenceGate.WaitAsync(ct);
-                try { SettingsStore.Save(p.GetProperty("settings").Deserialize<StudioSettings>(Json) ?? throw new ArgumentException("Settings không hợp lệ.")); return true; }
+                try
+                {
+                    var preferences = p.GetProperty("settings").Deserialize<StudioSettings>(Json) ?? throw new ArgumentException("Settings không hợp lệ.");
+                    foreach (var (id, timestamp) in SettingsStore.Load().ProjectLastAccess)
+                        if (!preferences.ProjectLastAccess.TryGetValue(id, out var previousAccess) || timestamp > previousAccess)
+                            preferences.ProjectLastAccess[id] = timestamp;
+                    SettingsStore.Save(preferences);
+                    return true;
+                }
                 finally { persistenceGate.Release(); }
             case "project.create":
                 var created = ProjectImporter.Create(S("name"), S("server"), S("database"), S("sourcePath"));
+                created = WithUpdatePath(created, S("updatePath"));
                 await SaveProjectAsync(created, ct); return Project(created);
             case "project.list": return ProjectStore.Load().Select(Project).ToArray();
             case "project.import.preview": return ProjectImporter.Read(S("xml")).Select(Project).ToArray();
@@ -85,7 +97,23 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                 return ProjectImporter.Export([ProjectStore.Load().First(x => x.Id == S("id"))]);
             case "project.details":
                 var detail = ProjectStore.Load().First(x => x.Id == S("id"));
-                return new { project = Project(detail), programPath = detail.Field("ProgramPath"), metadata = ProjectImporter.Export([detail]) };
+                return new { project = Project(detail), programPath = detail.Field("ProgramPath"),
+                    updatePath = UpdatePath(detail), metadata = ProjectImporter.Export([detail]) };
+            case "project.delete":
+                await persistenceGate.WaitAsync(ct);
+                try
+                {
+                    var catalog = ProjectStore.Load();
+                    var deleted = catalog.FirstOrDefault(item => item.Id == S("id"))
+                        ?? throw new InvalidOperationException("Profile dự án đã được xóa.");
+                    ProjectStore.Save(catalog.Where(item => item.Id != deleted.Id));
+                    var preferences = SettingsStore.Load();
+                    preferences.ProjectLastAccess.Remove(deleted.Id);
+                    if (preferences.ActiveProjectId == deleted.Id) preferences.ActiveProjectId = null;
+                    SettingsStore.Save(preferences);
+                    return true;
+                }
+                finally { persistenceGate.Release(); }
             case "project.update":
                 await persistenceGate.WaitAsync(ct);
                 try {
@@ -95,7 +123,8 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                         var field = element.Elements().FirstOrDefault(e => e.Name.LocalName.Equals(pair.Item1, StringComparison.OrdinalIgnoreCase));
                         if (field == null) element.Add(new XElement(pair.Item1, S(pair.Item2))); else field.Value = S(pair.Item2);
                     }
-                    var updated = ProjectImporter.Read(element.ToString())[0];
+                    var updated = WithUpdatePath(ProjectImporter.Read(element.ToString())[0], S("updatePath", previous.Field("UpdatePath")));
+                    EnsureUniqueProject(all.Where(item => item.Id != previous.Id), updated);
                     ProjectStore.Save(all.Select(x => x.Id == previous.Id ? updated : x).ToList()); return Project(updated);
                 } finally { persistenceGate.Release(); }
             case "project.history.list":
@@ -158,8 +187,13 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                     var legacyConnection = new SqlConnectionStringBuilder { DataSource = project.Server, InitialCatalog = project.Database, IntegratedSecurity = string.IsNullOrWhiteSpace(project.User), UserID = project.User, Password = project.Field("Password"), Encrypt = SqlConnectionEncryptOption.Optional, ConnectTimeout = 12, ApplicationName = "LS Code" };
                     available.Add(Register(new(project.Server, project.Database, legacyConnection.ConnectionString)));
                 }
-                var state = SettingsStore.Load(); state.ActiveProjectId = project.Id; state.ProjectLastAccess[project.Id] = DateTimeOffset.Now;
-                state.Workspace = project.SourcePath; SettingsStore.Save(state);
+                await persistenceGate.WaitAsync(ct);
+                try
+                {
+                    var state = SettingsStore.Load(); state.ActiveProjectId = project.Id; state.ProjectLastAccess[project.Id] = DateTimeOffset.Now;
+                    state.Workspace = project.SourcePath; SettingsStore.Save(state);
+                }
+                finally { persistenceGate.Release(); }
                 return new { project = Project(project), targets = available };
             case "workspace.reveal":
                 var folder = S("path");
@@ -198,6 +232,8 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                 return SqlSuggestions.Get(S("beforeCaret"), symbols, S("text")).Concat(CompletionSnippets.Get(sqlSnippets, S("beforeCaret"))).ToArray();
             case "javascript.complete":
                 if (S("language") != "javascript" && !CompletionSnippets.IsInScript(S("text"), S("beforeCaret").Length)) return Array.Empty<SqlSuggestion>();
+                var fields = S("language") == "xml" ? XmlTools.ScriptFields(S("text"), S("beforeCaret")) : [];
+                if (fields.Count > 0) return fields;
                 var jsSnippets = CompletionSnippets.Read(await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "Assets", "jssnippet.xml"), ct));
                 return CompletionSnippets.Get(jsSnippets, S("beforeCaret")).ToArray();
             case "sql.refresh": SqlSchemaCompletion.Clear(); return true;
@@ -321,15 +357,17 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                 return new { diagnostic, outline = XmlTools.Parse(S("text")).Descendants().Take(3000).Select(e => new { name = e.Name.ToString(), line = ((IXmlLineInfo)e).LineNumber }).ToArray() };
             case "xml.viewWidth": return XmlViewWidths.Find(S("text"), I("offset"));
             case "xml.validate": return S("text").Length > 1000000 ? null : XmlTools.Validate(S("text"));
+            case "xml.diagnostics": return await Task.Run(() => XmlTools.InspectEditor(S("text"), S("path"), OpenBuffers()), ct);
+            case "xml.controllerPreview": return await Task.Run(() => XmlControllerPreview.Read(S("text"), S("path"), OpenBuffers()), ct);
             case "xml.xpath":
                 var xml = XmlTools.Parse(S("text")); var manager = new XmlNamespaceManager(new NameTable());
                 if (xml.Root?.GetDefaultNamespace() is { NamespaceName.Length: > 0 } ns) manager.AddNamespace("d", ns.NamespaceName);
                 var value = xml.XPathEvaluate(S("expression"), manager);
                 return value is System.Collections.IEnumerable sequence and not string ? string.Join(Environment.NewLine, sequence.Cast<object>()) : Convert.ToString(value);
             case "xml.include":
-                var openBuffers = p.TryGetProperty("buffers", out var bufferElement) ? bufferElement.Deserialize<Dictionary<string, string>>(Json) ?? [] : [];
-                var byPath = new Dictionary<string, string>(openBuffers, StringComparer.OrdinalIgnoreCase);
-                return XmlIncludes.Find(S("path"), S("text"), I("offset"), path => byPath.TryGetValue(path, out var buffer) ? buffer : File.Exists(path) ? File.ReadAllText(path) : null);
+                var byPath = OpenBuffers();
+                return await Task.Run(() => XmlIncludes.Find(S("path"), S("text"), I("offset"),
+                    path => byPath.TryGetValue(path, out var buffer) ? buffer : File.Exists(path) ? File.ReadAllText(path) : null), ct);
             case "snippet.list": return ReadSnippets();
             case "snippet.completions":
                 var snippetFile = Path.Combine(AppContext.BaseDirectory, "Assets", S("language") == "javascript" ? "jssnippet.xml" : "sqlsnippet.xml");
@@ -414,7 +452,9 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
             var existing = ProjectStore.Load();
             if (preserveProgramPath)
             {
-                var customPath = existing.FirstOrDefault(p => p.Id == project.Id)?.Field("ProgramPath");
+                var previous = existing.FirstOrDefault(p => p.Id == project.Id);
+                project = WithUpdatePath(project, previous?.Field("UpdatePath") ?? "");
+                var customPath = previous?.Field("ProgramPath");
                 if (!string.IsNullOrWhiteSpace(customPath))
                 {
                     var raw = XmlTools.Parse(project.RawXml).Root!;
@@ -422,9 +462,31 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                     project = project with { RawXml = raw.ToString(SaveOptions.DisableFormatting) };
                 }
             }
+            else EnsureUniqueProject(existing, project);
             ProjectStore.Save(ProjectImporter.Merge(existing, [project], true).Projects);
         }
         finally { persistenceGate.Release(); }
+    }
+    private static string UpdatePath(LegacyProject project) =>
+        project.Field("UpdatePath").Trim() is { Length: > 0 } saved ? saved :
+            $@"\\172.168.5.14\CustomerUpdate\{project.Name}\update\";
+
+    private static LegacyProject WithUpdatePath(LegacyProject project, string value)
+    {
+        var xml = XmlTools.Parse(project.RawXml).Root!;
+        var path = xml.Elements().FirstOrDefault(field => field.Name.LocalName.Equals("UpdatePath", StringComparison.OrdinalIgnoreCase));
+        var updated = string.IsNullOrWhiteSpace(value) ? UpdatePath(project) : value.Trim();
+        if (path is null) xml.Add(new XElement("UpdatePath", updated));
+        else path.Value = updated;
+        return project with { RawXml = xml.ToString(SaveOptions.DisableFormatting) };
+    }
+
+    private static void EnsureUniqueProject(IEnumerable<LegacyProject> existing, LegacyProject candidate)
+    {
+        static bool Same(string left, string right) => left.Trim().Equals(right.Trim(), StringComparison.OrdinalIgnoreCase);
+        if (existing.Any(item => item.Id == candidate.Id ||
+            (Same(item.Name, candidate.Name) && Same(item.Server, candidate.Server) && Same(item.Database, candidate.Database))))
+            throw new InvalidOperationException($"Profile dự án '{candidate.Name}' đã tồn tại.");
     }
     public async Task StopTraceAsync()
     {
@@ -436,5 +498,5 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
         }
         finally { traceGate.Release(); }
     }
-    public async ValueTask DisposeAsync() { await StopTraceAsync(); http.Dispose(); traceGate.Dispose(); persistenceGate.Dispose(); }
+    public async ValueTask DisposeAsync() { await StopTraceAsync(); http.Dispose(); traceGate.Dispose(); }
 }

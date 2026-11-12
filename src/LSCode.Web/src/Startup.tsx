@@ -58,6 +58,16 @@ export default function Startup() {
         void request("window.close");
     });
   }, [entered]);
+  useEffect(() => {
+    if (entered || !native) return;
+    const openWindow = (event: KeyboardEvent) => {
+      if (!event.ctrlKey || !event.shiftKey || event.altKey || event.metaKey || event.code !== "KeyN") return;
+      event.preventDefault();
+      if (!event.repeat) void request("window.new").catch((failure: Error) => setError(failure.message));
+    };
+    window.addEventListener("keydown", openWindow, true);
+    return () => window.removeEventListener("keydown", openWindow, true);
+  }, [entered]);
   if (entered)
     return (
       <Suspense
@@ -76,6 +86,7 @@ export default function Startup() {
       {bootstrap ? (
         <ProjectDialog
           projects={bootstrap.projects}
+          lastAccess={bootstrap.settings.projectLastAccess}
           onProjects={(projects) => setBootstrap({ ...bootstrap, projects })}
           onClose={() => setEntered(true)}
           onOpen={async (p) => {

@@ -43,6 +43,7 @@ export type Settings = {
   crystalPath: string;
   profiler18Path: string;
   shortcuts: Record<string, string[]>;
+  projectLastAccess?: Record<string, string>;
   activityCommands?: string[] | null;
   [key: string]: unknown;
 };

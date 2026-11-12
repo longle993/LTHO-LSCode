@@ -7,6 +7,16 @@ import HtmlWorker from "monaco-editor/esm/vs/language/html/html.worker?worker";
 import CssWorker from "monaco-editor/esm/vs/language/css/css.worker?worker";
 import { request } from "./bridge";
 import type { DocumentInfo, Target } from "./bridge";
+import { xmlLanguage } from "./xmlLanguage";
+
+type XmlProblem = { line: number; column: number; message: string };
+export type EditorDiagnostic = XmlProblem & { severity: "error" | "warning" };
+const toDiagnostic = (marker: monaco.editor.IMarker): EditorDiagnostic => ({
+  line: marker.startLineNumber,
+  column: marker.startColumn,
+  message: marker.message,
+  severity: marker.severity === monaco.MarkerSeverity.Warning ? "warning" : "error",
+});
 
 (self as unknown as { MonacoEnvironment: unknown }).MonacoEnvironment = {
   getWorker: (_: string, label: string) =>
@@ -35,15 +45,31 @@ export const language = (name: string) =>
     cs: "csharp",
     md: "markdown",
   })[name.split(".").pop()?.toLowerCase() ?? ""] ?? "plaintext";
+const editorLanguage = (name: string) => {
+  const id = language(name);
+  return id === "xml" ? xmlLanguage : id;
+};
 const viewStates = new Map<string, monaco.editor.ICodeEditorViewState>();
+const modelSources = new Map<string, { path: string | null; initialVersion: number; validate: () => void }>();
+export function xmlIncludeBuffers() {
+  return Object.fromEntries(monaco.editor.getModels().flatMap((model) => {
+    const source = modelSources.get(model.uri.toString());
+    return source?.path && model.getVersionId() !== source.initialVersion && model.getValueLength() <= 1_000_000
+      ? [[source.path, model.getValue()]] : [];
+  }));
+}
 export const modelFor = (d: DocumentInfo) => {
   const existing = monaco.editor.getModel(
     monaco.Uri.parse("lscode://document/" + d.id),
   );
-  if (existing) return existing;
+  if (existing) {
+    const source = modelSources.get(existing.uri.toString());
+    if (source) source.path = d.path;
+    return existing;
+  }
   const model = monaco.editor.createModel(
     d.text,
-    language(d.name),
+    editorLanguage(d.name),
     monaco.Uri.parse("lscode://document/" + d.id),
   );
   model.setEOL(
@@ -57,7 +83,7 @@ export const modelFor = (d: DocumentInfo) => {
       clearTimeout(timer);
       timer = setTimeout(async () => {
         if (model.isDisposed()) return;
-        if (model.getLanguageId() !== "xml") {
+        if (model.getLanguageId() !== xmlLanguage) {
           monaco.editor.setModelMarkers(model, "xml", []);
           return;
         }
@@ -68,28 +94,19 @@ export const modelFor = (d: DocumentInfo) => {
           return;
         }
         try {
-          const problem = await request<{
-            line: number;
-            column: number;
-            message: string;
-          } | null>("xml.validate", { text });
-          if (!model.isDisposed() && version === model.getVersionId())
-            monaco.editor.setModelMarkers(
-              model,
-              "xml",
-              problem
-                ? [
-                    {
-                      severity: monaco.MarkerSeverity.Error,
-                      message: problem.message,
-                      startLineNumber: problem.line,
-                      endLineNumber: problem.line,
-                      startColumn: problem.column,
-                      endColumn: problem.column + 1,
-                    },
-                  ]
-                : [],
-            );
+          const { diagnostic, warnings } = await request<{
+            diagnostic: XmlProblem | null;
+            warnings: XmlProblem[];
+          }>("xml.diagnostics", { text, path: modelSources.get(model.uri.toString())?.path, buffers: xmlIncludeBuffers() });
+          if (model.isDisposed() || version !== model.getVersionId() || model.getLanguageId() !== xmlLanguage) return;
+          monaco.editor.setModelMarkers(model, "xml", (diagnostic ? [diagnostic] : warnings).map((problem) => ({
+            severity: diagnostic ? monaco.MarkerSeverity.Error : monaco.MarkerSeverity.Warning,
+            message: problem.message,
+            startLineNumber: problem.line,
+            endLineNumber: problem.line,
+            startColumn: problem.column,
+            endColumn: problem.column + 1,
+          })));
         } catch {
           /* Native bridge errors are surfaced by the workbench; no fabricated diagnostics. */
         }
@@ -97,7 +114,9 @@ export const modelFor = (d: DocumentInfo) => {
     };
     const changed = model.onDidChangeContent(validate);
     const changedLanguage = model.onDidChangeLanguage(validate);
+    modelSources.set(model.uri.toString(), { path: d.path, initialVersion: model.getVersionId(), validate });
     model.onWillDispose(() => {
+      modelSources.delete(model.uri.toString());
       clearTimeout(timer);
       changed.dispose();
       changedLanguage.dispose();
@@ -200,9 +219,9 @@ function sqlSnippet(body: string) {
     (_, label) => "${" + ++n + ":" + (label ?? "") + "}",
   );
 }
-for (const lang of ["javascript", "xml", "html"])
+for (const lang of ["javascript", xmlLanguage, "html"])
   monaco.languages.registerCompletionItemProvider(lang, {
-    triggerCharacters: ["."],
+    triggerCharacters: [".", "'", '"'],
     provideCompletionItems: async (model, position, _, token) => {
       const word = model.getWordUntilPosition(position);
       const range = {
@@ -213,9 +232,9 @@ for (const lang of ["javascript", "xml", "html"])
       };
       try {
         const values = await request<
-          { text: string; insertText: string; description: string }[]
+          { text: string; insertText: string; description: string; isSnippet: boolean }[]
         >("javascript.complete", {
-          language: lang,
+          language: lang === xmlLanguage ? "xml" : lang,
           text: model.getValue(),
           beforeCaret: model.getValueInRange({
             startLineNumber: 1,
@@ -230,7 +249,7 @@ for (const lang of ["javascript", "xml", "html"])
             label: x.text,
             insertText: x.insertText,
             detail: x.description,
-            kind: monaco.languages.CompletionItemKind.Snippet,
+            kind: x.isSnippet ? monaco.languages.CompletionItemKind.Snippet : monaco.languages.CompletionItemKind.Field,
             range,
           })),
         };
@@ -239,7 +258,7 @@ for (const lang of ["javascript", "xml", "html"])
       }
     },
   });
-monaco.languages.registerHoverProvider("xml", {
+monaco.languages.registerHoverProvider(xmlLanguage, {
   async provideHover(model, position, token) {
     const hint = await request<{
       field: string;
@@ -283,7 +302,7 @@ export function CodeEditor({
   target?: Target;
   readOnly?: boolean;
   onDiagnostics?: (
-    diagnostics: { line: number; column: number; message: string }[],
+    diagnostics: EditorDiagnostic[],
   ) => void;
   viewId?: string;
   onChange: () => void;
@@ -325,7 +344,7 @@ export function CodeEditor({
         model = editor.getModel(),
         basic = `Dòng ${e.position.lineNumber}, cột ${e.position.column}`;
       callbacks.current.onCursor(basic);
-      if (model?.getLanguageId() !== "xml") return;
+      if (model?.getLanguageId() !== xmlLanguage) return;
       const hint = await request<{
         field: string;
         width: number;
@@ -349,15 +368,11 @@ export function CodeEditor({
     const focus = editor.onDidFocusEditorText(() =>
       callbacks.current.onMount(editor),
     );
-    const markers = monaco.editor.onDidChangeMarkers(() => {
+    const markers = monaco.editor.onDidChangeMarkers((uris) => {
       const model = editor.getModel();
-      if (model)
+      if (model && uris.some((uri) => uri.toString() === model.uri.toString()))
         callbacks.current.onDiagnostics?.(
-          monaco.editor.getModelMarkers({ resource: model.uri }).map((m) => ({
-            line: m.startLineNumber,
-            column: m.startColumn,
-            message: m.message,
-          })),
+          monaco.editor.getModelMarkers({ resource: model.uri }).map(toDiagnostic),
         );
     });
     const keys = editor.onKeyDown((e) => {
@@ -402,6 +417,9 @@ export function CodeEditor({
   }, []);
   useEffect(() => {
     const model = modelFor(document);
+    instance.current!.updateOptions({
+      quickSuggestions: { other: true, comments: false, strings: model.getLanguageId() === xmlLanguage },
+    });
     targetByModel.set(model.uri.toString(), target);
     const previous = instance.current!.getModel(),
       previousState = instance.current!.saveViewState();
@@ -411,23 +429,20 @@ export function CodeEditor({
     const restored = viewStates.get(model.uri.toString() + "|" + viewId);
     if (restored) instance.current!.restoreViewState(restored);
     callbacks.current.onDiagnostics?.(
-      monaco.editor.getModelMarkers({ resource: model.uri }).map((m) => ({
-        line: m.startLineNumber,
-        column: m.startColumn,
-        message: m.message,
-      })),
+      monaco.editor.getModelMarkers({ resource: model.uri }).map(toDiagnostic),
     );
-    monaco.editor.setModelLanguage(model, language(document.name));
+    monaco.editor.setModelLanguage(model, editorLanguage(document.name));
+    if (previous !== model) modelSources.get(model.uri.toString())?.validate();
     callbacks.current.onMount(instance.current!);
-  }, [document.id, document.name, target?.id]);
+  }, [document.id, document.name, document.path, target?.id]);
   useEffect(() => {
-    monaco.editor.setTheme(
-      theme === "High Contrast"
-        ? "hc-black"
-        : theme === "Dark"
-          ? "vs-dark"
-          : "vs",
-    );
+    const base = theme === "High Contrast" ? "hc-black" : theme === "Dark" ? "vs-dark" : "vs";
+    monaco.editor.defineTheme("lscode-" + base, {
+      base, inherit: true,
+      rules: [{ token: "delimiter.cdata.xml", foreground: base === "vs" ? "18683C" : base === "hc-black" ? "BFFF00" : "63D990", fontStyle: "bold" }],
+      colors: {},
+    });
+    monaco.editor.setTheme("lscode-" + base);
   }, [theme]);
   return (
     <div ref={host} className="code-editor" aria-label="Trình soạn thảo mã" />

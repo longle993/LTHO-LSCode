@@ -1,6 +1,7 @@
 import ControllerExplorer, { FileIcon } from "./ControllerExplorer";
 import { pathIsWithin, rebasePath, tabFolderLabel } from "./fileLabels";
 import { FileSections } from "./features/FileSections";
+import { ControllerPreview } from "./features/ControllerPreview";
 import { ProjectHistory } from "./features/ProjectHistory";
 import logo from "../../../assets/logo2.png";
 import { LoadingLine } from "./LoadingLine";
@@ -61,7 +62,7 @@ import {
   language,
   markSqlErrors,
 } from "./editor";
-import type { EditorHandle } from "./editor";
+import type { EditorDiagnostic, EditorHandle } from "./editor";
 import { Button, IconButton, Select, Modal, DataGrid } from "./ui";
 import {
   ToolDialog,
@@ -92,9 +93,7 @@ export default function App({
   initialProjectId,
   bootstrap,
 }: { initialProjectId?: string; bootstrap?: Bootstrap } = {}) {
-  const [diagnostics, setDiagnostics] = useState<
-    { line: number; column: number; message: string }[]
-  >([]);
+  const [diagnostics, setDiagnostics] = useState<EditorDiagnostic[]>([]);
   const [settings, setSettings] = useState<Settings>(initialSettings),
     [projects, setProjects] = useState<Project[]>([]),
     [snippets, setSnippets] = useState<Snippet[]>([]);
@@ -1004,10 +1003,10 @@ export default function App({
           (v) => v.toUpperCase() === key.toUpperCase(),
         ),
       );
-      if (c && !document.querySelector("dialog[open]")) {
+      if (c && (c[0] === "window.new" || !document.querySelector("dialog[open]"))) {
         e.preventDefault();
         e.stopImmediatePropagation();
-        void guard(() => executeRef.current(c[0]));
+        if (c[0] !== "window.new" || !e.repeat) void guard(() => executeRef.current(c[0]));
       }
     };
     window.addEventListener("keydown", keys, true);
@@ -1498,6 +1497,7 @@ export default function App({
                   }[nav]
                 }
               </h2>
+              <div className="sidebar-heading-actions">
               <IconButton
                 label="Tải lại"
                 onClick={() =>
@@ -1514,6 +1514,7 @@ export default function App({
               <IconButton label="Ẩn không gian dự án" onClick={() => setSide(false)}>
                 <PanelLeftClose size={15} />
               </IconButton>
+              </div>
             </div>
             <div className="side-tabs">
               {[
@@ -1554,7 +1555,7 @@ export default function App({
               </>
             )}
             {nav === "files" && (
-              <div className="side-content">
+              <div className="side-content side-wide">
                 {workspace ? (
                   <>
                     <div className="section-label">
@@ -1566,11 +1567,17 @@ export default function App({
                       const expanded = expandedController === group.link;
                       const label = (group.file || group.link).split(/[\\/]/).at(-1)?.replace(/\.[^.]+$/, "") ?? group.link;
                       return <div className="controller-group" key={group.link}>
+                        <div className="controller-group-header">
                         <button className="tree-row folder-row controller-group-title" aria-expanded={expanded} title={group.link}
                           onClick={() => { controllerSelection.current++; setExpandedController(expanded ? undefined : group.link); }}>
                           {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                           <Folder size={15} className="folder-icon" /><span>{label}</span>
                         </button>
+                        <IconButton label={"Đóng controller " + label} onClick={() => {
+                          setControllers((current) => current.filter((entry) => entry.link !== group.link));
+                          if (expanded) setExpandedController(undefined);
+                        }}><X size={13} /></IconButton>
+                        </div>
                         {expanded && <div className="tree-children">
                           <ControllerExplorer
                             root={workspace}
@@ -1791,7 +1798,7 @@ export default function App({
                     <Button onClick={() => setDialog("sync")}>Đồng bộ</Button>
                   </div>
                 </div>
-                <div className="side-content loading-region" aria-busy={controllerRequests > 0}>
+                <div className="side-content side-wide loading-region" aria-busy={controllerRequests > 0}>
                   <LoadingLine busy={controllerRequests > 0} label="Đang tải cây controller…" />
                   {!menuQuery && (
                     <FunctionTree
@@ -1895,6 +1902,9 @@ export default function App({
             <div className="toolbar-spacer" />
             {active && !selectedTool && (
               <>
+                {language(active.name) === "xml" && (
+                  <Button variant="ghost" onClick={() => setDialog("editor.controllerPreview")}>Xem trước Grid / Dir</Button>
+                )}
                 <Select
                   label="Database của tab"
                   value={target?.id ?? ""}
@@ -2172,7 +2182,7 @@ export default function App({
                           <strong>
                             {d.line}:{d.column}
                           </strong>{" "}
-                          {d.message}
+                          {d.severity === "warning" ? "Cảnh báo · " : ""}{d.message}
                         </span>
                       </button>
                     ))
@@ -2248,6 +2258,7 @@ export default function App({
       {dialog === "projects" && (
         <ProjectDialog
           projects={projects}
+          lastAccess={settings.projectLastAccess}
           onClose={() => setDialog("")}
           onProjects={setProjects}
           onOpen={openProject}
@@ -2288,6 +2299,9 @@ export default function App({
           </div>
         </Modal>
       )}
+      {dialog === "editor.controllerPreview" && active && (
+        <ControllerPreview key={active.id} text={textOf(active)} path={active.path} onClose={() => setDialog("")} />
+      )}
       {dialog === "editor.sections" && active && (
         <FileSections name={active.name} text={textOf(active)} onClose={() => setDialog("")}
           onJump={(offset) => {
@@ -2300,7 +2314,7 @@ export default function App({
             });
           }} />
       )}
-      {dialog && !["connection", "projects", "settings", "editor.sections"].includes(dialog) && (
+      {dialog && !["connection", "projects", "settings", "editor.sections", "editor.controllerPreview"].includes(dialog) && (
         <ToolDialog
           onDirtyChange={(dirty) => {
             toolDirty.current = dirty;

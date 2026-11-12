@@ -427,6 +427,11 @@ kbd {
   @apply [font-size:12px];
   @apply [font-weight:600];
 }
+.sidebar-heading-actions {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+}
 .side-tabs {
   @apply flex;
   @apply [gap:4px];
@@ -453,6 +458,35 @@ kbd {
   @apply min-h-0;
   @apply overflow-auto;
   @apply [padding:0_10px_12px];
+}
+.side-wide .tree-row,
+.side-wide .search-hit {
+  min-width: max-content;
+}
+.side-wide .search-hit > strong {
+  white-space: nowrap;
+}
+.side-wide {
+  scrollbar-gutter: stable;
+}
+.side-wide::-webkit-scrollbar:horizontal {
+  height: 12px;
+}
+.side-wide::-webkit-scrollbar-thumb:horizontal {
+  background: color-mix(in srgb, var(--foreground) 35%, var(--surface));
+}
+.controller-group-header,
+.project-list-entry {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.controller-group-header > .tree-row,
+.project-list-entry > .project-row {
+  flex: 1;
+}
+.controller-group-header > .tree-row {
+  min-width: 0;
 }
 .side-empty {
   @apply flex;
@@ -1125,6 +1159,98 @@ kbd {
 }
 .modal.wide {
   @apply [width:1040px];
+}
+.grid-preview {
+  min-width: 0;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  font-size: 12px;
+}
+.grid-preview-heading,
+.grid-preview-toolbar {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border-strong);
+  background: color-mix(in srgb, var(--primary) 8%, var(--surface));
+}
+.grid-preview-heading h3 {
+  font-size: 14px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+.grid-preview-heading p {
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+.grid-preview-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.grid-preview-separator {
+  height: 14px;
+  border-left: 1px solid var(--border-strong);
+}
+.grid-preview-scroll {
+  overflow-x: auto;
+}
+.grid-preview-scroll::-webkit-scrollbar-thumb:horizontal,
+.grid-preview-toolbar::-webkit-scrollbar-thumb:horizontal {
+  background: color-mix(in srgb, var(--foreground) 35%, var(--surface));
+}
+.grid-preview table {
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+.grid-preview th,
+.grid-preview td {
+  height: 25px;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.grid-preview th {
+  padding: 4px 7px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+  font-weight: 600;
+}
+.grid-preview td,
+.grid-preview-empty {
+  padding: 4px 8px;
+  color: var(--muted);
+}
+.grid-preview tbody tr:nth-child(even) {
+  background: var(--background);
+}
+.dir-preview-layout {
+  width: max-content;
+  padding: 10px;
+}
+.dir-preview-row {
+  display: grid;
+  align-items: center;
+  min-height: 34px;
+}
+.dir-preview-label,
+.dir-preview-field {
+  min-width: 0;
+  padding-inline: 4px;
+}
+.dir-preview-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dir-preview-field input {
+  width: 100%;
+  min-width: 0;
+  min-height: 25px;
+  padding: 2px 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
 }
 .modal::backdrop {
   @apply [background:#0006];

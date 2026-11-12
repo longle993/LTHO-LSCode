@@ -25,7 +25,7 @@ $targets += Get-ChildItem -LiteralPath $webRoot -Filter '*.tsbuildinfo' -File | 
 if (Test-Path -LiteralPath $artifactRoot) {
     $targets += Get-ChildItem -LiteralPath $artifactRoot -Directory | Where-Object {
         $_.Name -match '^(smoke-|webview-(final-)?smoke-|catalog-(compact-regression|regression|transfer)-|compact-check-)' -or
-        $_.Name -in @('publish-ready', 'publish-save-fix', 'publish-web-link', 'publish-xml-save-fix', 'ui-a-validation')
+        $_.Name -in @('installer-publish', 'publish-ready', 'publish-save-fix', 'publish-web-link', 'publish-xml-save-fix', 'ui-a-validation')
     } | Select-Object -ExpandProperty FullName
 }
 

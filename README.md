@@ -1,6 +1,6 @@
 # LTHO Studio Code (LS Code)
 
-**Tìm nhanh lịch sử và tạo script cột cho bảng phân kỳ ERP**. Bản chạy `artifacts/publish-webview-tab-stripes/LSCode.WebView.exe`. [Lịch sử file](docs/WORKBENCH-PROJECT-HISTORY.vi.md) · [Cấu trúc và dữ liệu](docs/WEBVIEW-RUNNING.vi.md)
+**LSCode WebView cho Windows x64**. Bộ cài nằm tại `artifacts/installer/LSCode-WebView-Setup-x64.exe`. [Hướng dẫn cài đặt](docs/CAI-DAT-LSCODE.vi.md) · [Hướng dẫn WebView](docs/WEBVIEW-RUNNING.vi.md)
 
 **Bản React + WebView2:** build bằng `./build-webview.ps1 -Test -Smoke -Publish`, mở `artifacts/publish-webview/LSCode.WebView.exe`. [Hướng dẫn và trạng thái kiểm chứng](docs/WEBVIEW-RUNNING.vi.md) · [Đặc tả chuyển đổi toàn bộ tính năng](docs/WEBVIEW-MIGRATION.vi.md). Bản WPF bên dưới vẫn được giữ để đối chiếu.
 

@@ -129,6 +129,7 @@ public sealed class StudioWindow : Window
             var core = view.CoreWebView2;
             core.SetVirtualHostNameToFolderMapping("lscode.local", assets, CoreWebView2HostResourceAccessKind.DenyCors);
             core.Settings.AreDefaultContextMenusEnabled = false;
+            core.Settings.AreBrowserAcceleratorKeysEnabled = false;
             core.Settings.AreDevToolsEnabled = System.Diagnostics.Debugger.IsAttached;
             core.Settings.IsStatusBarEnabled = false;
             core.Settings.IsNonClientRegionSupportEnabled = true;
@@ -193,8 +194,7 @@ public sealed class StudioWindow : Window
             }
             if (request.Method == "window.new")
             {
-                var executable=Environment.ProcessPath ?? throw new InvalidOperationException("Không tìm thấy executable của ứng dụng.");
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(executable) { UseShellExecute = true });
+                new StudioWindow(false).Show();
                 Reply(new(1, request.RequestId, true)); return;
             }
             using var cts = new CancellationTokenSource();

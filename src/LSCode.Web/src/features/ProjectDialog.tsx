@@ -1,24 +1,37 @@
 import { writeClipboard } from "../bridge";
-import { useState } from "react";
-import { ArrowRight, FolderOpen } from "lucide-react";
-import { Button, Modal } from "../ui";
+import { useEffect, useState } from "react";
+import { ArrowRight, FolderOpen, Trash2 } from "lucide-react";
+import { Button, IconButton, Modal } from "../ui";
 import { request } from "../bridge";
-import type { Project } from "../bridge";
+import type { Project, Settings } from "../bridge";
 import { useTask } from "./useTask";
 import { LoadingLine } from "../LoadingLine";
 import { SyncTool } from "./SyncTool";
 export function ProjectDialog({
   projects,
+  lastAccess,
   onProjects,
   onOpen,
   onClose,
 }: {
   projects: Project[];
+  lastAccess?: Record<string, string>;
   onProjects: (p: Project[]) => void;
   onOpen: (p: Project) => Promise<void>;
   onClose: () => void;
 }) {
   const [editing, setEditing] = useState<Project>();
+  const [deleting, setDeleting] = useState<Project>();
+  const [updatePath, setUpdatePath] = useState("");
+  const [sharedAccess, setSharedAccess] = useState<Record<string, string>>();
+  useEffect(() => {
+    let current = true;
+    void request<Settings>("settings.read").then((preferences) => {
+      if (current) setSharedAccess(preferences?.projectLastAccess);
+    }).catch(() => {});
+    return () => { current = false; };
+  }, []);
+  const access = (id: string) => Math.max(Date.parse(lastAccess?.[id] ?? "") || 0, Date.parse(sharedAccess?.[id] ?? "") || 0);
   const [programPath, setProgramPath] = useState("");
   const [metadata, setMetadata] = useState("");
   const [search, setSearch] = useState(""),
@@ -58,7 +71,13 @@ export function ProjectDialog({
           >
             Danh sách
           </Button>
-          <Button variant="ghost" onClick={() => setMode("create")}>
+          <Button variant="ghost" onClick={() => {
+            setEditing(undefined);
+            setProgramPath("");
+            setUpdatePath("");
+            setForm({ name: "", server: ".", database: "", sourcePath: "" });
+            setMode("create");
+          }}>
             Tạo profile
           </Button>
           <Button variant={mode === "sync" ? "secondary" : "ghost"} onClick={() => setMode("sync")}>
@@ -94,16 +113,18 @@ export function ProjectDialog({
                     .toLowerCase()
                     .includes(search.toLowerCase()),
                 )
+                .sort((a, b) => access(b.id) - access(a.id) || a.name.localeCompare(b.name, "vi"))
                 .map((p) => (
+                  <div className="project-list-entry" key={p.id}>
                   <button
                     className="project-row"
-                    key={p.id}
                     disabled={task.busy}
                     onContextMenu={(e) => {
                       e.preventDefault();
                       void task.run(async () => {
                         const detail = await request<{
                           programPath: string;
+                          updatePath: string;
                           metadata: string;
                         }>("project.details", { id: p.id });
                         setEditing(p);
@@ -114,6 +135,7 @@ export function ProjectDialog({
                           sourcePath: p.sourcePath,
                         });
                         setProgramPath(detail.programPath);
+                        setUpdatePath(detail.updatePath ?? "");
                         setMetadata(detail.metadata);
                         setMode("edit");
                       });
@@ -131,6 +153,11 @@ export function ProjectDialog({
                     </span>
                     <ArrowRight size={16} />
                   </button>
+                  <IconButton label={"Xóa profile " + p.name} disabled={task.busy} onClick={() => {
+                    setDeleting(p);
+                    setMode("delete");
+                  }}><Trash2 size={15} /></IconButton>
+                  </div>
                 ))}
               {projects.length === 0 && (
                 <div className="empty">
@@ -140,6 +167,18 @@ export function ProjectDialog({
             </div>
           </>
         )}
+        {mode === "delete" && deleting && <>
+          <p>Xóa profile <strong>{deleting.name}</strong> khỏi danh sách? Thư mục dự án và database vẫn được giữ.</p>
+          <div className="inline-checks">
+            <Button disabled={task.busy} onClick={() => setMode("list")}>Hủy</Button>
+            <Button className="table-drop-action" disabled={task.busy} onClick={() => void task.run(async () => {
+              await request("project.delete", { id: deleting.id });
+              onProjects(await request<Project[]>("project.list"));
+              setDeleting(undefined);
+              setMode("list");
+            })}>Xóa profile</Button>
+          </div>
+        </>}
         {["create", "edit"].includes(mode) && (
           <form
             className="form"
@@ -148,7 +187,7 @@ export function ProjectDialog({
               void task.run(async () => {
                 const updated = await request<Project>(
                   mode === "edit" ? "project.update" : "project.create",
-                  { ...form, id: editing?.id, programPath },
+                  { ...form, id: editing?.id, programPath, updatePath },
                 );
                 onProjects(await request<Project[]>("project.list"));
                 setMode("list");
@@ -171,6 +210,11 @@ export function ProjectDialog({
                 />
               </label>
             ))}
+            <label>
+              Thư mục update
+              <input value={updatePath} onChange={(e) => setUpdatePath(e.target.value)}
+                placeholder={`\\\\172.168.5.14\\CustomerUpdate\\${form.name || "<Tên dự án>"}\\update\\`} />
+            </label>
             {mode === "edit" && (
               <>
                 <label>

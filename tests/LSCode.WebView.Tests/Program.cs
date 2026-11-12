@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using LSCode.Core;
 using LSCode.Domain;
 using LSCode.Infrastructure;
 using LSCode.Contracts;
@@ -85,6 +86,113 @@ Check(ReadOnlyQuery.Validate("SELECT TOP (1000) * FROM [dbo].[t] WHERE name='; U
 await Reject<ArgumentException>(() => Task.FromResult(ReadOnlyQuery.Validate("SELECT * FROM t; DELETE FROM t")), "Table viewer rejects additional write statement");
 await Reject<ArgumentException>(() => Task.FromResult(ReadOnlyQuery.Validate("SELECT * INTO copied FROM t")), "Table viewer rejects SELECT INTO");
 var viewXml = "<views><view id='Dir'><item value='120,30,70,100,100,130'/><item value='110100: [ma_nv].Label, [ma_nv], [ten]'/></view></views>";
+var controllers = Path.Combine(root, "App_Data", "Controllers");
+var includeDirectory = Directory.CreateDirectory(Path.Combine(controllers, "Include", "XML")).FullName;
+var dirFile = Path.Combine(controllers, "Dir", "EmployeeStatus.xml");
+var includeFile = Path.Combine(includeDirectory, "EditLog.ent");
+await File.WriteAllTextAsync(includeFile, """
+    <!ENTITY ListWhenBeforeUpdateLog "exec FastBusiness$App$List$EditLog">
+    """);
+const string xmlWithInclude = """
+    <!DOCTYPE dir [<!ENTITY % Log SYSTEM "EditLog">%Log;]>
+    <dir><title v="Trạng thái nhân viên"/><command>&ListWhenBeforeUpdateLog;</command></dir>
+    """;
+Check(XmlTools.InspectEditor(xmlWithInclude, dirFile).Diagnostic is null &&
+    XmlControllerPreview.Read(xmlWithInclude, dirFile).Title == "Trạng thái nhân viên" &&
+    XmlIncludes.Find(dirFile, xmlWithInclude, xmlWithInclude.IndexOf("&ListWhenBeforeUpdateLog;", StringComparison.Ordinal) + 1)?.Path == includeFile,
+    "XML diagnostics, preview and F12 resolve the same nested ERP entity through Include/XML");
+Check(XmlTools.InspectEditor(xmlWithInclude, dirFile, new Dictionary<string, string>
+    { [includeFile] = "<!ENTITY ListWhenBeforeUpdateLog 'SQL đang sửa'>" }).Diagnostic is null &&
+    XmlTools.InspectEditor(xmlWithInclude.Replace("&ListWhenBeforeUpdateLog;", "&Missing;"), dirFile).Diagnostic is { Line: 2 },
+    "Include validation supports unsaved entity buffers and still reports genuinely undeclared entities");
+var gridPreview = XmlControllerPreview.Read("""
+    <?xml version="1.0" encoding="utf-8"?>
+    <grid xmlns="urn:erp">
+      <title v="Cập nhật thông tin lương nhân viên" e="Employee Salary Information Input"/>
+      <subTitle v="Cập nhật thông tin lương, tài khoản ngân hàng..."/>
+      <toolBar><button id="Edit"><title v="Sửa"/></button><separator/><button id="Find"><title v="Tìm"/></button></toolBar>
+      <fields>
+        <field name="ma_nv" width="110"><header v="Mã nhân viên"/></field>
+        <field name="ten" width="160"><header e="Name"/></field>
+        <field name="stt_rec" width="99" hidden="true"/>
+      </fields>
+      <views><view id="Grid"><item value="ten, [stt_rec], [ma_nv], [ma_nv].Label"/></view></views>
+    </grid>
+    """);
+Check(gridPreview.Title == "Cập nhật thông tin lương nhân viên" &&
+    gridPreview.Subtitle == "Cập nhật thông tin lương, tài khoản ngân hàng..." &&
+    gridPreview.Toolbar.SequenceEqual(new string?[] { "Sửa", null, "Tìm" }) &&
+    gridPreview.Views.Single().Columns.SequenceEqual([
+        new GridPreviewColumn("ten", "Name", 160), new GridPreviewColumn("ma_nv", "Mã nhân viên", 110)
+    ]), "Grid preview reads localized captions, toolbar order, view column widths and hidden fields");
+var dirPreview = XmlControllerPreview.Read("""
+    <dir xmlns="urn:erp">
+      <title v="Khai báo nhân viên"/><subTitle v="Thông tin nhân viên"/>
+      <toolbar><button id="Save"><title v="Lưu"/></button></toolbar>
+      <fields>
+        <field name="nam"><header v="Năm hiển thị trong bảng"/><label v="Năm"/></field>
+        <field name="internal" hidden="true"/>
+        <field name="ma_nv"><header v="Mã nhân viên"/></field>
+      </fields>
+      <views><view id="Dir">
+        <item value="120,40,60,320,0"/>
+        <item value="110-: [nam].Label, [nam]"/>
+        <item value="1-11: [internal].Label, [internal], [ma_nv]"/>
+      </view></views>
+    </dir>
+    """);
+var dirLayout = dirPreview.Views.Single().Layout!;
+Check(dirPreview is { Kind: "dir", Title: "Khai báo nhân viên", Subtitle: "Thông tin nhân viên" } &&
+    dirPreview.Toolbar.SequenceEqual(["Lưu"]) && dirLayout.Widths.SequenceEqual([120, 40, 60, 320, 0]) &&
+    dirLayout.Rows[0].SequenceEqual([
+        new DirPreviewCell("nam", "Năm", true, 1, 1), new DirPreviewCell("nam", "Năm", false, 2, 2)
+    ]) && dirLayout.Rows[1].SequenceEqual([new DirPreviewCell("ma_nv", "Mã nhân viên", false, 4, 1)]),
+    "Dir preview honors label cells, zero spans, skipped columns and hidden-field gaps");
+var xmlDiagnostics = XmlTools.InspectEditor("\uFEFF" + """
+    <?xml version="1.0" encoding="utf-8"?>
+    <!DOCTYPE dir [<!ENTITY example "ERP">]>
+    <dir title="&example;">
+      <fields>
+        <field name="ma_nv"/>
+        <field name="MA_NV"/>
+        <field name="missing"/>
+      </fields>
+      <views>
+        <view id="Dir"><item value="111: [ma_nv].Label, [ma_nv], [ma_nv]"/></view>
+        <view id="dir"><item value="1: [ma_nv]"/></view>
+      </views>
+    </dir>
+    """);
+Check(xmlDiagnostics.Diagnostic is null && xmlDiagnostics.Warnings.Select(w => w.Line).Order().SequenceEqual([6, 7, 10, 11]),
+    "XML editor accepts BOM, declaration and DTD and locates missing or duplicate ERP fields and view IDs");
+Check(XmlTools.InspectEditor("<?xml version=\"1.0\" encoding=\"utf-8\"?><dir><fields><field name='x'/></fields><views><view id='a'><item value='11: [x].Label, [x]'/></view><view id='b'><item value='1: [x]'/></view></views></dir>") is { Diagnostic: null, Warnings.Count: 0 },
+    "Labels and references shared between different views are valid");
+Check(XmlTools.InspectEditor("<?xml version=\"1.0\" encoding=\"utf-8\"?><dir></grid>").Diagnostic?.Line == 1,
+    "XML editor still reports malformed markup");
+var dashLayout = """
+    <dir>
+      <fields><field name="thang"/><field name="nam"/><field name="ten_bp"/></fields>
+      <views><view id="Dir">
+        <item value="120, 40, 60, 320, 0"/>
+        <item value="11--: [thang].Label, [thang]"/>
+        <item value="110-: [nam].Label, [nam]"/>
+        <item value="1-: [ten_bp%l], [extra]"/>
+        <item value="11-: [extra2]"/>
+        <item value="1-: [decorative].Label, [decorative].Label"/>
+        <item value="11-: [heading].Label"/>
+      </view></views>
+      <script><![CDATA[g.getValue('th');]]></script>
+    </dir>
+    """;
+var dashWarnings = XmlTools.InspectEditor(dashLayout).Warnings;
+Check(dashWarnings.Count == 2 && dashWarnings.All(w => w.Message.StartsWith("Layout")),
+    "Dash masks resolve, both field slot mismatches are reported, and labels alone do not cause warnings");
+Check(XmlViewWidths.Find(dashLayout, dashLayout.LastIndexOf("[thang]") + 2)?.Width == 40 &&
+    XmlViewWidths.Find(dashLayout, dashLayout.LastIndexOf("[nam]") + 2)?.Width == 100,
+    "Dash layout hover widths stop at skipped columns and retain zero spans");
+var jsCaret = dashLayout.IndexOf("g.getValue('th", StringComparison.Ordinal) + "g.getValue('th".Length;
+Check(XmlTools.ScriptFields(dashLayout, dashLayout[..jsCaret]).Select(suggestion => suggestion.Text).SequenceEqual(["thang"]),
+    "A quoted g. argument suggests matching fields from views");
 Check(XmlViewWidths.Find(viewXml, viewXml.IndexOf("[ma_nv].Label")+5)?.Width == 120, "View label uses first grid width");
 Check(XmlViewWidths.Find(viewXml, viewXml.IndexOf(", [ma_nv]")+5)?.Width == 100, "View field spans 30 + 70");
 Check(XmlViewWidths.Find(viewXml, viewXml.IndexOf("[ten]")+2)?.Width == 330, "View final field spans trailing zero columns");
@@ -114,6 +222,15 @@ await using (var projectTools = new DeveloperTools())
         """);
     await WriteConfig("Saved_App", "Saved_Sys");
     var syncedProject = (ProjectInfo)(await CallProject("project.sync", new { name = "ERP startup fixture", configPath }))!;
+    var details = JsonSerializer.SerializeToElement(await CallProject("project.details", new { id = syncedProject.Id }), Protocol.Json);
+    Check(details.GetProperty("updatePath").GetString() == @"\\172.168.5.14\CustomerUpdate\ERP startup fixture\update\",
+        "Project sync saves the default update folder");
+    var created = (ProjectInfo)(await CallProject("project.create", new { name = "Temporary profile", server = ".", database = "Test", sourcePath = root, updatePath = @"D:\Updates" }))!;
+    await Reject<InvalidOperationException>(() => CallProject("project.create", new { name = created.Name, server = ".", database = "Test", sourcePath = root }),
+        "Duplicate project creation is rejected");
+    await CallProject("project.delete", new { id = created.Id });
+    Check(((ProjectInfo[])(await CallProject("project.list", new { }))!).All(p => p.Id != created.Id) && Directory.Exists(root),
+        "Deleting a project removes only its catalog profile");
     async Task<IEnumerable<string?>> OpenDatabases()
     {
         var opened = await CallProject("project.open", new { id = syncedProject.Id });

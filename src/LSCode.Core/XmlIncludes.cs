@@ -1,4 +1,7 @@
 using System.Text.RegularExpressions;
+using System.Net;
+using System.Text;
+using System.Xml;
 
 namespace LSCode.Core;
 
@@ -10,6 +13,83 @@ public static class XmlIncludes
     private static readonly Regex Declarations = new("""<!ENTITY\s+(?<parameter>%\s*)?(?<name>[\w.:-]+)\s+(?:(?:SYSTEM\s+|PUBLIC\s+["'][^"']*["']\s+)(?<q>["'])(?<path>.*?)\k<q>|(?<q>["'])(?<value>.*?)\k<q>)\s*>""", RegexOptions.Singleline);
     private static readonly Regex References = new(@"(?<kind>[&%])(?<name>[\w.:-]+);");
     private static readonly Regex Doctype = new("""<!DOCTYPE\s+[^\s>]+\s+(?:SYSTEM\s+|PUBLIC\s+["'][^"']*["']\s+)["'](?<path>[^"']+)["']""");
+
+    private static string? Resolve(string owner, string name, Func<string, bool> exists)
+    {
+        if (Uri.TryCreate(name, UriKind.Absolute, out var uri))
+        {
+            if (!uri.IsFile) return null;
+            name = uri.LocalPath;
+        }
+        var directory = Path.GetDirectoryName(owner)!;
+        var folders = new List<string> { directory };
+        for (var current = directory; current is not null && folders.Count <= 8; current = Path.GetDirectoryName(current))
+        {
+            folders.Add(Path.Combine(current, "Include", "XML"));
+            folders.Add(Path.Combine(current, "Include"));
+        }
+        folders.Add(Path.Combine(directory, "..", "..", "App_Data", "Controllers", "Include", "XML"));
+        foreach (var folder in folders)
+            foreach (var extension in new[] { "", ".ent", ".dtd", ".xml", ".txt", ".sql" })
+            {
+                try
+                {
+                    var path = Path.GetFullPath(Path.Combine(folder, name.Replace('/', Path.DirectorySeparatorChar) + extension));
+                    if (exists(path)) return path;
+                }
+                catch (Exception ex) when (ex is ArgumentException or NotSupportedException) { }
+            }
+        return null;
+    }
+
+    internal sealed class EditorResolver(string documentPath, IReadOnlyDictionary<string, string>? buffers) : XmlResolver
+    {
+        private readonly string root = IncludeRoot(documentPath);
+        public override ICredentials? Credentials { set { } }
+
+        private static string IncludeRoot(string path)
+        {
+            var directory = new DirectoryInfo(Path.GetDirectoryName(Path.GetFullPath(path))!);
+            for (var current = directory; current is not null; current = current.Parent)
+                if (current.Name.Equals("Controllers", StringComparison.OrdinalIgnoreCase) ||
+                    current.Name.Equals("Controller", StringComparison.OrdinalIgnoreCase))
+                {
+                    var parent = current.Parent;
+                    return (parent?.Name.Equals("App_Data", StringComparison.OrdinalIgnoreCase) == true ||
+                        parent?.Name.Equals("AppData", StringComparison.OrdinalIgnoreCase) == true
+                        ? parent.Parent : parent)?.FullName ?? current.FullName;
+                }
+            return directory.FullName;
+        }
+
+        private bool IsInside(string path)
+        {
+            var relative = Path.GetRelativePath(root, path);
+            return !Path.IsPathRooted(relative) && relative != ".." &&
+                !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal);
+        }
+
+        public override Uri ResolveUri(Uri? baseUri, string? relativeUri)
+        {
+            var resolved = base.ResolveUri(baseUri, relativeUri);
+            if (baseUri?.IsFile != true || relativeUri is null || !resolved.IsFile)
+                return resolved;
+            return Resolve(baseUri.LocalPath, relativeUri,
+                path => IsInside(path) && (buffers?.ContainsKey(path) == true || File.Exists(path))) is { } local
+                ? new Uri(local) : resolved;
+        }
+
+        public override object GetEntity(Uri absoluteUri, string? role, Type? ofObjectToReturn)
+        {
+            if (!absoluteUri.IsFile)
+                throw new XmlException("Chỉ hỗ trợ include XML từ file.");
+            var path = absoluteUri.LocalPath;
+            if (!IsInside(path)) throw new XmlException("Include XML nằm ngoài thư mục dự án.");
+            if (buffers?.TryGetValue(path, out var text) == true)
+                return new MemoryStream(Encoding.UTF8.GetBytes(text), writable: false);
+            return File.OpenRead(path);
+        }
+    }
 
     public static IncludeLocation? Find(string file, string text, int offset, Func<string, string?>? read = null)
     {
@@ -23,30 +103,11 @@ public static class XmlIncludes
             try { return cache[path] = read(path); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
         }
-        string? Resolve(string owner, string name)
-        {
-            if (Uri.TryCreate(name, UriKind.Absolute, out var uri))
-            {
-                if (!uri.IsFile) return null;
-                name = uri.LocalPath;
-            }
-            var dir = Path.GetDirectoryName(owner)!;
-            foreach (var folder in new[] { dir, Path.Combine(dir, "Include", "XML"), Path.Combine(dir, "..", "Include", "XML"), Path.Combine(dir, "..", "..", "App_Data", "Controllers", "Include", "XML") })
-                foreach (var ext in new[] { "", ".xml", ".txt", ".sql" })
-                {
-                    try
-                    {
-                        var path = Path.GetFullPath(Path.Combine(folder, name.Replace('/', Path.DirectorySeparatorChar) + ext));
-                        if (Load(path) != null) return path;
-                    }
-                    catch (Exception ex) when (ex is ArgumentException or NotSupportedException) { }
-                }
-            return null;
-        }
+        string? ResolveInclude(string owner, string name) => Resolve(owner, name, path => Load(path) is not null);
         IncludeLocation? Location(string owner, string content, Match declaration)
         {
             if (declaration.Groups["path"].Success)
-                return Resolve(owner, declaration.Groups["path"].Value) is { } target ? new(target, 1, 1) : null;
+                return ResolveInclude(owner, declaration.Groups["path"].Value) is { } target ? new(target, 1, 1) : null;
             var before = content[..declaration.Index];
             return new(owner, before.Count(c => c == '\n') + 1, declaration.Index - before.LastIndexOf('\n'));
         }
@@ -65,7 +126,7 @@ public static class XmlIncludes
             var match = declarations.FirstOrDefault(m => m.Groups["name"].Value == reference.Groups["name"].Value && m.Groups["parameter"].Success == (reference.Groups["kind"].Value == "%"));
             if (match != null) return Location(owner, content, match);
             foreach (var external in declarations.Where(m => m.Groups["path"].Success).Concat(Doctype.Matches(content).Cast<Match>()))
-                if (Resolve(owner, external.Groups["path"].Value) is { } path && Load(path) is { } nested && Search(path, nested, depth + 1) is { } result) return result;
+                if (ResolveInclude(owner, external.Groups["path"].Value) is { } path && Load(path) is { } nested && Search(path, nested, depth + 1) is { } result) return result;
             return null;
         }
         return Search(file, text, 0);

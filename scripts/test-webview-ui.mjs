@@ -23,7 +23,7 @@ await page.addInitScript(()=>{
     projectRoot+'\\App_Data\\Controllers\\Templates\\Upload\\'+name+'.xml',
   ];
   let workspaceFiles=[projectRoot+'\\fixture.xml',projectRoot+'\\long.sql',...controllerFiles('nhanvien'),...controllerFiles('bophan')];
-  const settings={theme:'Light',workspace:'C:\\Fixture',server:'.',database:'Fixture_App',integratedSecurity:true,sqlUser:'',trustCertificate:true,crystalPath:'',profiler18Path:'',shortcuts:{},activityCommands:null};
+  const settings={theme:'Light',workspace:'C:\\Fixture',server:'.',database:'Fixture_App',integratedSecurity:true,sqlUser:'',trustCertificate:true,crystalPath:'',profiler18Path:'',shortcuts:{},activityCommands:null,projectLastAccess:{other:'2026-11-12T03:00:00Z'}};
   const native={addEventListener:(_,fn)=>listeners.push(fn),postMessage:request=>{window.__nativeCalls.push(request);let result,error;
     switch(request.method){
       case 'studio.bootstrap':result={settings,projects:[{id:'fixture',name:'Dự án thử UI',server:'.',database:'Fixture_App',sourcePath:'C:\\Fixture'},otherProject],snippets:[{key:'select',category:'SQL',body:'SELECT * FROM {{table}};',description:'Mẫu SELECT',position:0,param:''}],version:'ui-test'};break;
@@ -44,7 +44,8 @@ await page.addInitScript(()=>{
       case 'project.structure.clear':result=2;break;
       case 'project.commands':result=[{entry:{id:'menu1',caption:'Nhân viên',sysId:'HR',commandId:'Dir',link:'nhanvien.aspx'},children:[]},{entry:{id:'menu2',caption:'Bộ phận',sysId:'HR',commandId:'Dept',link:'bophan.aspx'},children:[]},{entry:{id:'separator',caption:'-',sysId:'',commandId:'',link:''},children:[]}];break;
       case 'project.controller':{const files=controllerFiles(request.payload.link==='bophan.aspx'?'bophan':'nhanvien');result={file:files[0],files};break;}
-      case 'project.details':result={programPath:'C:\\Fixture\\program.exe',metadata:'<project><FolderName>Dự án thử UI</FolderName></project>'};break;
+      case 'project.details':result={programPath:'C:\\Fixture\\program.exe',updatePath:'C:\\Fixture\\update',metadata:'<project><FolderName>Dự án thử UI</FolderName></project>'};break;
+      case 'window.new':result=true;break;
       case 'recovery.load':result=[];break;
       case 'workspace.list':{
         const prefix=request.payload.path+'\\', entries=new Map();
@@ -60,7 +61,7 @@ await page.addInitScript(()=>{
       case 'document.openMany':result=window.__bulkOpenCount
         ? Array.from({length:window.__bulkOpenCount},(_,index)=>doc('open-'+(++serial),'<root>bulk-'+index+'</root>','bulk-'+index+'.xml',projectRoot+'\\bulk-'+index+'.xml'))
         : [doc('open-'+(++serial),'<root>Tiếng Việt</root>')];break;
-      case 'document.open':result=doc('open-'+(++serial),request.payload.path?.endsWith('nhanvien.xml')?'<root>\r\n<fields/>\r\n<toolbar/>\r\n</root>':'<root>Tiếng Việt</root>',request.payload.path?.split(/[\\/]/).at(-1)??'fixture.xml',request.payload.path??'C:\\Fixture\\fixture.xml');break;
+      case 'document.open':result=doc('open-'+(++serial),request.payload.path?.endsWith('nhanvien.xml')?'<root>\r\n<fields/>\r\n<toolbar/>\r\n<command><text><![CDATA[SELECT 42 AS x]]></text></command>\r\n<query>SELECT 43 AS y</query>\r\n<script><![CDATA[const z = 1;]]></script>\r\n</root>':'<root>Tiếng Việt</root>',request.payload.path?.split(/[\\/]/).at(-1)??'fixture.xml',request.payload.path??'C:\\Fixture\\fixture.xml');break;
       case 'workspace.duplicate':result=request.payload.path.replace(/(\.[^.]+)$/, '_copy$1');workspaceFiles.push(result);break;
       case 'workspace.rename':{
         const {path,name}=request.payload;
@@ -79,6 +80,17 @@ await page.addInitScript(()=>{
       case 'sql.complete':result=request.payload.text===''?['COUNT','AS','IS NOT NULL','AND','BETWEEN','DESC','ASC'].map(text=>({text,isSnippet:false})):[];break;
       case 'javascript.complete':result=[];break;
       case 'xml.validate':case 'xml.viewWidth':result=null;break;
+      case 'xml.diagnostics':result={diagnostic:null,warnings:request.payload.text.includes('SELECT 42 AS x')?
+        [{line:2,column:2,message:"Field 'missing' đã khai báo nhưng chưa có trong <views>."}]:[]};break;
+      case 'xml.controllerPreview':result=window.__previewDir ? {
+        kind:'dir', title:'Khai báo nhân viên', subtitle:'Thông tin nhân viên', toolbar:['Lưu'],
+        views:[{name:'Dir', columns:[], layout:{widths:[120,40,60,320],rows:[
+          [{name:'nam',label:'Năm',isLabel:true,column:1,span:1},{name:'nam',label:'Năm',isLabel:false,column:2,span:2}],
+          [{name:'ma_nv',label:'Mã nhân viên',isLabel:false,column:4,span:1}]
+        ]}}]
+      } : {kind:'grid',title:'Cập nhật thông tin lương nhân viên',subtitle:'Cập nhật thông tin lương, tài khoản ngân hàng…',
+        toolbar:['Sửa','Tìm','Xem'],views:[{name:'Grid',columns:[{name:'ma_nv',label:'Mã nhân viên',width:110},
+          {name:'ten',label:'Họ và tên',width:160},{name:'ma_bp',label:'Bộ phận',width:240}]}]};break;
       case 'schema.objects':result={columns:['Schema','Name','Type','Id'],rows:[['dbo','DanhMuc','USER_TABLE','1']]};break;
       case 'table.names':result={columns:['Schema','Name'],rows:[['dbo','DanhMuc']]};break;
       case 'table.catalog':result={columns:['Schema','Name'],rows:[['dbo','DanhMuc_Archive'],['dbo','DanhMuc'],['hr','NhanVien']]};break;
@@ -108,7 +120,17 @@ await page.addInitScript(()=>{
 const out='artifacts/webview-ui';mkdirSync(out,{recursive:true});
 let checks=0;const check=(value,name)=>{if(!value)throw Error('FAIL '+name);checks++;console.log('PASS '+name);};
 try{
-  await page.goto('http://127.0.0.1:4173');await page.getByRole('dialog',{name:'Dự án của bạn'}).waitFor();check(true,'Project picker opens before workbench');await page.getByRole('button',{name:'Đóng',exact:true}).click();await page.locator('[data-ready=true]').waitFor();
+  await page.goto('http://127.0.0.1:4173');await page.getByRole('dialog',{name:'Dự án của bạn'}).waitFor();check(true,'Project picker opens before workbench');
+  check((await page.locator('.project-row').first().textContent()).includes('Dự án lịch sử'),'Project picker sorts by last access');
+  await page.keyboard.press('Control+Shift+n');
+  await page.waitForFunction(()=>window.__nativeCalls.filter(call=>call.method==='window.new').length===1);
+  await page.getByRole('button',{name:'Xóa profile Dự án thử UI',exact:true}).click();
+  await page.getByRole('button',{name:'Xóa profile',exact:true}).waitFor();
+  await page.getByRole('button',{name:'Hủy',exact:true}).click();
+  await page.getByRole('button',{name:'Đóng',exact:true}).click();await page.locator('[data-ready=true]').waitFor();
+  await page.keyboard.press('Control+Shift+n');
+  await page.waitForFunction(()=>window.__nativeCalls.filter(call=>call.method==='window.new').length===2);
+  check(true,'New-window shortcut reaches the native bridge from both the picker and the workbench');
   await page.getByRole('button',{name:'SQL mới',exact:true}).click();
   await page.getByRole('button',{name:'Kết nối SQL',exact:true}).click();
   await page.getByRole('textbox',{name:'Server',exact:true}).fill('.');
@@ -273,6 +295,43 @@ try{
   await page.getByRole('tab',{name:'nhanvien.xml — Dir',exact:true}).waitFor();
   await page.getByRole('tab',{name:'nhanvien.xml — Grid',exact:true}).waitFor();
   check(true,'Same-name file tabs still show their distinct folders');
+  await page.getByRole('button',{name:'Xem trước Grid / Dir',exact:true}).click();
+  const previewDialog=page.getByRole('dialog',{name:'Xem trước Grid'});
+  await previewDialog.getByRole('heading',{name:'Cập nhật thông tin lương nhân viên'}).waitFor();
+  check(await page.locator('dialog[open]').count()===1, 'Grid preview opens one dialog');
+  check(await previewDialog.getByRole('columnheader').allTextContents().then(headers=>headers.join('|')==='Mã nhân viên|Họ và tên|Bộ phận') &&
+    await previewDialog.getByRole('columnheader',{name:'Mã nhân viên'}).evaluate(cell=>Math.abs(cell.getBoundingClientRect().width-110)<2),
+    'Grid preview renders ordered XML columns at their configured widths');
+  await page.screenshot({path:out+'/grid-preview.png'});
+  await previewDialog.getByRole('button',{name:'Đóng',exact:true}).click();
+  await page.evaluate(()=>{window.__previewDir=true;});
+  await page.getByRole('button',{name:'Xem trước Grid / Dir',exact:true}).click();
+  const dirDialog=page.getByRole('dialog',{name:'Xem trước Dir',exact:true});
+  await dirDialog.getByRole('heading',{name:'Khai báo nhân viên'}).waitFor();
+  check(await dirDialog.getByText('Năm',{exact:true}).isVisible() &&
+    await dirDialog.getByRole('textbox',{name:'Năm',exact:true}).evaluate(input=>input.parentElement.style.gridColumn==='2 / span 2') &&
+    await dirDialog.getByRole('textbox',{name:'Mã nhân viên',exact:true}).evaluate(input=>input.parentElement.style.gridColumn==='4 / span 1'),
+    'Dir preview shows labels and keeps field spans and positions');
+  await dirDialog.getByRole('button',{name:'Đóng',exact:true}).click();
+  const colored=()=>page.evaluate(()=>{
+    const lines=[...document.querySelectorAll('.editor-group.focused .view-line')];
+    const color=(line,token)=>[...line.querySelectorAll('span[class^="mtk"]')]
+      .find(span=>span.textContent.trim()===token)?.className;
+    return ['42','43'].every(value=>{
+      const line=lines.find(element=>element.textContent.includes(value));
+      return line && color(line,'SELECT') && color(line,'SELECT')!==color(line,value);
+    });
+  });
+  await page.waitForFunction(()=>[...document.querySelectorAll('.editor-group.focused .view-line span[class^="mtk"]')]
+    .filter(span=>span.textContent.trim()==='SELECT').length>=2);
+  check(await colored(),'SQL keywords and numbers are colored in XML CDATA and inline queries');
+  check(await page.locator('.editor-group.focused .view-line').evaluateAll(lines => lines.some(line =>
+    [...line.querySelectorAll('span')].some(span => span.textContent === '<![CDATA[' && /rgb\(99, 217, 144\)/.test(getComputedStyle(span).color)))),
+    'CDATA opening delimiter is highlighted in green');
+  await page.getByRole('button',{name:/^Vấn đề/}).click();
+  await page.getByText(/Cảnh báo · Field 'missing'/).waitFor();
+  check(true,'ERP XML warnings are listed with their severity');
+  await page.getByRole('button',{name:'Kết quả',exact:true}).click();
   await page.keyboard.press('Control+g');
   await page.getByRole('dialog',{name:'Đi đến phần trong file'}).getByRole('button',{name:'toolbar',exact:true}).click();
   await page.waitForFunction(()=>document.querySelector('.statusbar')?.textContent.includes('Dòng 3'));
@@ -332,6 +391,9 @@ try{
   await fileTree.getByTitle(renamedPath,{exact:true}).waitFor();
   check(await departmentGroup.getAttribute('aria-expanded')==='false','Reopening a group collapses the other controller');
   await departmentGroup.click();
+  await page.getByRole('button',{name:'Đóng controller nhanvien',exact:true}).click();
+  check(await employeeGroup.count()===0 && await page.getByRole('tab',{name:'nhanvien-doi.xml',exact:true}).count()===1,
+    'Closing a controller removes its group and preserves its editor tabs');
   await page.screenshot({path:out+'/erp-controller-groups.png'});
   await page.keyboard.press('Control+Shift+f');
   await page.getByRole('button',{name:'Phạm vi tìm kiếm',exact:true}).click();
@@ -467,14 +529,14 @@ try{
   await page.evaluate(()=>{window.__bulkOpenCount=36;});
   await page.keyboard.press('Control+o');
   await page.getByRole('tab',{name:'bulk-35.xml',exact:true,selected:true}).waitFor();
-  await page.waitForFunction(()=>window.__nativeCalls.some(call=>call.method==='xml.validate'&&call.payload.text==='<root>bulk-35</root>'));
-  check(await page.evaluate(()=>!window.__nativeCalls.some(call=>call.method==='xml.validate'&&call.payload.text==='<root>bulk-0</root>')),
+  await page.waitForFunction(()=>window.__nativeCalls.some(call=>call.method==='xml.diagnostics'&&call.payload.text==='<root>bulk-35</root>'));
+  check(await page.evaluate(()=>!window.__nativeCalls.some(call=>call.method==='xml.diagnostics'&&call.payload.text==='<root>bulk-0</root>')),
     'Bulk open defers loading and validating inactive files');
   await page.waitForFunction(()=>window.__nativeCalls.some(call=>call.method==='project.history.record'&&call.payload.path.endsWith('\\bulk-35.xml')));
   check(await page.evaluate(()=>!window.__nativeCalls.some(call=>call.method==='project.history.record'&&call.payload.path.endsWith('\\bulk-0.xml'))),
     'History records the displayed file without adding background tabs');
   await page.getByRole('tab',{name:'bulk-0.xml',exact:true}).click();
-  await page.waitForFunction(()=>window.__nativeCalls.some(call=>call.method==='xml.validate'&&call.payload.text==='<root>bulk-0</root>'));
+  await page.waitForFunction(()=>window.__nativeCalls.some(call=>call.method==='xml.diagnostics'&&call.payload.text==='<root>bulk-0</root>'));
   await page.getByRole('button',{name:'Lịch sử',exact:true}).click();
   const otherHistory=page.locator('.history-group').filter({has:page.locator('summary').getByText('Dự án lịch sử',{exact:true})});
   await otherHistory.getByText('Main',{exact:true}).waitFor();

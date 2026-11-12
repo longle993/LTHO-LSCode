@@ -1,4 +1,4 @@
-> Bản mới nằm tại `artifacts/publish-webview-tab-stripes/LSCode.WebView.exe`. [Lịch sử file và thao tác dự án](WORKBENCH-PROJECT-HISTORY.vi.md)
+> [Cài đặt LSCode WebView trên Windows x64](CAI-DAT-LSCODE.vi.md) · [Lịch sử file và thao tác dự án](WORKBENCH-PROJECT-HISTORY.vi.md)
 
 > Cập nhật mới: [Workbench 10/11/2026](WEBVIEW-UPDATE-2026-11-10.vi.md), thay thế mô tả explorer, split editor, startup và Profiler cũ.
 
@@ -44,6 +44,16 @@ dotnet run --project tests/LSCode.WebView.Tests -c Release -- --sql
 3. Với profile chưa có connection strings, dùng **Kết nối SQL** để chọn server/database và Windows/SQL authentication.
 4. F5 chạy selection nếu có, nếu không chạy cả document. Nút Dừng hủy SqlCommand. Kết quả có nhiều result sets và xuất CSV.
 5. Ctrl+Shift+P tìm mọi công cụ: danh mục, XML/XPath/include, snippets, compare, Profiler, dịch, Crystal và cài đặt.
+
+Trong trình soạn thảo XML, khối CDATA dùng màu cú pháp SQL, còn CDATA trong `<script>` dùng màu JavaScript. Các thẻ `<sql>` và `<query>` cũng tô màu SQL trực tiếp. Với XML ERP có `<fields>` và `<views>` cùng cấp, khung **Vấn đề** báo field thiếu trong tất cả view, tên field khai báo trùng, ID view trùng và field lặp trong cùng một view. Tham chiếu `[field].Label` được tính là nhãn. Bấm cảnh báo để nhảy đến dòng liên quan.
+
+- Kiểm tra XML và xem trước Grid/Dir đọc include theo đường dẫn của file đang mở. LSCode lần theo `DOCTYPE` và khai báo `SYSTEM`/`PUBLIC`, dò thư mục của file khai báo và các thư mục `Include/XML` của dự án. Nội dung include đang sửa trong editor được ưu tiên. Lệnh mở include cũng dùng cùng quy tắc dò đường dẫn.
+
+- Mở file XML Grid hoặc Dir và bấm **Xem trước Grid / Dir** trên thanh editor. Bản xem trước đọc nội dung đang sửa và ưu tiên nhãn tiếng Việt. Grid lấy thứ tự cột từ view và độ rộng từ `<fields>`. Dir lấy độ rộng và vị trí các ô từ view. Mặt nạ `1` mở một ô, `0` nối cột vào ô trước và `-` chừa một cột trống. `[field].Label` hiển thị nhãn. Trường có `hidden="true"` được ẩn, vị trí các ô Dir phía sau vẫn theo mặt nạ. Khi có nhiều view, có thể chọn view để xem. Toolbar hiển thị để đối chiếu bố cục.
+
+- Mặt nạ layout ERP nhận `1` để bắt đầu ô, `0` để nối cột và `-` để bỏ qua cột. Đặt con trỏ vào tên field để xem độ rộng. Khung **Vấn đề** so số ô dành cho field với số field sau khi loại nhãn `[field].Label` và ô dành cho nhãn. Dòng chỉ có nhãn được bỏ qua. Trong chuỗi đối số của lời gọi `f.` hoặc `g.` ở `<script>`, editor gợi ý field có trong view.
+- **Dự án của bạn** xếp dự án đã mở gần nhất lên đầu. Có thể xóa profile sau khi xác nhận. Profile tạo thủ công trùng sẽ được báo lỗi. Trường **Thư mục update** mặc định là `\\172.168.5.14\CustomerUpdate\<Tên dự án>\update\` và có thể sửa trong thông tin profile.
+- Nhấn **Ctrl+Shift+N** để mở cửa sổ LSCode mới và chọn dự án khác. Trong không gian dự án, cuộn ngang để đọc tên file và menu dài. Bấm **×** cạnh nhóm controller để bỏ nhóm khỏi cây File.
 
 Trình duyệt tại `http://127.0.0.1:4173` chỉ dùng xem/kiểm tra giao diện. Không có HTTP backend hoặc kết nối SQL trong bản xem này. Mở EXE để dùng chức năng thật.
 

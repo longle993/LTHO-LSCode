@@ -1,8 +1,24 @@
 using System.Text.RegularExpressions;
-namespace LSCode.Domain;
+namespace LSCode.Core;
 public sealed record ViewWidth(string Field, int Width, int[] Columns);
 public static class XmlViewWidths
 {
+    internal static readonly Regex LayoutMask = new(@"^\s*(?<slots>[01-]+)\s*:");
+    internal static readonly Regex LayoutFields = new(@"\[(?<name>[^\]\r\n]+)\](?<label>\s*\.Label\b)?",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    internal static string FieldName(string name) =>
+        name.Trim().EndsWith("%l", StringComparison.OrdinalIgnoreCase) ? name.Trim()[..^2] : name.Trim();
+    internal static IEnumerable<(int Start, int Length)> Spans(string slots)
+    {
+        for (var start = 0; start < slots.Length; start++)
+        {
+            if (slots[start] != '1') continue;
+            var stop = start + 1;
+            while (stop < slots.Length && slots[stop] == '0') stop++;
+            yield return (start, stop - start);
+            start = stop - 1;
+        }
+    }
     public static ViewWidth? Find(string text, int offset)
     {
         if (text.Length == 0 || text.Length > 1000000 || offset < 0 || offset > text.Length) return null;
@@ -17,15 +33,15 @@ public static class XmlViewWidths
                 try { widths = value.Value.Split(',').Select(v => int.Parse(v.Trim())).ToArray(); } catch (OverflowException) { widths = []; }
                 continue;
             }
-            var mask = Regex.Match(value.Value, @"^\s*([01]+)\s*:"); if (!mask.Success || widths.Length == 0) continue;
-            var bits = mask.Groups[1].Value; if (bits[0] != '1' || bits.Length > widths.Length) continue;
-            var fields = Regex.Matches(value.Value[mask.Length..], @"\[[^\]]+\](?:\.Label)?", RegexOptions.IgnoreCase);
-            var starts = bits.Select((c,i)=>(c,i)).Where(x=>x.c=='1').Select(x=>x.i).ToArray();
-            for (var f = 0; f < Math.Min(fields.Count, starts.Length); f++) {
-                var field = fields[f]; var absolute = start + value.Index + mask.Length + field.Index;
+            var mask = LayoutMask.Match(value.Value); if (!mask.Success || widths.Length == 0) continue;
+            var bits = mask.Groups["slots"].Value;
+            var fields = LayoutFields.Matches(value.Value[mask.Length..]);
+            foreach (var (span, field) in Spans(bits).Zip(fields)) {
+                var absolute = start + value.Index + mask.Length + field.Index;
                 if (offset < absolute || offset > absolute + field.Length) continue;
-                var stop = f + 1 < starts.Length ? starts[f+1] : bits.Length;
-                var columns = widths[starts[f]..stop];
+                var stop = span.Start + span.Length;
+                if (stop > widths.Length) return null;
+                var columns = widths[span.Start..stop];
                 try { return new(field.Value, columns.Sum(), columns); } catch (OverflowException) { return null; }
             }
         }
