@@ -8,8 +8,11 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using LSCode.Application;
+using LSCode.Application.Commands;
 using LSCode.Contracts;
 using LSCode.Infrastructure;
+using MediatR;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
 
@@ -22,8 +25,8 @@ public sealed class StudioWindow : Window
     private readonly Grid splash;
     private Window? startupOverlay;
     private readonly DispatcherTimer startupTimeout = new() { Interval = TimeSpan.FromSeconds(45) };
-    private readonly DeveloperTools tools = new();
-    private readonly StudioCommands commands;
+    private readonly ServiceProvider services;
+    private readonly ISender _sender;
     private readonly ConcurrentDictionary<string, CancellationTokenSource> operations = new();
     private bool closeAllowed, shuttingDown, closing, bridgeReady;
     private readonly bool smoke;
@@ -36,7 +39,17 @@ public sealed class StudioWindow : Window
         System.Windows.Shell.WindowChrome.SetWindowChrome(this, new System.Windows.Shell.WindowChrome { CaptionHeight = 0, ResizeBorderThickness = new Thickness(6), GlassFrameThickness = new Thickness(0), CornerRadius = new CornerRadius(0) });
         WindowWorkArea.Attach(this);
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
-        commands = new(new DocumentWorkspace(), tools, new DesktopDialogs(this));
+        var serviceCollection = new ServiceCollection();
+        serviceCollection.AddLogging();
+        serviceCollection.AddLSCodeApplication();
+        serviceCollection.AddLSCodeInfrastructure();
+        serviceCollection.AddSingleton<IDesktopDialogs>(new DesktopDialogs(this));
+        services = serviceCollection.BuildServiceProvider(new ServiceProviderOptions
+        {
+            ValidateOnBuild = true,
+            ValidateScopes = true
+        });
+        _sender = services.GetRequiredService<ISender>();
         var splashBackground = new SolidColorBrush(Color.FromRgb(4, 36, 49));
         Background = splashBackground;
         var brand = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
@@ -202,7 +215,7 @@ public sealed class StudioWindow : Window
             try
             {
                 // IO-bound services retain the UI context for native pickers, while CPU/UNC scans use Task.Run in their adapters.
-                var result = await commands.ExecuteAsync(request.Method, request.Payload, cts.Token);
+                var result = await _sender.Send(new ExecuteStudioCommand(request.Method, request.Payload), cts.Token);
                 Reply(new(1, request.RequestId, result));
             }
             finally { operations.TryRemove(request.RequestId, out _); }
@@ -231,7 +244,7 @@ public sealed class StudioWindow : Window
         {
             closing=true;
             foreach (var op in operations.Values) await op.CancelAsync();
-            await tools.DisposeAsync();
+            await services.DisposeAsync();
             EndStartup();
             shuttingDown = true; view.Dispose();
             // Finish the cancelled Closing event before requesting the final close.

@@ -15,6 +15,7 @@ namespace LSCode.Infrastructure;
 
 public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
 {
+    private readonly TemplateStudioTool templateStudio = new();
     private readonly ConcurrentDictionary<string, (SqlTarget Connection, bool IsProjectSys)> targets = new();
     private readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(25) };
     private TranslationClient? translator;
@@ -49,6 +50,8 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
         t.Rows.Cast<DataRow>().Select(r => r.ItemArray.Select(x => x is null or DBNull ? null : Convert.ToString(x, System.Globalization.CultureInfo.InvariantCulture)).ToArray()).ToArray());
     public async Task<object?> ExecuteAsync(string method, JsonElement p, CancellationToken ct)
     {
+        if (method.StartsWith("templateStudio.", StringComparison.Ordinal))
+            return await templateStudio.ExecuteAsync(method, p, ct);
         if (method.StartsWith("catalog.", StringComparison.Ordinal)) return await catalog.ExecuteAsync(method, p, Target(p), ct);
         string S(string key, string fallback = "") => p.TryGetProperty(key, out var x) && x.ValueKind == JsonValueKind.String ? x.GetString()! : fallback;
         bool B(string key) => p.TryGetProperty(key, out var x) && x.ValueKind == JsonValueKind.True;
@@ -322,6 +325,12 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                 tableSnapshots[S("scope")] = new(snapshotId, readTarget, qualified, data);
                 return new { data = preview, snapshotId };
             case "project.commands": return await ProjectDatabase.CommandsAsync(Target(p), ct, S("appDatabase"));
+            case "project.menu.details": return await MenuEditor.ReadAsync(Target(p), S("wmenuId"), ct);
+            case "project.menu.new": return await MenuEditor.NewAsync(Target(p), S("selectedId"), ct);
+            case "project.menu.resources": return await MenuEditor.ResourcesAsync(S("root"), S("link"), ct);
+            case "project.menu.save":
+                var menuValues = p.GetProperty("values").Deserialize<Dictionary<string, string?>>(Json) ?? [];
+                return await MenuEditor.SaveAsync(Target(p), S("mode"), S("originalId"), S("version"), menuValues, ct);
             case "project.employeeTabs": return await ProjectDatabase.EmployeeFunctionTabsAsync(Target(p), ct);
             case "project.controller":
                 return await Task.Run(async () =>

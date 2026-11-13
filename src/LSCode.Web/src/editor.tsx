@@ -371,6 +371,7 @@ export function CodeEditor({
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
       smoothScrolling: true,
+      mouseWheelZoom: true,
       renderLineHighlight: "gutter",
       // Monaco 0.52 word-highlighter leaves a rejected Delayer on model disposal.
       // Keep textual selection highlighting while independent panes switch models.

@@ -4,6 +4,8 @@
 
 **Bản React + WebView2:** build bằng `./build-webview.ps1 -Test -Smoke -Publish`, mở `artifacts/publish-webview/LSCode.WebView.exe`. [Hướng dẫn và trạng thái kiểm chứng](docs/WEBVIEW-RUNNING.vi.md) · [Đặc tả chuyển đổi toàn bộ tính năng](docs/WEBVIEW-MIGRATION.vi.md). Bản WPF bên dưới vẫn được giữ để đối chiếu.
 
+Luồng command của WebView dùng MediatR theo Clean Architecture: [cấu trúc lớp, dependency và cách thêm use case](docs/CLEAN-ARCHITECTURE-MEDIATR.vi.md).
+
 **Giao diện A mới:** chạy `artifacts/publish-ui-a/LSCode.exe`. [Thiết kế, kiểm chứng và hướng dẫn](docs/UI-REDESIGN-A.vi.md). Một cột File/Chức năng/DB, vùng editor rộng hơn, style dùng chung và ba theme.
 
 Bản Profiler trước lần thiết kế giao diện **`artifacts/publish-profiler18/LSCode.exe`**: [sửa reader và xác nhận bắt được SQL trên BACHVIET App](docs/PROFILER-LIVE-CAPTURE.vi.md). [cấu hình đường dẫn SSMS 18 một lần](docs/PROFILER-PATH.vi.md). [Profiler mặc định và template SQL2014](docs/PROFILER-DEFAULTS.vi.md). Bao gồm [Compare Text, Compare Folder, Beautify SQL](docs/COMPARE-AND-BEAUTIFY.vi.md). Bản này giữ các sửa lỗi [giải quyết %Database, mặc định App và chuyển App/SYS](docs/CONFIG-DATABASES.vi.md). Các bản publish và dữ liệu smoke cũ đã được dọn; tài liệu phiên bản cũ được giữ làm lịch sử.

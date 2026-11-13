@@ -2387,6 +2387,10 @@ kbd {
   @apply [color:var(--category-color,_var(--folder-color))];
   @apply shrink-0;
 }
+.sidebar .folder-row { background:color-mix(in srgb,var(--folder-tone) 15%,var(--surface)); }
+.sidebar .folder-row:hover { background:color-mix(in srgb,var(--folder-tone) 22%,var(--surface)); }
+.sidebar .folder-row[data-active] { background:color-mix(in srgb,var(--folder-tone) 24%,var(--surface)); }
+.sidebar .folder-icon { fill:color-mix(in srgb,var(--category-color,var(--folder-color)) 82%,var(--surface)); stroke:var(--category-color,var(--folder-color)); }
 .folder-chevron {
   @apply flex;
   @apply [color:var(--muted)];

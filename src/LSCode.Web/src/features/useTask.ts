@@ -18,5 +18,5 @@ export function useTask() {
       setBusy(false);
     }
   }
-  return { busy, error, run };
+  return { busy, error, clearError: () => setError(""), run };
 }

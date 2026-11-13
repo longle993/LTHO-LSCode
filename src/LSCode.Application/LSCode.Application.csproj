@@ -1,1 +1,6 @@
-<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><ProjectReference Include="../LSCode.Domain/LSCode.Domain.csproj" /></ItemGroup></Project>
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../LSCode.Domain/LSCode.Domain.csproj" />
+    <PackageReference Include="MediatR" Version="14.3.0" />
+  </ItemGroup>
+</Project>

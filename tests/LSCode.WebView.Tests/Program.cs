@@ -4,6 +4,8 @@ using LSCode.Core;
 using LSCode.Domain;
 using LSCode.Infrastructure;
 using LSCode.Contracts;
+using LSCode.Application;
+using Microsoft.Extensions.DependencyInjection;
 using System.Text.RegularExpressions;
 
 var root = Path.Combine(Path.GetTempPath(), "LSCode-WebView-checks-" + Guid.NewGuid().ToString("N"));
@@ -12,6 +14,10 @@ Environment.SetEnvironmentVariable("LSCODE_DATA_HOME", root);
 var checks = 0;
 void Check(bool value, string name) { if (!value) throw new Exception("FAIL " + name); checks++; Console.WriteLine("PASS " + name); }
 async Task Reject<T>(Func<Task> work, string name) where T : Exception { try { await work(); throw new Exception("FAIL " + name); } catch (T) { checks++; Console.WriteLine("PASS " + name); } }
+await using (var provider = new ServiceCollection().AddLSCodeInfrastructure().BuildServiceProvider())
+    Check(provider.GetRequiredService<IDeveloperTools>() is DeveloperTools, "Profiler resolves through its single DI registration");
+checks++;
+Console.WriteLine("PASS Closing DI container disposes Profiler once");
 var workspace = new DocumentWorkspace();
 var path = Path.Combine(root, "unicode.xml");
 var encoding = new UnicodeEncoding(false, true, true);
@@ -242,6 +248,22 @@ await using (var projectTools = new DeveloperTools())
         "Concurrent file duplication creates separate copies preserving every byte and BOM");
     Check(duplicatePaths.Cast<string>().All(file => Path.GetDirectoryName(file) == Path.GetDirectoryName(path) &&
         Path.GetExtension(file) == Path.GetExtension(path)), "File copies stay beside the source with the same extension");
+    var resourceRoot = Directory.CreateDirectory(Path.Combine(root, "menu-resources")).FullName;
+    var resourceMain = Directory.CreateDirectory(Path.Combine(resourceRoot, "Main")).FullName;
+    var resourceControllers = Path.Combine(resourceRoot, "App_Data", "Controllers");
+    Directory.CreateDirectory(Path.Combine(resourceControllers, "Dir"));
+    Directory.CreateDirectory(Path.Combine(resourceControllers, "Grid"));
+    await File.WriteAllTextAsync(Path.Combine(resourceMain, "fixture.aspx"), "<FastBusiness:ReportExtender Controller='Fixture' />");
+    await File.WriteAllTextAsync(Path.Combine(resourceControllers, "Dir", "Fixture.xml"), "<controller tableName='d46$000000'/>");
+    await File.WriteAllTextAsync(Path.Combine(resourceControllers, "Grid", "Fixture.f"), "<controller/>");
+    var menuResources = JsonSerializer.SerializeToElement(await CallProject("project.menu.resources", new { root = resourceRoot, link = "fixture.aspx" }), Protocol.Json);
+    var resourceStates = menuResources.GetProperty("resources").EnumerateArray().ToDictionary(
+        item => item.GetProperty("kind").GetString()!, item => item.GetProperty("status").GetString());
+    Check(menuResources.GetProperty("controllers")[0].GetString() == "Fixture" &&
+        menuResources.GetProperty("tables")[0].GetString() == "d46$000000" &&
+        resourceStates["Dir"] == "found" && resourceStates["Grid"] == "found" &&
+        resourceStates["Filter"] == "missing" && resourceStates["Main"] == "found",
+        "Menu editor resolves controller, Dir table and missing file groups");
     var configPath = Path.Combine(root, "erp", "web.config");
     Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
     Task WriteConfig(string app, string sys) => File.WriteAllTextAsync(configPath, $"""
@@ -344,6 +366,28 @@ if (args.Contains("--sql"))
         var menu = (List<CommandNode>)(await Call("project.commands", new { targetId = target.Id, appDatabase = menuAppDatabase }))!;
         Check(menu is [{ Entry.Id: "root", Children: [{ Entry.Id: "branch", Children: [{ Entry: { Id: "leaf", Caption: "Startup", Link: "leaf.aspx", CommandId: "leaf", SysId: "ControllerLeaf" } }] }] }],
             "Menu loads Sys wcommand without userinfo, uses App deny/Startup and retains the required ancestors");
+        var menuDetails = JsonSerializer.SerializeToElement(await Call("project.menu.details", new { targetId = target.Id, wmenuId = "leaf" }), Protocol.Json);
+        Check(menuDetails.GetProperty("values").GetProperty("bar").GetString() == "Menu" &&
+            menuDetails.GetProperty("values").GetProperty("wmenu_id").GetString() == "leaf",
+            "Menu editor reads schema-driven wcommand details");
+        var menuDraft = JsonSerializer.SerializeToElement(await Call("project.menu.new", new { targetId = target.Id, selectedId = "leaf" }), Protocol.Json);
+        var draftValues = menuDraft.GetProperty("values").Deserialize<Dictionary<string, string?>>(Protocol.Json)!;
+        draftValues["bar"] = "Menu mới";
+        var insertedMenu = JsonSerializer.SerializeToElement(await Call("project.menu.save", new
+        {
+            targetId = target.Id, mode = "new", originalId = "", version = "", values = draftValues
+        }), Protocol.Json);
+        var insertedId = insertedMenu.GetProperty("values").GetProperty("wmenu_id").GetString()!;
+        Check(insertedId == "leaf.01" && insertedMenu.GetProperty("values").GetProperty("bar").GetString() == "Menu mới",
+            "Menu editor generates a free branch code and inserts wcommand");
+        var insertedVersion = insertedMenu.GetProperty("version").GetString()!;
+        var editValues = insertedMenu.GetProperty("values").Deserialize<Dictionary<string, string?>>(Protocol.Json)!;
+        editValues["bar"] = "Đã sửa";
+        await Call("project.menu.save", new { targetId = target.Id, mode = "edit", originalId = insertedId, version = insertedVersion, values = editValues });
+        await Reject<InvalidOperationException>(async () => await Call("project.menu.save", new
+        {
+            targetId = target.Id, mode = "edit", originalId = insertedId, version = insertedVersion, values = editValues
+        }), "Menu editor rejects a stale edit instead of overwriting it");
         var batch = (ExecutionResult)(await Call("sql.execute", new { targetId = target.Id, sql = "CREATE TABLE #test(value int);\nGO\nINSERT INTO #test VALUES (42);\nGO\nSELECT value FROM #test;" }))!;
         Check(batch.Tables[0].Rows[0][0] == "42", "SQL keeps connection/temp table across GO batches");
         await Call("sql.execute", new { targetId = target.Id, sql = """
@@ -609,5 +653,64 @@ if (args.Contains("--sql"))
             await Call("sql.execute", new { targetId = admin.Id, sql = $"ALTER DATABASE [{menuAppDatabase}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{menuAppDatabase}]" });
         await Call("sql.execute", new { targetId = admin.Id, sql = "ALTER DATABASE [" + database + "] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [" + database + "]" });
     }
+}
+if (Environment.GetEnvironmentVariable("LSCODE_STUDIO_SAMPLE") is { } studioSample)
+{
+    var studioFolder = Path.Combine(root, "Studio");
+    Directory.CreateDirectory(studioFolder);
+    foreach (var relative in new[] { "project.json", "templates/order.import.json", "samples/order.import.sample.json" })
+    {
+        var destination = Path.Combine(studioFolder, relative);
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        File.Copy(Path.Combine(studioSample, relative), destination);
+    }
+    await using var studio = new DeveloperTools();
+    async Task<JsonElement> StudioCall(string method, object payload) =>
+        JsonSerializer.SerializeToElement(await studio.ExecuteAsync("templateStudio." + method,
+            JsonSerializer.SerializeToElement(payload, Protocol.Json), default), Protocol.Json);
+
+    var opened = await StudioCall("open", new { folder = studioFolder });
+    var project = System.Text.Json.Nodes.JsonNode.Parse(opened.GetProperty("project").GetRawText())!;
+    var template = project["templates"]![0]!;
+    template["execute"] = "dbo.usp_ImportOrderEdited";
+    var preview = await StudioCall("json", new { template });
+    Check(preview.GetProperty("json").GetString()!.Contains("dbo.usp_ImportOrderEdited"), "Studio renders edited runtime JSON");
+    var mapped = await StudioCall("mapping", new { template });
+    Check(mapped.GetProperty("tables").EnumerateObject().Any(), "Studio maps sample data through the WebView bridge");
+    var inferred = await StudioCall("infer", new { sample = template["sampleJson"]!.GetValue<string>() });
+    Check(inferred.GetProperty("tables").GetArrayLength() >= 2, "Studio proposes nested tables from sample JSON");
+    var relationTemplate = System.Text.Json.Nodes.JsonNode.Parse(template.ToJsonString())!;
+    relationTemplate["tables"]![0]!["columns"]![1]!["key"] = true;
+    relationTemplate["tables"]![0]!["rowKey"] = false;
+    var synchronized = await StudioCall("synchronize", new { template = relationTemplate, table = 0, generateMissing = true });
+    var synchronizedTables = synchronized.GetProperty("tables");
+    Check(synchronizedTables[1].GetProperty("columns").EnumerateArray().Any(column =>
+        column.GetProperty("name").GetString() == "CustomerID" && column.GetProperty("path").GetString() == "@#Header.CustomerID"),
+        "Studio materializes a new master key in the child table");
+    Check(synchronizedTables[1].GetProperty("parentKey").GetProperty("pairs").GetArrayLength() == 2,
+        "Studio refreshes composite child-parent key pairs when the master key changes");
+    Check((await StudioCall("save", new { project })).GetBoolean(), "Studio saves edited project");
+    var reopened = await StudioCall("open", new { folder = studioFolder });
+    Check(reopened.GetProperty("project").GetProperty("templates")[0].GetProperty("execute").GetString() == "dbo.usp_ImportOrderEdited",
+        "Studio reopens the saved edit");
+    var currentOnly = System.Text.Json.Nodes.JsonNode.Parse(reopened.GetProperty("project").GetRawText())!;
+    currentOnly["templates"]![0]!["execute"] = "dbo.usp_CurrentOnly";
+    var unsavedTemplate = System.Text.Json.Nodes.JsonNode.Parse(currentOnly["templates"]![0]!.ToJsonString())!;
+    unsavedTemplate["id"] = Guid.NewGuid();
+    unsavedTemplate["templateCode"] = "unsaved.template";
+    currentOnly["templates"]!.AsArray().Add(unsavedTemplate);
+    var savedCurrent = await StudioCall("saveTemplate", new { project = currentOnly, template = 0 });
+    Check(savedCurrent.GetProperty("valid").GetBoolean(), "Studio saves one selected template");
+    var afterCurrentSave = await StudioCall("open", new { folder = studioFolder });
+    Check(afterCurrentSave.GetProperty("project").GetProperty("templates").GetArrayLength() == 1 &&
+        afterCurrentSave.GetProperty("project").GetProperty("templates")[0].GetProperty("execute").GetString() == "dbo.usp_CurrentOnly",
+        "Studio selected-template save leaves other unsaved templates out of the project");
+    var exportedTemplate = await StudioCall("exportTemplate", new { template = afterCurrentSave.GetProperty("project").GetProperty("templates")[0] });
+    Check(exportedTemplate.GetString()!.Contains("dbo.usp_CurrentOnly"), "Studio exports one selected runtime template");
+    var newFolder = Path.Combine(root, "StudioNew");
+    Directory.CreateDirectory(newFolder);
+    var created = await StudioCall("create", new { folder = newFolder });
+    Check(created.GetProperty("project").GetProperty("templates").GetArrayLength() == 0 &&
+        File.Exists(Path.Combine(newFolder, "project.json")), "Studio creates a project in an empty folder");
 }
 Console.WriteLine($"{checks} WebView checks passed. Fixtures: {root}");

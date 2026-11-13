@@ -2,14 +2,25 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Button, Modal } from "./ui";
 import { pathIsWithin, rebasePath } from "./fileLabels";
-import { ChevronRight, ChevronDown, Folder, FileCode2, FileTerminal, PanelsTopLeft,
+import { ChevronRight, ChevronDown, Folder, FileCode2, PanelsTopLeft,
   ChartNoAxesCombined, FileSpreadsheet, FileText, FileChartColumn } from "lucide-react";
+
+function OutlineDocumentIcon({ kind }: { kind: "f" | "xml" }) {
+  return <svg width="19" height="19" viewBox="0 0 20 20" fill="none" aria-hidden="true"
+    className={`file-icon file-${kind}`}>
+    <path d="M2 1.25h11l5 5V18.75H2V1.25Z" stroke="currentColor" strokeWidth="1.25" strokeLinejoin="round" />
+    <path d="M13 1.25v5h5" stroke="currentColor" strokeWidth="1.25" strokeLinejoin="round" />
+    <text x="10" y="15.2" textAnchor="middle" fill="currentColor"
+      fontFamily="Arial, sans-serif" fontSize={kind === "xml" ? "8" : "12"} fontWeight="600">{kind}</text>
+  </svg>;
+}
 
 export function FileIcon({ path }: { path: string }) {
   const ext = path.split(".").at(-1)?.toLowerCase() ?? "";
   const Icon = ext === "xlsx" ? FileSpreadsheet : ext === "frx" ? FileChartColumn :
     ext === "rpt" ? ChartNoAxesCombined : ext === "txt" ? FileText :
-    ext === "f" ? FileTerminal : ext === "aspx" ? PanelsTopLeft : FileCode2;
+    ext === "aspx" ? PanelsTopLeft : FileCode2;
+  if (ext === "f" || ext === "xml") return <OutlineDocumentIcon kind={ext} />;
   return <Icon size={15} className={"file-icon file-" + ext} />;
 }
 

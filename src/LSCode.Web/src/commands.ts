@@ -32,6 +32,7 @@ export const commands = [
   ["compare", "So sánh văn bản / thư mục", ""],
   ["beautify", "Beautify SQL", ""],
   ["profiler", "SQL Profiler", ""],
+  ["template-studio", "Thiết kế template API", ""],
   ["xml", "XML: Outline / XPath", ""],
   ["xml.include", "Xem nhanh include", "F12"],
   ["xml.include.open", "Mở file include", "Ctrl+F12"],

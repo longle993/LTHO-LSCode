@@ -44,6 +44,8 @@ import { native, request, operation, subscribe, quoteSqlName, notifyWindowReady,
 import { PanelResizeHandle, WorkspaceResizeHandle } from "./PanelResizeHandle";
 import { ProfilerTool } from "./features/ProfilerTool";
 import { TableTool } from "./features/TableTool";
+import { TemplateStudio } from "./features/TemplateStudio";
+import { MenuEditor } from "./features/MenuEditor";
 import type {
   Bootstrap,
   DocumentInfo,
@@ -116,6 +118,9 @@ export default function App({
     [profilerBusy, setProfilerBusy] = useState(false),
     [closingProfiler, setClosingProfiler] = useState(false);
   const profilerSelected = selectedTool === "profiler";
+  const [studioOpen, setStudioOpen] = useState(false);
+  const studioDirty = useRef(false);
+  const studioBusy = useRef(false);
   const tableTab = tableTabs.find((tab) => tab.id === selectedTool);
   const tableSelected = !!tableTab;
   const tableNumber = useRef(0);
@@ -233,6 +238,7 @@ export default function App({
   const active = tabs.find((t) => t.id === activeId),
     target = active?.target ?? defaultTarget.current;
   const [selectedCommand, setSelectedCommand] = useState("");
+  const [menuEditor, setMenuEditor] = useState<CommandNode>();
   useEffect(() => {
     setObjects(undefined);
     dbLoadedQuery.current = "";
@@ -489,6 +495,9 @@ export default function App({
     [],
   );
   const closeWindow = useCallback(async () => {
+    if (studioBusy.current) { setStatus("Studio đang xử lý. Thử đóng lại khi hoàn tất."); return; }
+    if (studioDirty.current && !window.confirm("Dynamic Template Studio còn thay đổi chưa lưu. Đóng ứng dụng?"))
+      return;
     if (
       toolDirty.current &&
       !window.confirm(
@@ -806,12 +815,17 @@ export default function App({
         break;
       case "file.close":
         if (profilerSelected) await closeProfilerTab();
+        else if (selectedTool === "template-studio") closeStudio();
         else if (tableTab) closeTableTab(tableTab.id);
         else if (active) await closeTab(active);
         break;
       case "profiler":
         setProfilerTab((existing) => existing ?? { target });
         setSelectedTool("profiler");
+        break;
+      case "template-studio":
+        setStudioOpen(true);
+        setSelectedTool(id);
         break;
       case "table": {
         const id = "table-" + crypto.randomUUID();
@@ -973,6 +987,13 @@ export default function App({
     const next = tableTabs[index + 1] ?? tableTabs[index - 1];
     setTableTabs((tabs) => tabs.filter((tab) => tab.id !== id));
     setSelectedTool((current) => current === id ? next?.id : current);
+  }
+  function closeStudio() {
+    if (studioBusy.current) { setStatus("Studio đang xử lý. Thử đóng lại khi hoàn tất."); return; }
+    if (studioDirty.current && !window.confirm("Bỏ thay đổi chưa lưu trong Studio?")) return;
+    studioDirty.current = false;
+    setStudioOpen(false);
+    setSelectedTool((current) => current === "template-studio" ? undefined : current);
   }
   const executeRef = useRef(execute);
   executeRef.current = execute;
@@ -1438,6 +1459,7 @@ export default function App({
           {(
             settings.activityCommands ?? [
               "profiler",
+              "template-studio",
               "compare",
               "snippets",
               "translation",
@@ -1814,6 +1836,7 @@ export default function App({
                       selected={selectedCommand}
                       onSelect={setSelectedCommand}
                       onOpen={(node) => void guard(() => openController(node.entry.link))}
+                      onEdit={setMenuEditor}
                     />
                   )}
                   {(menuQuery ? matches : []).map((n, i) => (
@@ -1824,6 +1847,18 @@ export default function App({
                         menuQuery && i === menuIndex ? "page" : undefined
                       }
                       onClick={() => n.entry.link && void guard(() => openController(n.entry.link))}
+                      onFocus={() => setSelectedCommand(n.entry.id)}
+                      onKeyDown={(event) => {
+                        if (event.key === "F3") {
+                          event.preventDefault();
+                          setMenuEditor(n);
+                        }
+                      }}
+                      onContextMenu={(event) => {
+                        event.preventDefault();
+                        setSelectedCommand(n.entry.id);
+                        setMenuEditor(n);
+                      }}
                     >
                       <strong>{n.entry.caption}</strong>
                       <span>
@@ -1891,8 +1926,15 @@ export default function App({
                   "Không gian làm việc"}
               </span>
             </div>
-            {(profilerTab || tableTabs.length > 0) && (
+            {(profilerTab || studioOpen || tableTabs.length > 0) && (
               <div className="workspace-tools" role="tablist" aria-label="Công cụ SQL">
+                {studioOpen && <div className={`document-tab ${selectedTool === "template-studio" ? "active" : ""}`}>
+                  <button id="template-studio-tab" role="tab" aria-controls="template-studio-panel"
+                    aria-selected={selectedTool === "template-studio"} onClick={() => setSelectedTool("template-studio")}>
+                    <span>Dynamic Template Studio</span>
+                  </button>
+                  <IconButton label="Đóng Dynamic Template Studio" onClick={closeStudio}><X size={13} /></IconButton>
+                </div>}
                 {profilerTab && (
                   <div className={`document-tab ${profilerSelected ? "active" : ""}`}>
                     <button id="profiler-tab" role="tab" aria-controls="profiler-panel" aria-selected={profilerSelected} onClick={() => setSelectedTool("profiler")}>
@@ -1984,6 +2026,11 @@ export default function App({
               </>
             )}
           </div>
+          {studioOpen && <section id="template-studio-panel" className="profiler-panel" role="tabpanel"
+            aria-labelledby="template-studio-tab" hidden={selectedTool !== "template-studio"}>
+            <TemplateStudio onDirty={(dirty) => { studioDirty.current = dirty; }}
+              onBusy={(busy) => { studioBusy.current = busy; }} />
+          </section>}
           {profilerTab && (
             <section id="profiler-panel" className="profiler-panel" role="tabpanel" aria-labelledby="profiler-tab" hidden={!profilerSelected}>
               <ProfilerTool target={profilerTab.target ?? target} visible={profilerSelected} closing={closingProfiler} onBusyChange={setProfilerBusy} />
@@ -2294,6 +2341,20 @@ export default function App({
           }}
         />
       )}
+      {menuEditor && projectSysTarget.current && (
+        <MenuEditor
+          target={projectSysTarget.current}
+          command={menuEditor}
+          root={workspace}
+          onClose={() => setMenuEditor(undefined)}
+          onOpenPath={(path) => void guard(() => open(path))}
+          onSaved={async (id) => {
+            await loadCommands();
+            setSelectedCommand(id);
+            setStatus("Đã lưu thông tin menu " + id);
+          }}
+        />
+      )}
       {structureClear && (
         <Modal title="Xóa file trong Structure/App" onClose={() => {
           if (!projectActionBusy) setStructureClear(undefined);
@@ -2505,11 +2566,13 @@ function FunctionTree({
   selected,
   onSelect,
   onOpen,
+  onEdit,
 }: {
   nodes: CommandNode[];
   selected: string;
   onSelect: (id: string) => void;
   onOpen: (node: CommandNode) => void;
+  onEdit: (node: CommandNode) => void;
 }) {
   const [expanded, setExpanded] = useState(new Set<string>());
   return (
@@ -2547,6 +2610,17 @@ function FunctionTree({
                     return next;
                   });
               }}
+              onKeyDown={(event) => {
+                if (event.key === "F3") {
+                  event.preventDefault();
+                  onEdit(node);
+                }
+              }}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                onSelect(node.entry.id);
+                onEdit(node);
+              }}
               onDoubleClick={() => {
                 if (node.children.length && node.entry.link) onOpen(node);
               }}
@@ -2569,6 +2643,7 @@ function FunctionTree({
                   selected={selected}
                   onSelect={onSelect}
                   onOpen={onOpen}
+                  onEdit={onEdit}
                 />
               </div>
             )}
