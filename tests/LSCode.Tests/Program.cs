@@ -208,6 +208,26 @@ try
     var webRoot = Path.Combine(root, "web"); Directory.CreateDirectory(Path.Combine(webRoot, "Main")); await File.WriteAllTextAsync(Path.Combine(webRoot, "Main", "voucher.aspx"), "fixture");
     Assert(ProjectConventions.ResolveMenuFile(webRoot, "voucher.aspx?x=1") == Path.Combine(webRoot, "Main", "voucher.aspx"), "Menu link resolves Main ASPX");
     Assert(ProjectConventions.ResolveMenuFile(webRoot, "../../search.sql") == null, "Menu link cannot escape project");
+    var metadataRoot = Path.Combine(root, "page-metadata");
+    Directory.CreateDirectory(Path.Combine(metadataRoot, "AppData"));
+    await File.WriteAllTextAsync(Path.Combine(metadataRoot, "AppData", "PageMetadata.xml"),
+        "<pages><page id='invt' controller='Item'/><page id='other' controller='Other'/></pages>");
+    Assert(ProjectConventions.ControllerFromPageMetadata(metadataRoot, "INVT") == "Item" &&
+        ProjectConventions.ControllerFromPageMetadata(metadataRoot, "missing") == null,
+        "PageMetadata resolves exact sysid without matching another page");
+    var metadataIncludes = Directory.CreateDirectory(Path.Combine(metadataRoot, "AppData", "Metadata")).FullName;
+    await File.WriteAllTextAsync(Path.Combine(metadataIncludes, "Config.ent"), "<!ENTITY Page.Title 'ERP'>");
+    await File.WriteAllTextAsync(Path.Combine(metadataIncludes, "Page.001.xml"),
+        "<page id='invt' title='&Page.Title;' controller='ItemIncluded'/><page id='arkh' controller='Customer'/><page id='Customer' controller='Wrong'/>");
+    await File.WriteAllTextAsync(Path.Combine(metadataRoot, "AppData", "PageMetadata.xml"),
+        "<!DOCTYPE pages [<!ENTITY % Config SYSTEM 'Metadata/Config.ent'>%Config;<!ENTITY Page.001 SYSTEM 'Metadata/Page.001.xml'>]><pages>&Page.001;</pages>");
+    Assert(ProjectConventions.ControllerFromPageMetadata(metadataRoot, "invt") == "ItemIncluded",
+        "PageMetadata resolves page from nested DTD entity include");
+    Assert(ProjectConventions.ControllerFromPageMetadata(metadataRoot, "Customer", "arkh.aspx") == "Customer",
+        "PageMetadata uses link page id before menu sysid when they differ");
+    Directory.CreateDirectory(Path.Combine(metadataRoot, "Main"));
+    Assert(ProjectConventions.ControllerFromPageMetadata(metadataRoot, "invt") == null,
+        "Legacy Main layout keeps ASPX controller resolution");
     Assert(ProjectConventions.GridControllers("<items controller='GLDetail' style='Grid'/><items style='AutoComplete' controller='Currency'/>").SequenceEqual(["GLDetail"]), "Controller file tree includes child grids only");
     Assert(TranslationText.ReadGoogle("""[[["Xin chào","Hello",null,null,1]],null,"en"]""") == "Xin chào", "Google translate payload keeps the full sentence");
     using var translateHandler = new TranslationHandler();

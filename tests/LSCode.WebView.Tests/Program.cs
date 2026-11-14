@@ -264,6 +264,34 @@ await using (var projectTools = new DeveloperTools())
         resourceStates["Dir"] == "found" && resourceStates["Grid"] == "found" &&
         resourceStates["Filter"] == "missing" && resourceStates["Main"] == "found",
         "Menu editor resolves controller, Dir table and missing file groups");
+    var modernRoot = Directory.CreateDirectory(Path.Combine(root, "metadata-menu-resources")).FullName;
+    var modernMetadata = Directory.CreateDirectory(Path.Combine(modernRoot, "AppData")).FullName;
+    var modernIncludes = Directory.CreateDirectory(Path.Combine(modernMetadata, "Metadata")).FullName;
+    var modernDir = Directory.CreateDirectory(Path.Combine(modernMetadata, "Controllers", "Dir")).FullName;
+    await File.WriteAllTextAsync(Path.Combine(modernMetadata, "PageMetadata.xml"),
+        "<!DOCTYPE pages [<!ENTITY Page.001 SYSTEM 'Metadata/Page.001.xml'>]><pages>&Page.001;</pages>");
+    await File.WriteAllTextAsync(Path.Combine(modernIncludes, "Page.001.xml"),
+        "<page id='invt' v='Danh mục hàng hóa, vật tư' controller='Item'/><page id='other' controller='Other'/><page id='arkh' controller='Customer'/>");
+    await File.WriteAllTextAsync(Path.Combine(modernDir, "Item.f"), "<controller tableName='item$000000'/>");
+    await File.WriteAllTextAsync(Path.Combine(modernDir, "Other.f"), "<controller/>");
+    await File.WriteAllTextAsync(Path.Combine(modernDir, "Customer.f"), "<controller/>");
+    var modernResources = JsonSerializer.SerializeToElement(await CallProject("project.menu.resources",
+        new { root = modernRoot, link = "missing.aspx", sysId = "invt" }), Protocol.Json);
+    Check(modernResources.GetProperty("controllers")[0].GetString() == "Item" &&
+        modernResources.GetProperty("tables")[0].GetString() == "item$000000" &&
+        modernResources.GetProperty("resources").EnumerateArray().Any(item =>
+            item.GetProperty("kind").GetString() == "Dir" && item.GetProperty("status").GetString() == "found"),
+        "Menu resources resolve sysid from PageMetadata without Main");
+    var modernFiles = JsonSerializer.SerializeToElement(await CallProject("project.controller",
+        new { root = modernRoot, link = "missing.aspx", sysId = "invt" }), Protocol.Json);
+    Check(modernFiles.GetProperty("files").EnumerateArray().Select(item => item.GetString())
+        .SequenceEqual([Path.Combine(modernDir, "Item.f")]),
+        "Controller explorer loads PageMetadata controller files without Main or ASPX");
+    var customerFiles = JsonSerializer.SerializeToElement(await CallProject("project.controller",
+        new { root = modernRoot, link = "arkh.aspx", sysId = "Customer" }), Protocol.Json);
+    Check(customerFiles.GetProperty("files").EnumerateArray().Select(item => item.GetString())
+        .SequenceEqual([Path.Combine(modernDir, "Customer.f")]),
+        "Controller explorer maps menu link arkh.aspx to page id arkh and Customer files");
     var configPath = Path.Combine(root, "erp", "web.config");
     Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
     Task WriteConfig(string app, string sys) => File.WriteAllTextAsync(configPath, $"""

@@ -96,7 +96,7 @@ internal static class MenuEditor
         return await ReadAsync(target, savedId, token).ConfigureAwait(false);
     }
 
-    public static async Task<object> ResourcesAsync(string root, string link, CancellationToken token)
+    public static async Task<object> ResourcesAsync(string root, string link, string sysId, CancellationToken token)
     {
         return await Task.Run(async () =>
         {
@@ -104,6 +104,12 @@ internal static class MenuEditor
             var names = main != null && Path.GetExtension(main).Equals(".aspx", StringComparison.OrdinalIgnoreCase)
                 ? ProjectConventions.Controllers(await File.ReadAllTextAsync(main, token).ConfigureAwait(false))
                 : Array.Empty<string>();
+            if (!Directory.Exists(Path.Combine(root, "Main")))
+            {
+                var metadataController = ProjectConventions.ControllerFromPageMetadata(root, sysId, link);
+                if (!string.IsNullOrWhiteSpace(metadataController)) names = [metadataController];
+                else if (names.Count == 0 && !string.IsNullOrWhiteSpace(sysId)) names = [sysId];
+            }
             var roots = new[] { Path.Combine(root, "App_Data"), Path.Combine(root, "AppData") }.Where(Directory.Exists).ToArray();
             var files = (roots.Length == 0 ? [root] : roots).SelectMany(folder => WorkspaceFileIndex.Files(folder, token, false)).Take(100001).ToArray();
             if (files.Length > 100000) throw new IOException("Project vượt 100000 file; cần thu hẹp thư mục.");

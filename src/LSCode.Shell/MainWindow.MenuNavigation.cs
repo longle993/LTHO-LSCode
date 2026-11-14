@@ -46,16 +46,22 @@ public partial class MainWindow
         try
         {
             var file = await Task.Run(() => ProjectConventions.ResolveMenuFile(root, entry.Link), current.Token).WaitAsync(current.Token);
-            if (file == null) { CommandStatus.Text = "Không tìm thấy file: " + entry.Link; Log(CommandStatus.Text); return; }
-
             CommandStatus.Text = "Đang tìm file controller…";
-            var controllers = ProjectConventions.Controllers(await File.ReadAllTextAsync(file, current.Token));
-            if (controllers.Count == 0) controllers = new[] { Path.GetFileNameWithoutExtension(file) };
+            IReadOnlyList<string> controllers = file == null ? [] : ProjectConventions.Controllers(await File.ReadAllTextAsync(file, current.Token));
+            if (!Directory.Exists(Path.Combine(root, "Main")))
+            {
+                var metadataController = ProjectConventions.ControllerFromPageMetadata(root, entry.SysId, entry.Link);
+                if (!string.IsNullOrWhiteSpace(metadataController)) controllers = [metadataController];
+                else if (controllers.Count == 0 && !string.IsNullOrWhiteSpace(entry.SysId)) controllers = [entry.SysId];
+            }
+            if (controllers.Count == 0 && file != null) controllers = [Path.GetFileNameWithoutExtension(file)];
+            if (controllers.Count == 0) { CommandStatus.Text = "Không tìm thấy controller cho sysid: " + entry.SysId; Log(CommandStatus.Text); return; }
             if (!controllerFileIndexes.TryGetValue(root, out var files))
             {
                 files = await Task.Run(() =>
                 {
-                    var found = new List<string>(); var pending = new Stack<string>(); pending.Push(Path.Combine(root, "App_Data"));
+                    var found = new List<string>(); var pending = new Stack<string>();
+                    pending.Push(Path.Combine(root, "App_Data")); pending.Push(Path.Combine(root, "AppData"));
                     while (pending.Count > 0)
                     {
                         current.Token.ThrowIfCancellationRequested(); var folder = pending.Pop(); if (!Directory.Exists(folder)) continue;
@@ -73,7 +79,7 @@ public partial class MainWindow
                 var key = root + "|" + controller;
                 var existing = ProjectFileTabs.Items.OfType<TabItem>().FirstOrDefault(t => Equals(t.Tag, key));
                 if (existing != null) { ProjectFileTabs.SelectedItem = existing; ShowSide(ExplorerPanel); continue; }
-                var tree = new TreeView(); var tab = new TabItem { Tag = key, ToolTip = file };
+                var tree = new TreeView(); var tab = new TabItem { Tag = key, ToolTip = file ?? controller };
                 var header = new DockPanel { LastChildFill = true };
                 var close = new Button { Content = "×", Padding = new Thickness(4, 0, 4, 0), ToolTip = "Đóng" }; close.Click += (_, _) => ProjectFileTabs.Items.Remove(tab); DockPanel.SetDock(close, Dock.Right); header.Children.Add(close); header.Children.Add(new TextBlock { Text = controller, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, ToolTip = controller }); tab.Header = header;
                 tab.Content = ScrollableTree(tree);
@@ -90,11 +96,12 @@ public partial class MainWindow
                             foreach (var child in ProjectConventions.GridControllers(File.ReadAllText(xml))) if (names.Count < 64 && names.Add(child)) queue.Enqueue(child);
                         }
                     }
-                    return files.Where(p => names.Any(n => Path.GetFileNameWithoutExtension(p).StartsWith(n, StringComparison.OrdinalIgnoreCase))).Append(file).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                    var relatedFiles = files.Where(p => names.Any(n => Path.GetFileNameWithoutExtension(p).StartsWith(n, StringComparison.OrdinalIgnoreCase)));
+                    return (file == null ? relatedFiles : relatedFiles.Append(file)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
                 }, current.Token).WaitAsync(current.Token);
                 current.Token.ThrowIfCancellationRequested();
                 foreach (var path in related.OrderBy(p => Path.GetRelativePath(root, p), StringComparer.OrdinalIgnoreCase)) AddControllerNode(tree, root, path);
-                tab.ToolTip = file + "\n" + related.Count + " file";
+                tab.ToolTip = (file ?? controller) + "\n" + related.Count + " file";
                 ProjectFileTabs.Items.Add(tab); ProjectFileTabs.SelectedItem = tab;
                 CommandStatus.Text = controller + " · " + related.Count + " file";
             }

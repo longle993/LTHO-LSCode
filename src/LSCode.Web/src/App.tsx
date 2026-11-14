@@ -76,7 +76,7 @@ import {
 
 type Tab = DocumentInfo & { saved: string; target?: Target; project?: string };
 type TableTab = { id: string; number: number; target?: Target; table?: string };
-type ControllerGroup = { link: string; file: string; files: string[]; employeeTab?: boolean };
+type ControllerGroup = { id: string; link: string; file: string; files: string[]; employeeTab?: boolean; sysId?: string };
 const employeeController = "hrpigeneralinformation";
 function isEmployeeController(group: ControllerGroup) {
   return group.files.some((path) => /(?:^|[\\/])hrpigeneralinformation\.(xml|f)$/i.test(path));
@@ -164,7 +164,7 @@ export default function App({
     [controllerRequests, setControllerRequests] = useState(0),
     [controllers, setControllers] = useState<ControllerGroup[]>([]),
     [expandedController, setExpandedController] = useState<string>();
-  const controller = controllers.find((entry) => entry.link === expandedController);
+  const controller = controllers.find((entry) => entry.id === expandedController);
   const controllerRequest = useRef(0);
   const controllerSelection = useRef(0);
   const [historyRevision, setHistoryRevision] = useState(0);
@@ -863,7 +863,7 @@ export default function App({
         break;
       case "workspace.refresh":
         controllerCache.current.clear();
-        if (controller) await openController(controller.link);
+        if (controller) await openController(controller.link, controller.employeeTab, controller.sysId);
         break;
       case "workspace.files":
         setNav("files");
@@ -1157,18 +1157,18 @@ export default function App({
         : "Không tìm thấy chức năng",
     );
   }
-  async function openController(link: string, employeeTab = false) {
+  async function openController(link: string, employeeTab = false, sysId = "") {
     const root = workspace;
     const generation = controllerRequest.current;
     const selection = ++controllerSelection.current;
-    const key = JSON.stringify([root, link]);
+    const key = JSON.stringify([root, link, sysId]);
     const cache = controllerCache.current;
     let found = cache.get(key);
     if (!found) {
       setControllerRequests((count) => count + 1);
       try {
         found = await operation<{ file: string; files: string[] }>(
-          "project.controller", { root, link }, 20_000,
+          "project.controller", { root, link, sysId }, 20_000,
         ).promise;
       } finally {
         setControllerRequests((count) => count - 1);
@@ -1180,11 +1180,12 @@ export default function App({
       if (oldest !== undefined) cache.delete(oldest);
     }
     cache.set(key, found);
-    const group = { link, ...found, employeeTab };
-    setControllers((current) => current.some((entry) => entry.link === link)
-      ? current.map((entry) => entry.link === link ? { ...group, employeeTab: employeeTab || entry.employeeTab } : entry) : [...current, group]);
+    const id = JSON.stringify([link, sysId]);
+    const group = { id, link, ...found, employeeTab, sysId };
+    setControllers((current) => current.some((entry) => entry.id === id)
+      ? current.map((entry) => entry.id === id ? { ...group, employeeTab: employeeTab || entry.employeeTab } : entry) : [...current, group]);
     if (selection === controllerSelection.current) {
-      setExpandedController(link);
+      setExpandedController(id);
       setNav("files");
       setSide(true);
     }
@@ -1519,7 +1520,7 @@ export default function App({
                 onClick={() =>
                   void guard(async () => {
                     controllerCache.current.clear();
-                    if (nav === "files" && controller) await openController(controller.link);
+                    if (nav === "files" && controller) await openController(controller.link, controller.employeeTab, controller.sysId);
                     if (nav === "functions") await loadCommands();
                     if (nav === "database") await loadObjects(0, true);
                   })
@@ -1581,17 +1582,17 @@ export default function App({
                     </div>
                     {!controllers.length && <div className="explorer-message">Mở một chức năng ERP để xem file của controller.</div>}
                     {controllers.map((group) => {
-                      const expanded = expandedController === group.link;
+                      const expanded = expandedController === group.id;
                       const label = (group.file || group.link).split(/[\\/]/).at(-1)?.replace(/\.[^.]+$/, "") ?? group.link;
-                      return <div className="controller-group" key={group.link}>
+                      return <div className="controller-group" key={group.id}>
                         <div className="controller-group-header">
                         <button className="tree-row folder-row controller-group-title" aria-expanded={expanded} title={group.link}
-                          onClick={() => { controllerSelection.current++; setExpandedController(expanded ? undefined : group.link); }}>
+                          onClick={() => { controllerSelection.current++; setExpandedController(expanded ? undefined : group.id); }}>
                           {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                           <Folder size={15} className="folder-icon" /><span>{label}</span>
                         </button>
                         <IconButton label={"Đóng controller " + label} onClick={() => {
-                          setControllers((current) => current.filter((entry) => entry.link !== group.link));
+                          setControllers((current) => current.filter((entry) => entry.id !== group.id));
                           if (expanded) setExpandedController(undefined);
                         }}><X size={13} /></IconButton>
                         </div>
@@ -1635,11 +1636,11 @@ export default function App({
                 <EmployeeFunctionTabs
                   key={JSON.stringify([workspace, projectSysTarget.current?.id])}
                   targetId={projectSysTarget.current?.id}
-                  selected={isEmployeeController(controller) ? employeeController : controller.link.toLowerCase()}
+                  selected={isEmployeeController(controller) ? employeeController : (controller.sysId || controller.link).toLowerCase()}
                   onOpen={(sysId) => void guard(() => {
                     const general = sysId.toLowerCase() === employeeController
                       ? controllers.find(isEmployeeController) : undefined;
-                    return openController(general?.link ?? sysId, true);
+                    return openController(general?.link ?? sysId, true, sysId);
                   })}
                 />
               )}
@@ -1835,7 +1836,7 @@ export default function App({
                       nodes={commands}
                       selected={selectedCommand}
                       onSelect={setSelectedCommand}
-                      onOpen={(node) => void guard(() => openController(node.entry.link))}
+                      onOpen={(node) => void guard(() => openController(node.entry.link, false, node.entry.sysId))}
                       onEdit={setMenuEditor}
                     />
                   )}
@@ -1846,7 +1847,7 @@ export default function App({
                       aria-current={
                         menuQuery && i === menuIndex ? "page" : undefined
                       }
-                      onClick={() => n.entry.link && void guard(() => openController(n.entry.link))}
+                      onClick={() => void guard(() => openController(n.entry.link, false, n.entry.sysId))}
                       onFocus={() => setSelectedCommand(n.entry.id)}
                       onKeyDown={(event) => {
                         if (event.key === "F3") {
@@ -2601,7 +2602,7 @@ function FunctionTree({
                 .join(" · ")}
               onClick={() => {
                 onSelect(node.entry.id);
-                if (!node.children.length && node.entry.link) onOpen(node);
+                if (!node.children.length && (node.entry.link || node.entry.sysId)) onOpen(node);
                 if (node.children.length)
                   setExpanded((old) => {
                     const next = new Set(old);

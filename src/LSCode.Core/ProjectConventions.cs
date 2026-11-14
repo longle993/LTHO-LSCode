@@ -35,6 +35,25 @@ public static class ProjectConventions
         }
         return null;
     }
+    public static string? ControllerFromPageMetadata(string root, string sysId, string link = "")
+    {
+        if (Directory.Exists(Path.Combine(root, "Main"))) return null;
+        var pageId = Path.GetFileNameWithoutExtension(Uri.UnescapeDataString(link.Split('?', '#')[0]));
+        if (string.IsNullOrWhiteSpace(pageId) && string.IsNullOrWhiteSpace(sysId)) return null;
+        var path = new[] { "AppData", "App_Data" }
+            .Select(folder => Path.Combine(root, folder, "PageMetadata.xml"))
+            .FirstOrDefault(File.Exists);
+        if (path is null) return null;
+        var xml = XmlTools.ParseEditor(File.ReadAllText(path), path, allowedRoot: root);
+        string? Controller(string id) => xml.Descendants().FirstOrDefault(element =>
+                element.Name.LocalName.Equals("page", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(element.Attributes().FirstOrDefault(attribute =>
+                    attribute.Name.LocalName.Equals("id", StringComparison.OrdinalIgnoreCase))?.Value,
+                    id, StringComparison.OrdinalIgnoreCase))
+            ?.Attributes().FirstOrDefault(attribute => attribute.Name.LocalName.Equals("controller", StringComparison.OrdinalIgnoreCase))
+            ?.Value.Trim();
+        return !string.IsNullOrWhiteSpace(pageId) ? Controller(pageId) ?? Controller(sysId.Trim()) : Controller(sysId.Trim());
+    }
     public static IReadOnlyList<string> GridControllers(string text)
     {
         var timeout = TimeSpan.FromMilliseconds(300);

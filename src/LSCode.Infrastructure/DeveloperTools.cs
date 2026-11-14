@@ -327,7 +327,7 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
             case "project.commands": return await ProjectDatabase.CommandsAsync(Target(p), ct, S("appDatabase"));
             case "project.menu.details": return await MenuEditor.ReadAsync(Target(p), S("wmenuId"), ct);
             case "project.menu.new": return await MenuEditor.NewAsync(Target(p), S("selectedId"), ct);
-            case "project.menu.resources": return await MenuEditor.ResourcesAsync(S("root"), S("link"), ct);
+            case "project.menu.resources": return await MenuEditor.ResourcesAsync(S("root"), S("link"), S("sysId"), ct);
             case "project.menu.save":
                 var menuValues = p.GetProperty("values").Deserialize<Dictionary<string, string?>>(Json) ?? [];
                 return await MenuEditor.SaveAsync(Target(p), S("mode"), S("originalId"), S("version"), menuValues, ct);
@@ -341,6 +341,12 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                     var names = file != null && Path.GetExtension(file).Equals(".aspx", StringComparison.OrdinalIgnoreCase)
                         ? ProjectConventions.Controllers(await File.ReadAllTextAsync(file, ct))
                         : Array.Empty<string>();
+                    if (!Directory.Exists(Path.Combine(root, "Main")))
+                    {
+                        var metadataController = ProjectConventions.ControllerFromPageMetadata(root, S("sysId"), link);
+                        if (!string.IsNullOrWhiteSpace(metadataController)) names = [metadataController];
+                        else if (names.Count == 0 && !string.IsNullOrWhiteSpace(S("sysId"))) names = [S("sysId")];
+                    }
                     var controllerRoots = new[] { Path.Combine(root, "App_Data"), Path.Combine(root, "AppData") }
                         .Where(Directory.Exists).ToArray();
                     var files = (controllerRoots.Length == 0 ? [root] : controllerRoots)

@@ -8,13 +8,14 @@ public sealed record XmlDiagnostic(string Message, int Line, int Column);
 public sealed record XmlEditorDiagnostics(XmlDiagnostic? Diagnostic, IReadOnlyList<XmlDiagnostic> Warnings);
 public static class XmlTools
 {
-    internal static XDocument ParseEditor(string text, string? path = null, IReadOnlyDictionary<string, string>? buffers = null)
+    internal static XDocument ParseEditor(string text, string? path = null, IReadOnlyDictionary<string, string>? buffers = null,
+        string? allowedRoot = null)
     {
         var hasPath = !string.IsNullOrEmpty(path) && Path.IsPathFullyQualified(path);
         using var reader = XmlReader.Create(new StringReader(text.TrimStart('\uFEFF')), new XmlReaderSettings
         {
             DtdProcessing = DtdProcessing.Parse,
-            XmlResolver = hasPath ? new XmlIncludes.EditorResolver(path!, buffers) : null,
+            XmlResolver = hasPath ? new XmlIncludes.EditorResolver(path!, buffers, allowedRoot) : null,
             MaxCharactersFromEntities = 1_000_000,
         }, hasPath ? new Uri(Path.GetFullPath(path!)).AbsoluteUri : "");
         return XDocument.Load(reader, LoadOptions.SetLineInfo);

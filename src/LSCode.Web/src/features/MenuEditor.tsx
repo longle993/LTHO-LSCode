@@ -51,7 +51,7 @@ export function MenuEditor({ target, command, root, onClose, onSaved, onOpenPath
     try {
       const [loaded, linked] = await Promise.all([
         request<Model>("project.menu.details", { targetId: target.id, wmenuId: command.entry.id }),
-        request<ResourceResult>("project.menu.resources", { root, link: command.entry.link }),
+        request<ResourceResult>("project.menu.resources", { root, link: command.entry.link, sysId: command.entry.sysId }),
       ]);
       setModel(loaded); setValues(loaded.values); setResources(linked); setRecordId(command.entry.id);
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }

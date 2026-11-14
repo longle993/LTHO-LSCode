@@ -42,9 +42,9 @@ public static class XmlIncludes
         return null;
     }
 
-    internal sealed class EditorResolver(string documentPath, IReadOnlyDictionary<string, string>? buffers) : XmlResolver
+    internal sealed class EditorResolver(string documentPath, IReadOnlyDictionary<string, string>? buffers, string? allowedRoot = null) : XmlResolver
     {
-        private readonly string root = IncludeRoot(documentPath);
+        private readonly string root = allowedRoot is null ? IncludeRoot(documentPath) : Path.GetFullPath(allowedRoot);
         public override ICredentials? Credentials { set { } }
 
         private static string IncludeRoot(string path)

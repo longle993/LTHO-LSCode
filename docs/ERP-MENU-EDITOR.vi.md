@@ -66,7 +66,9 @@ NULL và chuỗi rỗng phải được phân biệt theo kiểu cột. Không g
 
 ## Tra controller, bảng và file
 
-Ưu tiên controller khai báo trong Main ASPX đã resolve từ link. Sysid và tên file link là gợi ý bổ sung, không tự chọn khi mâu thuẫn. Nếu có nhiều controller, hiển thị bộ chọn và nguồn xác định để người dùng biết đang kiểm tra controller nào.
+Với dự án có thư mục Main, ưu tiên controller khai báo trong ASPX đã resolve từ link. Với dự án không có Main, tìm page theo tên link trước, rồi theo `sysid`, trong `AppData/PageMetadata.xml` (hoặc `App_Data/PageMetadata.xml`) và dùng thuộc tính `controller` để tìm Dir/Filter/Grid và bảng Dir. Nếu metadata không có page tương ứng, thử `sysid` như tên controller rồi giữ fallback từ ASPX/link hiện có. Nếu có nhiều controller, hiển thị bộ chọn và nguồn xác định để người dùng biết đang kiểm tra controller nào.
+Page có thể nằm trong entity include của DTD, ví dụ `&Page.001;` → `Metadata/Page.001.xml`; bộ đọc phân giải include trong phạm vi thư mục dự án trước khi tìm `id`.
+Trên FBISP30, `wcommand.sysid` có thể là tên controller chứ không phải `page id` (`arkh.aspx` → `id=arkh` → `controller=Customer`, trong khi `sysid=Customer`). Vì vậy tra `page id` từ link trước, rồi mới thử `sysid` như page id hoặc tên controller.
 
 - Tìm theo tên controller chính xác, không phân biệt hoa thường; dùng convention App_Data/AppData và Controllers/Controller được dự án hỗ trợ. Không ghép đường dẫn cứng theo một khách hàng.
 - Main resolve từ link (bỏ query/fragment phục vụ tìm file). Dir/Filter/Grid kiểm tra XML và .f độc lập. Chỉ có .f vẫn phải được tìm thấy.
