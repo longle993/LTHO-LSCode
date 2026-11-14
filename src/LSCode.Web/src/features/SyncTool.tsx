@@ -29,7 +29,8 @@ export function SyncTool({ onProjects }: Pick<ToolProps, "onProjects">) {
       if (alive.current) setMatches(result);
     });
   return (
-    <div className="tool-body">
+    <div className="sync-webconfig-tool">
+      <p className="muted">Tìm một ứng dụng trong CustomerPro và đọc kết nối từ web.config.</p>
       <div className="form-row">
         <label className="field">
           Thư mục CustomerPro

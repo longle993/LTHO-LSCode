@@ -15,6 +15,10 @@ export type Project = {
   server: string;
   database: string;
   sourcePath: string;
+  code: string;
+  title: string;
+  programPath: string;
+  active: boolean;
 };
 export type Snippet = {
   key: string;

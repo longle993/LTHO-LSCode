@@ -35,15 +35,17 @@ public static class ProjectImporter
     }
     public static ProjectImportResult Merge(IEnumerable<LegacyProject> existing, IEnumerable<LegacyProject> incoming, bool overwrite)
     {
-        var result = existing.ToDictionary(p => p.Id, StringComparer.OrdinalIgnoreCase);
+        var result = existing.ToList();
         var added = 0; var updated = 0; var skipped = 0;
         foreach (var item in incoming)
         {
-            if (!result.ContainsKey(item.Id)) { result.Add(item.Id, item); added++; }
-            else if (overwrite && result[item.Id].RawXml != item.RawXml) { result[item.Id] = item; updated++; }
+            var index = result.FindIndex(saved => saved.Id.Equals(item.Id, StringComparison.OrdinalIgnoreCase) ||
+                ProjectCode(saved).Equals(ProjectCode(item), StringComparison.OrdinalIgnoreCase));
+            if (index < 0) { result.Add(item); added++; }
+            else if (overwrite && result[index].RawXml != item.RawXml) { result[index] = item with { Id = result[index].Id }; updated++; }
             else skipped++;
         }
-        return new(result.Values.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase).ToList(), added, updated, skipped);
+        return new(result.OrderBy(p => ProjectCode(p), StringComparer.OrdinalIgnoreCase).ToList(), added, updated, skipped);
     }
     public static string Export(IEnumerable<LegacyProject> projects, bool includeSensitive = false)
     {
@@ -61,6 +63,7 @@ public static class ProjectImporter
         return new XDocument(root).ToString();
     }
     public static bool IsSensitive(string name) => new[] { "password", "pwd", "secret", "token", "connectionstring", "apikey" }.Any(s => name.Contains(s, StringComparison.OrdinalIgnoreCase));
+    private static string ProjectCode(LegacyProject project) => project.Field("StandardProjectCode").Trim() is { Length: > 0 } code ? code : project.Name.Trim();
     public static LegacyProject Create(string name, string server, string database, string sourcePath) => FromElement(new XElement("project",
         new XElement("FolderName", name), new XElement("servername", server), new XElement("df_Database", database), new XElement("SourcePath", sourcePath),
         new XElement("User", ""), new XElement("Password", ""), new XElement("AppData", ""), new XElement("WorkingPath", ""), new XElement("ProgramPath", "")));

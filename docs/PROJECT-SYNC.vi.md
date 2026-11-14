@@ -4,6 +4,18 @@
 
 ## Sử dụng
 
+### Đồng bộ toàn bộ từ FSD Studio
+
+Trong FSD Studio, nút **Synchronize from standard project list** lấy `CurrUser` đã lưu qua `Reg.GetRegValue("CurrUser")`, kết nối DB danh mục chuẩn bằng tài khoản nhúng, gọi `ns_getListDept`, rồi cập nhật các dòng `dmda` đang hoạt động và thêm dự án còn thiếu. FSD Studio tự làm các bước này trong một lần bấm và làm mới lưới dự án.
+
+Trong **Dự án của bạn → Đồng bộ dự án** của LSCode, nhập `CurrUser` FSD Studio một lần; tên này được nhớ cục bộ trong WebView. Bấm **Đồng bộ từ danh mục chuẩn** để đọc, lập kế hoạch và ghi catalog trong cùng một thao tác. Nút **Xem trước** vẫn cho xem số dự án mới, cập nhật, không đổi và bỏ qua trước khi bấm **Đồng bộ toàn bộ**. Nút **Dừng** hủy truy vấn đang chạy. LSCode không tự đọc `CurrUser` từ FSD Studio vì mã nguồn FSD chỉ gọi thư viện `Reg` ngoài dự án; nơi lưu giá trị chưa được xác minh.
+
+LSCode chỉ giải mã kết nối nhúng trong bộ nhớ lúc gọi DB, không sao chép mật khẩu vào mã nguồn, cài đặt hay kết quả trả về UI. File nguồn FSD Studio phải có trên máy chạy; đường dẫn mặc định là `D:\FAST\Code\LTHO\FSDStudioSource\FSDStudio\clsDatabase.cs` và có thể sửa. `CurrUser` là tên người dùng mà FSD Studio lưu riêng, có thể khác tên đăng nhập Windows.
+
+Mỗi dòng chuẩn dùng `ma_da` làm mã đối chiếu; lấy đường dẫn từ `dir_pro_web`, rồi `dir_src_web`, `dir_pro_app`, `dir_src_app`; lấy server từ `ten_server`, SYS DB từ `db_sys`, thư mục update từ `dir_update`. Đồng bộ hàng loạt chỉ ghi đường dẫn `web.config`; khi mở một dự án, LSCode mới đọc kết nối App/SYS của dự án đó. Cách này tránh việc gần 3.000 lần kiểm tra đường dẫn mạng làm nút đồng bộ đứng lâu. Profile hiện có được giữ ID, đường dẫn chương trình và thư mục update đã chỉnh; dự án cũ vắng trong danh mục chuẩn không bị xóa. Dòng thiếu mã, server, SYS DB hoặc đường dẫn nguồn bị bỏ qua và hiện lý do. Nếu `web.config` không có hoặc không đọc được, lỗi được báo khi mở dự án tương ứng.
+
+Phần **Đồng bộ một dự án từ web.config** bên dưới vẫn dùng được khi cần chọn riêng một ứng dụng.
+
 1. Mở `artifacts/publish/LSCode.exe`, chọn **Project → Đồng bộ dự án** hoặc nút **Đồng bộ…** bên trái.
 2. Nhập tên, ví dụ `BACHVIET`, rồi nhấn **Enter**. Ứng dụng tìm đúng tên thư mục dưới các nhóm của `\\172.168.5.14\CustomerPro`, sau đó tìm `web.config` trong các thư mục ứng dụng con một cấp. Nếu có nhiều kết quả, chọn ứng dụng trong danh sách.
 3. LS Code đọc `appConnectionString` và `sysConnectionString`. Cây chức năng lấy từ DB sys; file explorer trỏ tới thư mục ứng dụng. Đồng bộ lại cập nhật cùng profile, không nhân bản.

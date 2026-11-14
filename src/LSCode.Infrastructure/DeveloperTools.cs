@@ -39,7 +39,18 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
         targets[id] = (t, isProjectSys);
         return new(id, t.Server, t.Database);
     }
-    private static ProjectInfo Project(LegacyProject p) => new(p.Id, p.Name, p.Server, p.Database, p.SourcePath);
+    private static ProjectInfo Project(LegacyProject p)
+    {
+        var root = XmlTools.Parse(p.RawXml).Root!;
+        string Field(string name) => root.Elements().FirstOrDefault(element =>
+            element.Name.LocalName.Equals(name, StringComparison.OrdinalIgnoreCase))?.Value ?? "";
+        var code = Field("StandardProjectCode").Trim() is { Length: > 0 } savedCode ? savedCode : p.Name;
+        var title = Field("StandardProjectTitle").Trim() is { Length: > 0 } savedTitle ? savedTitle : code;
+        var programPath = new[] { Field("WebProgramPath"), Field("WinProgramPath"), Field("ProgramPath"), Field("SourcePath") }
+            .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim() ?? "";
+        return new(p.Id, p.Name, Field("servername"), Field("df_Database"), Field("SourcePath"),
+            code, title, programPath, Field("IsActive") is not ("0" or "false" or "False"));
+    }
     private static string Identifier(string name) =>
         string.IsNullOrWhiteSpace(name) || name.Length > 128 || name.Contains('\0')
             ? throw new ArgumentException("Tên schema, bảng hoặc cột không hợp lệ.")
@@ -62,6 +73,45 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
         string QualifiedTable() => ProjectDatabase.Quote(Identifier(S("schema", "dbo"))) + "." + ProjectDatabase.Quote(Identifier(S("table")));
         string[] ColumnNames() => p.TryGetProperty("columns", out var values)
             ? (values.Deserialize<string[]>() ?? []).Select(Identifier).Distinct(StringComparer.Ordinal).ToArray() : [];
+        LegacyProject ApplyProjectInput(LegacyProject seed, bool keepPassword)
+        {
+            var xml = XmlTools.Parse(seed.RawXml).Root!;
+            void Set(string name, string value)
+            {
+                var field = xml.Elements().FirstOrDefault(element => element.Name.LocalName.Equals(name, StringComparison.OrdinalIgnoreCase));
+                if (field is null) xml.Add(new XElement(name, value)); else field.Value = value;
+            }
+            var code = S("code", S("name")).Trim();
+            if (code.Length == 0) throw new ArgumentException("Nhập mã dự án.");
+            var title = S("title", code).Trim();
+            var webSource = S("webSourcePath"); var webProgram = S("webProgramPath");
+            var winSource = S("winSourcePath"); var winProgram = S("winProgramPath");
+            var source = S("sourcePath", new[] { webSource, webProgram, winSource, winProgram }
+                .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? "");
+            var webHost1 = S("webHost1"); var webHost2 = S("webHost2");
+            var active = !p.TryGetProperty("active", out var activeValue) || activeValue.ValueKind != JsonValueKind.False;
+            var program = S("programPath", new[] { webHost1, webHost2, webProgram, winProgram }
+                .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? "");
+            foreach (var pair in new (string Xml, string Value)[] {
+                ("FolderName", code), ("StandardProjectCode", code), ("StandardProjectTitle", title),
+                ("ProjectVersion", S("version")), ("IsActive", active ? "1" : "0"),
+                ("WinProgramPath", winProgram), ("WebProgramPath", webProgram),
+                ("WinSourcePath", winSource), ("WebSourcePath", webSource),
+                ("WebHost1", webHost1), ("WebHost2", webHost2), ("UpdatePath", S("updatePath")),
+                ("servername", S("server")), ("Authentication", S("authentication", "sql")),
+                ("User", S("user")), ("df_Database", S("database")), ("DefaultUser", S("defaultUser")),
+                ("ListAllData", S("listAllData")), ("SortOrder", S("sortOrder")),
+                ("HomeUpdateCode", S("homeUpdateCode")), ("Notes", S("notes")),
+                ("SourcePath", source), ("ProgramPath", program),
+                ("Fsd_ma_da", code), ("Fsd_ten_da", title), ("Fsd_dir_pro_app", winProgram),
+                ("Fsd_dir_src_app", winSource), ("Fsd_dir_pro_web", webProgram), ("Fsd_dir_src_web", webSource),
+                ("Fsd_web_host1", webHost1), ("Fsd_web_host2", webHost2), ("Fsd_dir_update", S("updatePath")),
+                ("Fsd_ten_server", S("server")), ("Fsd_xuser", S("user")), ("Fsd_db_sys", S("database")),
+                ("Fsd_ghi_chu", S("notes")), ("Fsd_status", active ? "1" : "0") }) Set(pair.Xml, pair.Value);
+            var password = S("password");
+            if (password.Length > 0 || !keepPassword) Set("Password", password);
+            return seed with { Name = code, RawXml = xml.ToString(SaveOptions.DisableFormatting) };
+        }
         switch (method)
         {
             case "studio.bootstrap":
@@ -86,8 +136,8 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                 }
                 finally { persistenceGate.Release(); }
             case "project.create":
-                var created = ProjectImporter.Create(S("name"), S("server"), S("database"), S("sourcePath"));
-                created = WithUpdatePath(created, S("updatePath"));
+                var created = ProjectImporter.Create(S("code", S("name")), S("server"), S("database"), S("sourcePath"));
+                created = ApplyProjectInput(created, false);
                 await SaveProjectAsync(created, ct); return Project(created);
             case "project.list": return ProjectStore.Load().Select(Project).ToArray();
             case "project.import.preview": return ProjectImporter.Read(S("xml")).Select(Project).ToArray();
@@ -100,8 +150,21 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                 return ProjectImporter.Export([ProjectStore.Load().First(x => x.Id == S("id"))]);
             case "project.details":
                 var detail = ProjectStore.Load().First(x => x.Id == S("id"));
-                return new { project = Project(detail), programPath = detail.Field("ProgramPath"),
-                    updatePath = UpdatePath(detail), metadata = ProjectImporter.Export([detail]) };
+                var detailRoot = XmlTools.Parse(detail.RawXml).Root!;
+                string Detail(string name) => detailRoot.Elements().FirstOrDefault(element =>
+                    element.Name.LocalName.Equals(name, StringComparison.OrdinalIgnoreCase))?.Value ?? "";
+                return new { project = Project(detail), programPath = Detail("ProgramPath"), updatePath = UpdatePath(detail), profile = new {
+                    code = Detail("StandardProjectCode") is { Length: > 0 } detailCode ? detailCode : detail.Name,
+                    title = Detail("StandardProjectTitle"), version = Detail("ProjectVersion"),
+                    active = Detail("IsActive") is not ("0" or "false" or "False"),
+                    winProgramPath = Detail("WinProgramPath"), webProgramPath = Detail("WebProgramPath"),
+                    winSourcePath = Detail("WinSourcePath"), webSourcePath = Detail("WebSourcePath"),
+                    webHost1 = Detail("WebHost1"), webHost2 = Detail("WebHost2"), updatePath = UpdatePath(detail),
+                    server = Detail("servername"), authentication = Detail("Authentication"), user = Detail("User"),
+                    database = Detail("df_Database"), defaultUser = Detail("DefaultUser"),
+                    listAllData = Detail("ListAllData"), sortOrder = Detail("SortOrder"),
+                    homeUpdateCode = Detail("HomeUpdateCode"), notes = Detail("Notes")
+                }, metadata = ProjectImporter.Export([detail]) };
             case "project.delete":
                 await persistenceGate.WaitAsync(ct);
                 try
@@ -121,12 +184,7 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                 await persistenceGate.WaitAsync(ct);
                 try {
                     var all = ProjectStore.Load(); var previous = all.First(x => x.Id == S("id"));
-                    var element = XmlTools.Parse(previous.RawXml).Root!;
-                    foreach (var pair in new[] { ("FolderName", "name"), ("servername", "server"), ("df_Database", "database"), ("SourcePath", "sourcePath"), ("ProgramPath", "programPath") }) {
-                        var field = element.Elements().FirstOrDefault(e => e.Name.LocalName.Equals(pair.Item1, StringComparison.OrdinalIgnoreCase));
-                        if (field == null) element.Add(new XElement(pair.Item1, S(pair.Item2))); else field.Value = S(pair.Item2);
-                    }
-                    var updated = WithUpdatePath(ProjectImporter.Read(element.ToString())[0], S("updatePath", previous.Field("UpdatePath")));
+                    var updated = ApplyProjectInput(previous, true) with { Id = previous.Id };
                     EnsureUniqueProject(all.Where(item => item.Id != previous.Id), updated);
                     ProjectStore.Save(all.Select(x => x.Id == previous.Id ? updated : x).ToList()); return Project(updated);
                 } finally { persistenceGate.Release(); }
@@ -208,6 +266,34 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
             case "workspace.duplicate":
                 return await WorkspaceFiles.DuplicateAsync(S("path"), ct);
             case "project.discover": return await Task.Run(() => ProjectDiscovery.Find(S("root", @"\\172.168.5.14\CustomerPro"), S("name"), ct), ct);
+            case "project.standard.preview":
+                var standardRows = await StandardProjectSync.ReadAsync(S("sourceFile"), S("currentUser"), ct);
+                return StandardProjectSync.Plan(ProjectStore.Load(), standardRows, ct).Summary;
+            case "project.standard.sync":
+                var syncRows = await StandardProjectSync.ReadAsync(S("sourceFile"), S("currentUser"), ct);
+                await persistenceGate.WaitAsync(ct);
+                try
+                {
+                    var plan = StandardProjectSync.Plan(ProjectStore.Load(), syncRows, ct);
+                    if (plan.Summary.Added > 0 || plan.Summary.Updated > 0)
+                        ProjectStore.Save(plan.Projects);
+                    return new { summary = new { plan.Summary.Added, plan.Summary.Updated, plan.Summary.Unchanged, plan.Summary.Skipped },
+                        projects = plan.Projects.Select(Project).ToArray() };
+                }
+                finally { persistenceGate.Release(); }
+            case "project.standard.apply":
+                var applyRows = await StandardProjectSync.ReadAsync(S("sourceFile"), S("currentUser"), ct);
+                await persistenceGate.WaitAsync(ct);
+                try
+                {
+                    var plan = StandardProjectSync.Plan(ProjectStore.Load(), applyRows, ct);
+                    if (plan.Summary.Projects.Length == 0 ||
+                        !plan.Summary.Fingerprint.Equals(S("fingerprint"), StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException("Danh mục chuẩn đã thay đổi. Hãy xem trước lại trước khi đồng bộ.");
+                    ProjectStore.Save(plan.Projects);
+                    return new { summary = plan.Summary, projects = plan.Projects.Select(Project).ToArray() };
+                }
+                finally { persistenceGate.Release(); }
             case "project.sync":
                 var config = S("configPath"); var connections = await Task.Run(() => ProjectDiscovery.ReadConnections(config), ct);
                 var identity = new SqlConnectionStringBuilder(connections.Sys);
@@ -500,8 +586,8 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
     private static void EnsureUniqueProject(IEnumerable<LegacyProject> existing, LegacyProject candidate)
     {
         static bool Same(string left, string right) => left.Trim().Equals(right.Trim(), StringComparison.OrdinalIgnoreCase);
-        if (existing.Any(item => item.Id == candidate.Id ||
-            (Same(item.Name, candidate.Name) && Same(item.Server, candidate.Server) && Same(item.Database, candidate.Database))))
+        var code = candidate.Field("StandardProjectCode").Trim() is { Length: > 0 } savedCode ? savedCode : candidate.Name;
+        if (existing.Any(item => item.Id == candidate.Id || Same(item.Field("StandardProjectCode") is { Length: > 0 } itemCode ? itemCode : item.Name, code)))
             throw new InvalidOperationException($"Profile dự án '{candidate.Name}' đã tồn tại.");
     }
     public async Task StopTraceAsync()

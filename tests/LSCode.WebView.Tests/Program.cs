@@ -287,6 +287,51 @@ await using (var projectTools = new DeveloperTools())
     Check(modernFiles.GetProperty("files").EnumerateArray().Select(item => item.GetString())
         .SequenceEqual([Path.Combine(modernDir, "Item.f")]),
         "Controller explorer loads PageMetadata controller files without Main or ASPX");
+    var fsdSource = Path.Combine(root, "clsDatabase.cs");
+    var fakeConnection = "Data Source=standard.example;Initial Catalog=FSG_A;Uid=reader;Pwd=not-real;";
+    var encodedConnection = Convert.ToBase64String(Encoding.UTF32.GetBytes(fakeConnection)).TrimEnd('=');
+    await File.WriteAllTextAsync(fsdSource, $"string cVal = \"{encodedConnection}\";");
+    var decodedConnection = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(StandardProjectSync.ReadFsdConnection(fsdSource));
+    Check(decodedConnection.DataSource == "standard.example" && decodedConnection.InitialCatalog == "FSG_A",
+        "FSD embedded connection is decoded without storing it in a project");
+    var installedFsdSource = @"D:\FAST\Code\LTHO\FSDStudioSource\FSDStudio\clsDatabase.cs";
+    if (File.Exists(installedFsdSource))
+    {
+        var installedConnection = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(StandardProjectSync.ReadFsdConnection(installedFsdSource));
+        Check(!string.IsNullOrWhiteSpace(installedConnection.DataSource) &&
+            !string.IsNullOrWhiteSpace(installedConnection.InitialCatalog) &&
+            !string.IsNullOrWhiteSpace(installedConnection.Password),
+            "Installed FSD Studio embedded connection decodes in the .NET application runtime");
+    }
+    var standardFolder = Directory.CreateDirectory(Path.Combine(root, "standard-project")).FullName;
+    var oldProfile = ProjectImporter.Create("ABC", "old-server", "old-sys", standardFolder);
+    var oldXml = LSCode.Core.XmlTools.Parse(oldProfile.RawXml).Root!;
+    oldXml.SetElementValue("ProgramPath", "https://example.test/custom");
+    oldXml.SetElementValue("UpdatePath", @"D:\PrivateUpdates");
+    oldProfile = oldProfile with { RawXml = oldXml.ToString(System.Xml.Linq.SaveOptions.DisableFormatting) };
+    var standardRows = new[] {
+        new StandardProjectRow("ABC", "Dự án ABC", "new-server", "new-sys", standardFolder, "", "", "", @"D:\StandardUpdates",
+            new Dictionary<string, string> { ["web_host1"] = "https://abc.test", ["ghi_chu"] = "Nguồn chuẩn", ["status"] = "1", ["s9"] = "custom-source" }),
+        new StandardProjectRow("ABC", "Trùng", "new-server", "new-sys", standardFolder, "", "", "", ""),
+        new StandardProjectRow("XYZ", "Thiếu nguồn", "new-server", "new-sys", "", "", "", "", "")
+    };
+    var standardPlan = StandardProjectSync.Plan([oldProfile], standardRows);
+    Check(standardPlan.Summary.Updated == 1 && standardPlan.Summary.Skipped == 2 &&
+        standardPlan.Projects.Count == 1 && standardPlan.Projects[0].Id == oldProfile.Id &&
+        standardPlan.Projects[0].SourcePath == standardFolder &&
+        standardPlan.Projects[0].Field("ProgramPath") == "https://abc.test" &&
+        standardPlan.Projects[0].Field("UpdatePath") == @"D:\StandardUpdates" &&
+        standardPlan.Projects[0].Field("Notes") == "Nguồn chuẩn" &&
+        standardPlan.Projects[0].Field("Fsd_s9") == "custom-source",
+        "Bulk sync matches ma_da, applies authoritative fields and retains all source metadata");
+    var newStandardFolder = Directory.CreateDirectory(Path.Combine(root, "standard-new")).FullName;
+    var newPlan = StandardProjectSync.Plan([], [new StandardProjectRow("NEW", "Dự án mới", ".", "NEW_S",
+        newStandardFolder, "", "", "", @"D:\StandardUpdates")]);
+    Check(newPlan.Summary.Added == 1 && newPlan.Projects[0].Field("StandardProjectCode") == "NEW" &&
+        newPlan.Projects[0].Field("WebConfigPath") == Path.Combine(newStandardFolder, "web.config") &&
+        string.IsNullOrEmpty(newPlan.Projects[0].Field("AppConnectionString")) &&
+        newPlan.Projects[0].Field("UpdatePath") == @"D:\StandardUpdates",
+        "Bulk sync defers web.config access until project open and imports update path");
     var customerFiles = JsonSerializer.SerializeToElement(await CallProject("project.controller",
         new { root = modernRoot, link = "arkh.aspx", sysId = "Customer" }), Protocol.Json);
     Check(customerFiles.GetProperty("files").EnumerateArray().Select(item => item.GetString())
@@ -305,7 +350,19 @@ await using (var projectTools = new DeveloperTools())
     var details = JsonSerializer.SerializeToElement(await CallProject("project.details", new { id = syncedProject.Id }), Protocol.Json);
     Check(details.GetProperty("updatePath").GetString() == @"\\172.168.5.14\CustomerUpdate\ERP startup fixture\update\",
         "Project sync saves the default update folder");
-    var created = (ProjectInfo)(await CallProject("project.create", new { name = "Temporary profile", server = ".", database = "Test", sourcePath = root, updatePath = @"D:\Updates" }))!;
+    var created = (ProjectInfo)(await CallProject("project.create", new { code = "TMP", title = "Temporary profile", version = "SP30",
+        active = true, server = ".", database = "Test", webSourcePath = root, webProgramPath = @"D:\WebProgram",
+        winSourcePath = @"D:\WinSource", winProgramPath = @"D:\WinProgram", webHost1 = "https://tmp.test",
+        webHost2 = "http://tmp.local", updatePath = @"D:\Updates", authentication = "sql", user = "fixture-user",
+        password = "fixture-secret", defaultUser = "ABC", listAllData = "1", sortOrder = "12", homeUpdateCode = "TMP_HOME", notes = "Fixture notes" }))!;
+    var createdDetails = JsonSerializer.SerializeToElement(await CallProject("project.details", new { id = created.Id }), Protocol.Json)
+        .GetProperty("profile");
+    Check(created.Code == "TMP" && created.Title == "Temporary profile" && created.ProgramPath == @"D:\WebProgram" &&
+        createdDetails.GetProperty("version").GetString() == "SP30" &&
+        createdDetails.GetProperty("webHost1").GetString() == "https://tmp.test" &&
+        createdDetails.GetProperty("homeUpdateCode").GetString() == "TMP_HOME" &&
+        !((string)(await CallProject("project.export", new { }))!).Contains("fixture-secret", StringComparison.Ordinal),
+        "Full project profile persists and export removes its password");
     await Reject<InvalidOperationException>(() => CallProject("project.create", new { name = created.Name, server = ".", database = "Test", sourcePath = root }),
         "Duplicate project creation is rejected");
     await CallProject("project.delete", new { id = created.Id });

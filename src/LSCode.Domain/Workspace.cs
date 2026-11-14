@@ -5,5 +5,6 @@ public sealed record Entry(string Path, string Name, bool Directory);
 public sealed record TargetInfo(string Id, string Server, string Database);
 public sealed record ResultSet(string[] Columns, string?[][] Rows);
 public sealed record ExecutionResult(ResultSet[] Tables, string[] Messages, double DurationMs, bool Truncated);
-public sealed record ProjectInfo(string Id, string Name, string Server, string Database, string SourcePath);
+public sealed record ProjectInfo(string Id, string Name, string Server, string Database, string SourcePath,
+    string Code = "", string Title = "", string ProgramPath = "", bool Active = true);
 public sealed record SnippetInfo(string Key, string Category, string Body, string Description, int Position, string Param);
