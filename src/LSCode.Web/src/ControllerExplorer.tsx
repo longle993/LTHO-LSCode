@@ -183,7 +183,7 @@ export default function ControllerExplorer({
         {onRename && <Button role="menuitem" variant="ghost" onClick={() => beginRename(menu.item)}>Đổi tên <kbd>F2</kbd></Button>}
         <Button role="menuitem" variant="ghost" onClick={() => {
           closeMenu();
-          onReveal(menu.item.directory ? menu.item.path : parentFolder(menu.item.path));
+          onReveal(menu.item.path);
         }}>{menu.item.directory ? "Mở thư mục" : "Mở thư mục chứa file"}</Button>
         {!menu.item.directory && onDuplicate && <Button role="menuitem" variant="ghost" onClick={() => { closeMenu(); onDuplicate(menu.item.path); }}>Nhân bản file</Button>}
       </div>, document.body)}
