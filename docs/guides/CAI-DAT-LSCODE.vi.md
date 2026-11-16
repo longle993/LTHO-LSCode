@@ -2,7 +2,7 @@
 
 1. Đóng các cửa sổ LSCode đang chạy và mở `LSCode-WebView-Setup-x64.exe`. Khi tạo bộ cài từ mã nguồn, file nằm trong `artifacts/installer/`.
 2. Chọn thư mục cài đặt rồi bấm **Install**. Mặc định ứng dụng được cài cho tài khoản Windows hiện tại tại `%LOCALAPPDATA%\Programs\LSCode WebView`. Có thể chọn tạo biểu tượng Desktop trong trình cài đặt.
-3. Mở **LSCode WebView** từ menu Start, rồi chọn profile dự án hoặc đồng bộ dự án từ `web.config`.
+3. Mở **LSCode WebView** từ menu Start, rồi chọn profile dự án hoặc bấm **Đồng bộ** trong **Dự án của bạn** để lấy hồ sơ từ danh mục chuẩn.
 
 Bộ cài đã kèm .NET Desktop Runtime. Nếu máy thiếu Microsoft Edge WebView2 Runtime, bộ cài dùng Evergreen Bootstrapper và cần Internet để tải runtime. Có thể cài **Evergreen Standalone Installer x64** trước nếu máy cài đặt không có Internet. [Tải WebView2 từ Microsoft](https://developer.microsoft.com/microsoft-edge/webview2/#download-section)
 

@@ -1,8 +1,8 @@
-> Cập nhật mới: [Workbench 10/11/2026](WEBVIEW-UPDATE-2026-11-10.vi.md), thay thế mô tả explorer, split editor, startup và Profiler cũ.
+> Cập nhật mới: [Workbench 10/11/2026](../history/WEBVIEW-UPDATE-2026-11-10.vi.md), thay thế mô tả explorer, split editor, startup và Profiler cũ.
 
 # LSCode — đặc tả chuyển đổi toàn bộ tính năng sang WebView
 
-Ngày: 10/11/2026. Người dùng đã chọn “dựng luôn”. Kiến trúc và các luồng chuyển đổi đã có source, bản đóng gói và kiểm tra; xem [trạng thái kiểm chứng thực tế](WEBVIEW-RUNNING.vi.md). Ma trận trong tài liệu này là tiêu chí nghiệm thu, không tự động có nghĩa mọi ca đã được kiểm chứng.
+Ngày: 10/11/2026. Người dùng đã chọn “dựng luôn”. Kiến trúc và các luồng chuyển đổi đã có source, bản đóng gói và kiểm tra; xem [trạng thái kiểm chứng thực tế](../guides/WEBVIEW-RUNNING.vi.md). Ma trận trong tài liệu này là tiêu chí nghiệm thu, không tự động có nghĩa mọi ca đã được kiểm chứng.
 
 ## 1. Mục tiêu và phạm vi
 

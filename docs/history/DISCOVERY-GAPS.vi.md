@@ -40,7 +40,7 @@ Các đường dẫn tuyệt đối:
 - `D:\FAST\Code\LTHO\Fcode\fsystem`: 128 file, 78 C#; net461.
 - `D:\FAST\Code\LTHO\Fcode\FcodeViewer`: 44 file, 17 C#; net462.
 
-Tổng bổ sung 414 file, 313 C#. Đã xác minh project files và vị trí class quan trọng; chưa thực hiện phân tích đầy đủ các thân hàm mới. [Manifest bổ sung](source-supplement-manifest.csv) tách riêng để giữ nguyên snapshot/bằng chứng ban đầu. `source-manifest.csv`, `source-evidence.md` và `module-api-index.txt` trước đó vẫn chỉ mô tả phạm vi khảo sát ban đầu.
+Tổng bổ sung 414 file, 313 C#. Đã xác minh project files và vị trí class quan trọng; chưa thực hiện phân tích đầy đủ các thân hàm mới. [Manifest bổ sung](../../sources/fcode/source-supplement-manifest.csv) tách riêng để giữ nguyên snapshot/bằng chứng ban đầu. `source-manifest.csv`, `source-evidence.md` và `module-api-index.txt` trước đó vẫn chỉ mô tả phạm vi khảo sát ban đầu.
 
 ## Tên sản phẩm
 
