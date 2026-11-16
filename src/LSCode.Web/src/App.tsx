@@ -38,6 +38,7 @@ import {
   GitCompareArrows,
   Blocks,
   Languages,
+  ArrowRight,
   ArrowUpRight,
 } from "lucide-react";
 import { native, request, operation, subscribe, quoteSqlName, notifyWindowReady, writeClipboard } from "./bridge";
@@ -83,6 +84,13 @@ function isEmployeeController(group: ControllerGroup) {
 }
 type Entry = { path: string; name: string; directory: boolean };
 type Hit = { path: string; line: number; column: number; preview: string };
+type EditorSearchHit = {
+  line: number;
+  column: number;
+  endColumn: number;
+  preview: string;
+};
+type FormatLanguage = "sql" | "json" | "xml";
 const initialSettings: Settings = {
   theme: "Light",
   workspace: null,
@@ -117,6 +125,8 @@ export default function App({
     [selectedTool, setSelectedTool] = useState<string>(),
     [profilerBusy, setProfilerBusy] = useState(false),
     [closingProfiler, setClosingProfiler] = useState(false);
+  const [formatMenuOpen, setFormatMenuOpen] = useState(false);
+  const formatMenuRef = useRef<HTMLDivElement>(null);
   const profilerSelected = selectedTool === "profiler";
   const [studioOpen, setStudioOpen] = useState(false);
   const studioDirty = useRef(false);
@@ -127,6 +137,27 @@ export default function App({
   useEffect(() => {
     if (selectedTool) document.getElementById(selectedTool + "-tab")?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [selectedTool]);
+  useEffect(() => {
+    setFormatMenuOpen(false);
+  }, [activeId, selectedTool]);
+  useEffect(() => {
+    if (!formatMenuOpen) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (!formatMenuRef.current?.contains(event.target as Node)) setFormatMenuOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setFormatMenuOpen(false);
+        formatMenuRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+      }
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [formatMenuOpen]);
   const setActiveId = (id: string) => {
     setSelectedTool(undefined);
     setActiveIdRaw(id);
@@ -237,6 +268,45 @@ export default function App({
   latest.current = { tabs, activeId, settings };
   const active = tabs.find((t) => t.id === activeId),
     target = active?.target ?? defaultTarget.current;
+  const [editorSearchQuery, setEditorSearchQuery] = useState("");
+  const editorSearch = useMemo(() => {
+    const query = editorSearchQuery;
+    if (!active || query.length === 0) return { hits: [] as EditorSearchHit[], truncated: false };
+
+    const needle = query.toLowerCase();
+    const lines = textOf(active).split(/\r?\n/);
+    const hits: EditorSearchHit[] = [];
+    const limit = 200;
+    for (let index = 0; index < lines.length; index++) {
+      const line = lines[index];
+      const column = line.toLowerCase().indexOf(needle);
+      if (column < 0) continue;
+      hits.push({
+        line: index + 1,
+        column: column + 1,
+        endColumn: column + query.length + 1,
+        preview: line,
+      });
+      if (hits.length === limit)
+        return { hits, truncated: true };
+    }
+    return { hits, truncated: false };
+  }, [active?.id, active?.version, editorSearchQuery]);
+
+  const focusEditorSearchHit = useCallback((hit: EditorSearchHit) => {
+    const currentEditor = editor.current;
+    const model = currentEditor?.getModel();
+    if (!currentEditor || !model || !active || model.uri.toString() !== `lscode://document/${active.id}`)
+      return;
+    currentEditor.setSelection({
+      startLineNumber: hit.line,
+      startColumn: hit.column,
+      endLineNumber: hit.line,
+      endColumn: hit.endColumn,
+    });
+    currentEditor.revealLineInCenter(hit.line);
+    currentEditor.focus();
+  }, [active?.id]);
   const [selectedCommand, setSelectedCommand] = useState("");
   const [menuEditor, setMenuEditor] = useState<CommandNode>();
   useEffect(() => {
@@ -762,11 +832,11 @@ export default function App({
       runRef.current = undefined;
     }
   }
-  async function format() {
+  async function format(kind?: FormatLanguage) {
     if (!active) return;
     const formatted = await request<string>("text.format", {
       text: textOf(active),
-      language: language(active.name),
+      language: kind ?? language(active.name),
     });
     const model = modelFor(active);
     editor.current?.executeEdits("format", [
@@ -1157,7 +1227,7 @@ export default function App({
         : "Không tìm thấy chức năng",
     );
   }
-  async function openController(link: string, employeeTab = false, sysId = "") {
+  async function openController(link: string, employeeTab = false, sysId = "", openSource = false) {
     const root = workspace;
     const generation = controllerRequest.current;
     const selection = ++controllerSelection.current;
@@ -1188,6 +1258,7 @@ export default function App({
       setExpandedController(id);
       setNav("files");
       setSide(true);
+      if (openSource && found.file) await open(found.file);
     }
   }
   function exportCsv() {
@@ -1302,6 +1373,23 @@ export default function App({
     controllerCache.current.clear();
     setStatus("Đã đổi tên thành " + name);
     return destination;
+  }
+  function copyWorkspaceText(text: string) {
+    void guard(async () => {
+      await writeClipboard(text);
+      setStatus("Đã sao chép " + text);
+    });
+  }
+  function revealWorkspacePath(path: string) {
+    void guard(() => request("workspace.reveal", { path }));
+  }
+  async function duplicateWorkspaceItem(path: string) {
+    const copied = await request<string>("workspace.duplicate", { path });
+    setControllers((current) => current.map((entry) => entry.files.includes(path)
+      ? { ...entry, files: [...entry.files, copied] } : entry));
+    controllerCache.current.clear();
+    await open(copied);
+    setStatus("Đã nhân bản " + copied);
   }
   return (
     <div className="studio" data-ready={ready}>
@@ -1603,19 +1691,9 @@ export default function App({
                             emptyMessage="Controller chưa có file."
                             activePath={active?.path}
                             onOpen={(p) => void guard(() => open(p))}
-                            onCopy={(text) => void guard(async () => {
-                              await writeClipboard(text);
-                              setStatus("Đã sao chép " + text);
-                            })}
-                            onReveal={(path) => void guard(() => request("workspace.reveal", { path }))}
-                            onDuplicate={(path) => void guard(async () => {
-                              const copied = await request<string>("workspace.duplicate", { path });
-                              setControllers((current) => current.map((entry) => entry.files.includes(path)
-                                ? { ...entry, files: [...entry.files, copied] } : entry));
-                              controllerCache.current.clear();
-                              await open(copied);
-                              setStatus("Đã nhân bản " + copied);
-                            })}
+                            onCopy={copyWorkspaceText}
+                            onReveal={revealWorkspacePath}
+                            onDuplicate={(path) => void guard(() => duplicateWorkspaceItem(path))}
                             onRename={renameWorkspaceItem}
                           />
                         </div>}
@@ -1837,35 +1915,49 @@ export default function App({
                       selected={selectedCommand}
                       onSelect={setSelectedCommand}
                       onOpen={(node) => void guard(() => openController(node.entry.link, false, node.entry.sysId))}
+                      onOpenSource={(node) => void guard(() => openController(node.entry.link, false, node.entry.sysId, true))}
                       onEdit={setMenuEditor}
                     />
                   )}
                   {(menuQuery ? matches : []).map((n, i) => (
-                    <button
-                      className="search-hit"
-                      key={n.entry.id}
-                      aria-current={
-                        menuQuery && i === menuIndex ? "page" : undefined
-                      }
-                      onClick={() => void guard(() => openController(n.entry.link, false, n.entry.sysId))}
-                      onFocus={() => setSelectedCommand(n.entry.id)}
-                      onKeyDown={(event) => {
-                        if (event.key === "F3") {
-                          event.preventDefault();
-                          setMenuEditor(n);
+                    <div className="function-row" key={n.entry.id}>
+                      <button
+                        className="search-hit"
+                        aria-current={
+                          selectedCommand === n.entry.id || (menuQuery && i === menuIndex) ? "page" : undefined
                         }
-                      }}
-                      onContextMenu={(event) => {
-                        event.preventDefault();
-                        setSelectedCommand(n.entry.id);
-                        setMenuEditor(n);
-                      }}
-                    >
-                      <strong>{n.entry.caption}</strong>
-                      <span>
-                        {n.entry.sysId || n.entry.commandId || n.entry.id}
-                      </span>
-                    </button>
+                        onClick={() => setSelectedCommand(n.entry.id)}
+                        onDoubleClick={() => void guard(() => openController(n.entry.link, false, n.entry.sysId))}
+                        onFocus={() => setSelectedCommand(n.entry.id)}
+                        onKeyDown={(event) => {
+                          if (event.key === "F3") {
+                            event.preventDefault();
+                            setMenuEditor(n);
+                          }
+                        }}
+                        onContextMenu={(event) => {
+                          event.preventDefault();
+                          setSelectedCommand(n.entry.id);
+                          setMenuEditor(n);
+                        }}
+                      >
+                        <strong>{n.entry.caption}</strong>
+                        <span>
+                          {n.entry.sysId || n.entry.commandId || n.entry.id}
+                        </span>
+                      </button>
+                      {!n.children.length && (n.entry.link || n.entry.sysId) && <button
+                        type="button"
+                        className="function-source-button"
+                        title="Mở source tại File"
+                        aria-label={`Mở source ${n.entry.caption}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setSelectedCommand(n.entry.id);
+                          void guard(() => openController(n.entry.link, false, n.entry.sysId, true));
+                        }}
+                      ><ArrowRight size={15} /></button>}
+                    </div>
                   ))}
                   {commands.length === 0 && (
                     <div className="empty">Tải chức năng từ SYS của dự án.</div>
@@ -1959,6 +2051,23 @@ export default function App({
             <div className="toolbar-spacer" />
             {active && !selectedTool && (
               <>
+                <div className="editor-search">
+                  <Search size={14} aria-hidden="true" />
+                  <input
+                    type="search"
+                    aria-label="Tìm trong file đang mở"
+                    placeholder="Tìm trong file…"
+                    value={editorSearchQuery}
+                    onChange={(event) => {
+                      const query = event.target.value;
+                      setEditorSearchQuery(query);
+                      if (query.length > 0) {
+                        setBottom("results");
+                        setPanel(true);
+                      }
+                    }}
+                  />
+                </div>
                 {language(active.name) === "xml" && (
                   <Button variant="ghost" onClick={() => setDialog("editor.controllerPreview")}>Xem trước Grid / Dir</Button>
                 )}
@@ -2018,12 +2127,37 @@ export default function App({
                 >
                   <Columns2 size={16} />
                 </IconButton>
-                <IconButton
-                  label="Định dạng"
-                  onClick={() => void guard(format)}
-                >
-                  <Braces size={16} />
-                </IconButton>
+                <div className="format-menu" ref={formatMenuRef}>
+                  <IconButton
+                    label="Định dạng"
+                    aria-expanded={formatMenuOpen}
+                    aria-haspopup="menu"
+                    onClick={() => setFormatMenuOpen((open) => !open)}
+                  >
+                    <Braces size={16} />
+                  </IconButton>
+                  {formatMenuOpen && (
+                    <div className="format-menu-options" role="menu" aria-label="Định dạng">
+                      {([
+                        ["sql", "Format SQL"],
+                        ["json", "Format Json"],
+                        ["xml", "Format XML"],
+                      ] as const).map(([kind, label]) => (
+                        <button
+                          key={kind}
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            setFormatMenuOpen(false);
+                            void guard(() => format(kind));
+                          }}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </>
             )}
           </div>
@@ -2180,14 +2314,16 @@ export default function App({
                     {id === "problems" && diagnostics.length > 0 && (
                       <span className="count">{diagnostics.length}</span>
                     )}
-                    {id === "results" && result && (
+                    {id === "results" && editorSearchQuery.length > 0 ? (
+                      <span className="count">{editorSearch.truncated ? "200+" : editorSearch.hits.length}</span>
+                    ) : id === "results" && result ? (
                       <span className="count">{result.tables.length}</span>
-                    )}
+                    ) : null}
                   </button>
                 ))}
               </div>
               <div className="toolbar-spacer" />
-              {panel && result?.tables[resultIndex] && bottom === "results" && (
+              {panel && !editorSearchQuery && result?.tables[resultIndex] && bottom === "results" && (
                 <Button variant="ghost" onClick={exportCsv}>
                   Xuất CSV
                 </Button>
@@ -2199,7 +2335,7 @@ export default function App({
                 <PanelBottom size={15} />
               </IconButton>
             </div>
-            {panel && bottom === "results" && !running && result && result.tables.length > 1 && (
+            {panel && !editorSearchQuery && bottom === "results" && !running && result && result.tables.length > 1 && (
               <div className="result-table-picker" role="group" aria-label="Bảng kết quả">
                 {result.tables.map((table, index) => (
                   <Button
@@ -2215,7 +2351,30 @@ export default function App({
             )}
             {panel &&
               (bottom === "results" ? (
-                running ? (
+                editorSearchQuery.length > 0 ? (
+                  <div className="editor-search-panel" role="listbox" aria-label="Kết quả tìm trong file">
+                    {editorSearch.hits.length === 0 ? (
+                      <div className="editor-search-empty">Không tìm thấy dòng nào.</div>
+                    ) : (
+                      <>
+                        {editorSearch.hits.map((hit) => (
+                          <button
+                            type="button"
+                            role="option"
+                            key={`${hit.line}:${hit.column}`}
+                            onClick={() => focusEditorSearchHit(hit)}
+                          >
+                            <span className="editor-search-line">{hit.line}</span>
+                            <span className="editor-search-preview">{hit.preview || " "}</span>
+                          </button>
+                        ))}
+                        {editorSearch.truncated && (
+                          <div className="editor-search-empty">Đang hiển thị 200 dòng đầu tiên.</div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                ) : running ? (
                   <div className="empty">
                     <span className="loading-dot" />
                     Đang thực thi query…
@@ -2348,7 +2507,23 @@ export default function App({
           command={menuEditor}
           root={workspace}
           onClose={() => setMenuEditor(undefined)}
-          onOpenPath={(path) => void guard(() => open(path))}
+          onCopy={copyWorkspaceText}
+          onReveal={revealWorkspacePath}
+          onDuplicate={(path) => guard(() => duplicateWorkspaceItem(path))}
+          onRename={renameWorkspaceItem}
+          onOpenPath={(path) => {
+            const command = menuEditor;
+            setMenuEditor(undefined);
+            setNav("files");
+            setSide(true);
+            void guard(async () => {
+              try {
+                await openController(command.entry.link, false, command.entry.sysId);
+              } finally {
+                await open(path);
+              }
+            });
+          }}
           onSaved={async (id) => {
             await loadCommands();
             setSelectedCommand(id);
@@ -2567,12 +2742,14 @@ function FunctionTree({
   selected,
   onSelect,
   onOpen,
+  onOpenSource,
   onEdit,
 }: {
   nodes: CommandNode[];
   selected: string;
   onSelect: (id: string) => void;
   onOpen: (node: CommandNode) => void;
+  onOpenSource: (node: CommandNode) => void;
   onEdit: (node: CommandNode) => void;
 }) {
   const [expanded, setExpanded] = useState(new Set<string>());
@@ -2587,56 +2764,68 @@ function FunctionTree({
           />
         ) : (
           <li key={node.entry.id}>
-            <button
-              className="tree-row"
-              aria-current={selected === node.entry.id ? "page" : undefined}
-              aria-expanded={
-                node.children.length ? expanded.has(node.entry.id) : undefined
-              }
-              title={[
-                node.entry.caption,
-                node.entry.sysId,
-                node.entry.commandId,
-              ]
-                .filter(Boolean)
-                .join(" · ")}
-              onClick={() => {
-                onSelect(node.entry.id);
-                if (!node.children.length && (node.entry.link || node.entry.sysId)) onOpen(node);
-                if (node.children.length)
-                  setExpanded((old) => {
-                    const next = new Set(old);
-                    if (next.has(node.entry.id)) next.delete(node.entry.id);
-                    else next.add(node.entry.id);
-                    return next;
-                  });
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "F3") {
-                  event.preventDefault();
-                  onEdit(node);
+            <div className="function-row">
+              <button
+                className="tree-row"
+                aria-current={selected === node.entry.id ? "page" : undefined}
+                aria-expanded={
+                  node.children.length ? expanded.has(node.entry.id) : undefined
                 }
-              }}
-              onContextMenu={(event) => {
-                event.preventDefault();
-                onSelect(node.entry.id);
-                onEdit(node);
-              }}
-              onDoubleClick={() => {
-                if (node.children.length && node.entry.link) onOpen(node);
-              }}
-            >
-              {node.children.length ? (
-                expanded.has(node.entry.id) ? (
-                  <ChevronDown size={12} />
+                title={[
+                  node.entry.caption,
+                  node.entry.sysId,
+                  node.entry.commandId,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+                onClick={() => {
+                  onSelect(node.entry.id);
+                  if (node.children.length)
+                    setExpanded((old) => {
+                      const next = new Set(old);
+                      if (next.has(node.entry.id)) next.delete(node.entry.id);
+                      else next.add(node.entry.id);
+                      return next;
+                    });
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "F3") {
+                    event.preventDefault();
+                    onEdit(node);
+                  }
+                }}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  onSelect(node.entry.id);
+                  onEdit(node);
+                }}
+                onDoubleClick={() => {
+                  if (node.entry.link || node.entry.sysId) onOpen(node);
+                }}
+              >
+                {node.children.length ? (
+                  expanded.has(node.entry.id) ? (
+                    <ChevronDown size={12} />
+                  ) : (
+                    <ChevronRight size={12} />
+                  )
                 ) : (
-                  <ChevronRight size={12} />
-                )
-              ) : (
-                <span className="tree-spacer" />
-              )}
-              <span>{node.entry.caption}</span>
-            </button>
+                  <span className="tree-spacer" />
+                )}
+                <span>{node.entry.caption}</span>
+              </button>
+              {!node.children.length && (node.entry.link || node.entry.sysId) && <button
+                type="button"
+                className="function-source-button"
+                title="Mở source tại File"
+                aria-label={`Mở source ${node.entry.caption}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onSelect(node.entry.id);
+                  onOpenSource(node);
+                }}
+              ><ArrowRight size={15} /></button>}
+            </div>
             {node.children.length > 0 && expanded.has(node.entry.id) && (
               <div className="tree-children">
                 <FunctionTree
@@ -2644,6 +2833,7 @@ function FunctionTree({
                   selected={selected}
                   onSelect={onSelect}
                   onOpen={onOpen}
+                  onOpenSource={onOpenSource}
                   onEdit={onEdit}
                 />
               </div>
