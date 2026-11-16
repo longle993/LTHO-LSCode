@@ -16,7 +16,7 @@ File được so sánh theo kích thước và SHA-256 nội dung, không chỉ 
 
 ## Beautify SQL (Beauty SQL)
 
-Mở cửa sổ với vùng chọn hoặc toàn bộ tab hiện tại, hoặc dán SQL mới vào ô trái. Nhấn Beautify SQL để xem kết quả bên phải: từ khóa viết hoa, thụt lề 4 khoảng trắng, xuống dòng các mệnh đề. Dùng ScriptDom SQL150 giống chức năng Format hiện có; SQL không hợp lệ hiển thị vị trí lỗi.
+Mở cửa sổ với vùng chọn hoặc toàn bộ tab hiện tại, hoặc dán SQL mới vào ô trái. Nhấn Beautify SQL để xem kết quả bên phải: từ khóa viết hoa, thụt lề bằng tab 4 cột, giữ comment và `GO`, xuống dòng các mệnh đề. Dùng ScriptDom SQL150 theo profile SQLBeautyFormat legacy giống chức năng Format hiện có; SQL không hợp lệ hiển thị vị trí lỗi.
 
 Sao chép kết quả hoặc Áp dụng vào tab gốc. Áp dụng chỉ thay vùng chọn ban đầu và có thể Undo; nếu tab gốc đã sửa/đóng thì không ghi đè. Không tự lưu file hoặc thực thi SQL. Editor → Format SQL/XML/JSON vẫn giữ nguyên.
 

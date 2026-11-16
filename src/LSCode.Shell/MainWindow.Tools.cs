@@ -538,7 +538,9 @@ public partial class MainWindow
             report.Add("PASS 12 legacy snippets");
             var sql = AddDocument("query.sql", "select 1 as id;\nGO\nselect N'Tiếng Việt' as message;");
             if (sql.Primary.SyntaxHighlighting == null) throw new Exception("SQL syntax highlighting missing");
-            if (!SqlLanguageService.Format(sql.Buffer.Text).Contains("SELECT")) throw new Exception("SQL format failed");
+            var formattedSql = SqlLanguageService.Format("-- keep this comment\nIF 1 = 1\nBEGIN\nselect 1 as id\nEND\nGO\nselect N'Tiếng Việt' as message\nGO");
+            if (!formattedSql.Contains("SELECT") || !formattedSql.Contains("-- keep this comment") || !formattedSql.Contains("\tSELECT") || !formattedSql.TrimEnd().EndsWith("GO", StringComparison.Ordinal))
+                throw new Exception("SQL legacy format profile failed");
             report.Add("PASS SQL highlighting + ScriptDom formatting");
             TableBrowser.BuildQuery("dbo", "freecolumns", "*", "controller LIKE 'GLDetail'", "controller");
             foreach (var fields in new[] { ("*", "1=1; DELETE FROM dbo.freecolumns"), ("* INTO dbo.bad", ""), ("*", "1=1 UNION SELECT * FROM dbo.freecolumns") })
