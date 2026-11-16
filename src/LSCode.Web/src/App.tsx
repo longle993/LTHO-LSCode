@@ -41,6 +41,7 @@ import {
   Languages,
   ArrowRight,
   ArrowUpRight,
+  NotebookPen,
 } from "lucide-react";
 import { native, request, operation, subscribe, quoteSqlName, notifyWindowReady, writeClipboard } from "./bridge";
 import { PanelResizeHandle, WorkspaceResizeHandle } from "./PanelResizeHandle";
@@ -49,6 +50,7 @@ import { TableTool } from "./features/TableTool";
 import { TemplateStudio } from "./features/TemplateStudio";
 import { SqlWatchTool } from "./features/SqlWatchTool";
 import { MenuEditor } from "./features/MenuEditor";
+import { AdvanceNote, type AdvanceNoteMenu } from "./features/AdvanceNote";
 import type {
   Bootstrap,
   DocumentInfo,
@@ -140,6 +142,14 @@ export default function App({
   const [studioOpen, setStudioOpen] = useState(false);
   const studioDirty = useRef(false);
   const studioBusy = useRef(false);
+  const [advanceNoteOpen, setAdvanceNoteOpen] = useState(false);
+  const advanceNoteDirty = useRef(false);
+  function closeAdvanceNote() {
+    if (advanceNoteDirty.current && !window.confirm("Bỏ thay đổi Advance Note chưa lưu?")) return;
+    advanceNoteDirty.current = false;
+    setAdvanceNoteOpen(false);
+    setSelectedTool(current => current === "advance-note" ? undefined : current);
+  }
   const tableTab = tableTabs.find((tab) => tab.id === selectedTool);
   const tableSelected = !!tableTab;
   const tableNumber = useRef(0);
@@ -781,6 +791,16 @@ export default function App({
         if (xml.diagnostic) throw new Error("XML analysis");
         const data = await request<Snippet[]>("snippet.list");
         if (data.length === 0) throw new Error("Snippet assets missing");
+        const smokeNote = {
+          id: "smoke-note", title: "Kiểm tra Advance Note", status: "Mới", details: "Smoke",
+          menuId: "AA.00.00", menuCaption: "Smoke menu", sysId: "SmokeController", link: "Smoke.aspx",
+          sourceFiles: [workspace ? workspace + "\\fixture.xml" : "fixture.xml"], updatedAt: new Date().toISOString(),
+        };
+        await request("advanceNote.save", { projectId: "smoke-project", items: [smokeNote] });
+        const loadedNotes = await request<{ items: Array<typeof smokeNote> }>("advanceNote.load", { projectId: "smoke-project" });
+        if (loadedNotes.items[0]?.menuId !== smokeNote.menuId ||
+            !Array.from(document.querySelectorAll("button")).some(button => button.textContent?.includes("Advance Note")))
+          throw new Error("Advance Note bridge or entry point");
         await request("sourceCollection.sync", { group: "HRM" });
         setSourceCollection({ samples: [], destination: workspace ?? "" });
         const waitFor = async <T,>(read: () => T | null | undefined): Promise<T> => {
@@ -812,6 +832,16 @@ export default function App({
           "-- Kiểm tra WebView2\r\nSELECT 1 AS [Giá trị];",
           "webview-smoke.sql",
         );
+        setProject({
+          id: "smoke-project", name: "Smoke ERP", server: "", database: "", sourcePath: workspace,
+          code: "SMOKE", title: "Smoke ERP", programPath: "", active: true,
+        });
+        setAdvanceNoteOpen(true);
+        setSelectedTool("advance-note");
+        const advancePanel = await waitFor(() => document.querySelector<HTMLElement>(".advance-note"));
+        await waitFor(() => advancePanel.querySelector<HTMLInputElement>('input[value="Kiểm tra Advance Note"]'));
+        if (advancePanel.scrollWidth > advancePanel.clientWidth + 1)
+          throw new Error("Advance Note workspace overflows horizontally");
         document.documentElement.dataset.smoke = JSON.stringify({
           passed: true,
           checks: [
@@ -823,6 +853,8 @@ export default function App({
             "Monaco editor",
             "native file open/save/BOM",
             "shared split model",
+            "Advance Note XML bridge and entry point",
+            "Advance Note workspace render",
             "Source Collection dropdown escapes dialog clipping",
           ],
         });
@@ -945,6 +977,7 @@ export default function App({
       case "file.close":
         if (selectedTool === "sql-watch") closeWatchTab();
         else if (selectedTool === "menu-editor") closeMenuEditor();
+        else if (selectedTool === "advance-note") closeAdvanceNote();
         else if (profilerSelected) await closeProfilerTab();
         else if (selectedTool === "template-studio") closeStudio();
         else if (tableTab) closeTableTab(tableTab.id);
@@ -956,6 +989,11 @@ export default function App({
         break;
       case "template-studio":
         setStudioOpen(true);
+        setSelectedTool(id);
+        break;
+      case "advance-note":
+        if (!project) { setDialog("projects"); break; }
+        setAdvanceNoteOpen(true);
         setSelectedTool(id);
         break;
       case "table": {
@@ -1270,6 +1308,7 @@ export default function App({
   }
   const flatCommands = (nodes: CommandNode[]): CommandNode[] =>
     nodes.flatMap((n) => [n, ...flatCommands(n.children)]);
+  const selectedAdvanceMenu = flatCommands(commands).find(node => node.entry.id === selectedCommand);
   const matches = useMemo(() => flatCommands(commands).filter((n) =>
     [n.entry.caption, n.entry.sysId, n.entry.commandId, n.entry.id].some((v) =>
       v.toLowerCase().includes(menuQuery.toLowerCase()),
@@ -1639,6 +1678,7 @@ export default function App({
           <div className="rail-spacer" />
           {(
             settings.activityCommands ?? [
+              "advance-note",
               "profiler",
               "template-studio",
               "compare",
@@ -1667,6 +1707,7 @@ export default function App({
                     "file.new": FilePlus2,
                     "project.open": FolderOpen,
                     "theme.switch": SunMoon,
+                    "advance-note": NotebookPen,
                   } as Record<string, typeof Activity>
                 )[id] ?? Code2;
               return (
@@ -2109,7 +2150,7 @@ export default function App({
                   "Không gian làm việc"}
               </span>
             </div>
-            {(watchTab || menuEditor || profilerTab || studioOpen || tableTabs.length > 0) && (
+            {(watchTab || menuEditor || profilerTab || studioOpen || advanceNoteOpen || tableTabs.length > 0) && (
               <div className="workspace-tools" role="tablist" aria-label="Công cụ làm việc">
                 {watchTab && <div className={`document-tab ${selectedTool === "sql-watch" ? "active" : ""}`}>
                   <button id="sql-watch-tab" role="tab" aria-controls="sql-watch-panel" aria-selected={selectedTool === "sql-watch"} onClick={() => setSelectedTool("sql-watch")}>SQL Debug / Watch</button>
@@ -2128,6 +2169,13 @@ export default function App({
                     <span>Dynamic Template Studio</span>
                   </button>
                   <IconButton label="Đóng Dynamic Template Studio" onClick={closeStudio}><X size={13} /></IconButton>
+                </div>}
+                {advanceNoteOpen && <div className={`document-tab ${selectedTool === "advance-note" ? "active" : ""}`}>
+                  <button id="advance-note-tab" role="tab" aria-controls="advance-note-panel"
+                    aria-selected={selectedTool === "advance-note"} onClick={() => setSelectedTool("advance-note")}>
+                    <NotebookPen size={15} /><span>Advance Note</span>
+                  </button>
+                  <IconButton label="Đóng Advance Note" onClick={closeAdvanceNote}><X size={13} /></IconButton>
                 </div>}
                 {profilerTab && (
                   <div className={`document-tab ${profilerSelected ? "active" : ""}`}>
@@ -2150,6 +2198,7 @@ export default function App({
               </div>
             )}
             <div className="toolbar-spacer" />
+            <Button onClick={() => void guard(() => execute("advance-note"))}><NotebookPen size={14} />Advance Note</Button>
             <Button onClick={() => { setWatchTab(current => current ?? { target }); setSelectedTool("sql-watch"); }}>SQL Debug / Watch</Button>
             {active && !selectedTool && (
               <>
@@ -2285,6 +2334,22 @@ export default function App({
             aria-labelledby="template-studio-tab" hidden={selectedTool !== "template-studio"}>
             <TemplateStudio onDirty={(dirty) => { studioDirty.current = dirty; }}
               onBusy={(busy) => { studioBusy.current = busy; }} />
+          </section>}
+          {advanceNoteOpen && project && <section id="advance-note-panel" className="profiler-panel" role="tabpanel"
+            aria-labelledby="advance-note-tab" hidden={selectedTool !== "advance-note"}>
+            <AdvanceNote projectId={project.id} projectName={project.name} root={workspace}
+              activeMenu={selectedAdvanceMenu && (selectedAdvanceMenu.entry.link || selectedAdvanceMenu.entry.sysId) ? {
+                id: selectedAdvanceMenu.entry.id,
+                caption: selectedAdvanceMenu.entry.caption,
+                sysId: selectedAdvanceMenu.entry.sysId,
+                link: selectedAdvanceMenu.entry.link,
+              } : undefined}
+              source={controller ? { link: controller.link, sysId: controller.sysId, files: controller.files } : undefined}
+              onChooseMenu={() => { setSelectedCommand(""); setNav("functions"); setSide(true); }}
+              onLoadMenu={(menu: AdvanceNoteMenu) => void guard(() => openController(menu.link, false, menu.sysId))}
+              onOpen={(path) => void guard(() => open(path))}
+              onCopy={copyWorkspaceText} onReveal={revealWorkspacePath}
+              onDirtyChange={(dirty) => { advanceNoteDirty.current = dirty; }} onStatus={setStatus} />
           </section>}
           {profilerTab && (
             <section id="profiler-panel" className="profiler-panel" role="tabpanel" aria-labelledby="profiler-tab" hidden={!profilerSelected}>

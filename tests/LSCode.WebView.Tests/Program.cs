@@ -39,6 +39,16 @@ await using (var provider = new ServiceCollection().AddLSCodeInfrastructure().Bu
     Check(provider.GetRequiredService<IDeveloperTools>() is DeveloperTools, "Profiler resolves through its single DI registration");
 checks++;
 Console.WriteLine("PASS Closing DI container disposes Profiler once");
+var noteProject = "advance-note-project";
+var noteItem = new AdvanceNoteItem("request-1", "Kiểm tra phiếu nhập", "Đang xử lý", "Đối chiếu controller",
+    "01.01", "Phiếu nhập", "PNTran", "PNTran.aspx", [Path.Combine(root, "PNTran.xml")], DateTimeOffset.UtcNow);
+var savedNotes = await AdvanceNoteStore.SaveAsync(noteProject, [noteItem], default);
+var loadedNotes = await AdvanceNoteStore.LoadAsync(noteProject, default);
+Check(File.Exists(savedNotes.FilePath) && loadedNotes.Items.Length == 1 &&
+    loadedNotes.Items[0].MenuId == "01.01" && loadedNotes.Items[0].SourceFiles.Single().EndsWith("PNTran.xml"),
+    "Advance Note persists request, ERP menu and source files in project XML");
+await Reject<InvalidDataException>(() => AdvanceNoteStore.SaveAsync(noteProject,
+    [noteItem with { Title = "" }], default), "Advance Note rejects requests without a title");
 var workspace = new DocumentWorkspace();
 var path = Path.Combine(root, "unicode.xml");
 var encoding = new UnicodeEncoding(false, true, true);
@@ -308,22 +318,9 @@ await using (var projectTools = new DeveloperTools())
     Check(modernFiles.GetProperty("files").EnumerateArray().Select(item => item.GetString())
         .SequenceEqual([Path.Combine(modernDir, "Item.f")]),
         "Controller explorer loads PageMetadata controller files without Main or ASPX");
-    var fsdSource = Path.Combine(root, "clsDatabase.cs");
-    var fakeConnection = "Data Source=standard.example;Initial Catalog=FSG_A;Uid=reader;Pwd=not-real;";
-    var encodedConnection = Convert.ToBase64String(Encoding.UTF32.GetBytes(fakeConnection)).TrimEnd('=');
-    await File.WriteAllTextAsync(fsdSource, $"string cVal = \"{encodedConnection}\";");
-    var decodedConnection = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(StandardProjectSync.ReadFsdConnection(fsdSource));
-    Check(decodedConnection.DataSource == "standard.example" && decodedConnection.InitialCatalog == "FSG_A",
-        "FSD embedded connection is decoded without storing it in a project");
-    var installedFsdSource = @"D:\FAST\Code\LTHO\FSDStudioSource\FSDStudio\clsDatabase.cs";
-    if (File.Exists(installedFsdSource))
-    {
-        var installedConnection = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(StandardProjectSync.ReadFsdConnection(installedFsdSource));
-        Check(!string.IsNullOrWhiteSpace(installedConnection.DataSource) &&
-            !string.IsNullOrWhiteSpace(installedConnection.InitialCatalog) &&
-            !string.IsNullOrWhiteSpace(installedConnection.Password),
-            "Installed FSD Studio embedded connection decodes in the .NET application runtime");
-    }
+    Check(typeof(DeveloperTools).Assembly.GetManifestResourceNames()
+        .Contains("LSCode.Infrastructure.StandardCatalogConnection"),
+        "Standard catalog connection ships inside LSCode without an FSD Studio source checkout");
     var standardFolder = Directory.CreateDirectory(Path.Combine(root, "standard-project")).FullName;
     var oldProfile = ProjectImporter.Create("ABC", "old-server", "old-sys", standardFolder);
     var oldXml = LSCode.Core.XmlTools.Parse(oldProfile.RawXml).Root!;
@@ -367,7 +364,19 @@ await using (var projectTools = new DeveloperTools())
         </connectionStrings></configuration>
         """);
     await WriteConfig("Saved_App", "Saved_Sys");
-    var syncedProject = (ProjectInfo)(await CallProject("project.sync", new { name = "ERP startup fixture", configPath }))!;
+    var syncedSeed = ProjectImporter.Create("ERP startup fixture", ".", "Saved_Sys", Path.GetDirectoryName(configPath)!);
+    var syncedXml = LSCode.Core.XmlTools.Parse(syncedSeed.RawXml).Root!;
+    syncedXml.SetElementValue("WebConfigPath", configPath);
+    syncedXml.SetElementValue("AppConnectionString", "Server=.;Database=Saved_App;Integrated Security=True");
+    syncedXml.SetElementValue("SysConnectionString", "Server=.;Database=Saved_Sys;Integrated Security=True");
+    syncedXml.SetElementValue("UpdatePath", @"\\172.168.5.14\CustomerUpdate\ERP startup fixture\update\");
+    syncedSeed = syncedSeed with { RawXml = syncedXml.ToString(System.Xml.Linq.SaveOptions.DisableFormatting) };
+    var syncedCatalog = Path.Combine(root, "synced-project.xml");
+    ProjectImporter.ExportFile([syncedSeed], syncedCatalog, includeSensitive: true);
+    var syncedImport = JsonSerializer.SerializeToElement(await CallProject("project.import.applyFile",
+        new { path = syncedCatalog, overwrite = false }), Protocol.Json);
+    var syncedProject = syncedImport.GetProperty("projects").EnumerateArray()
+        .Select(item => item.Deserialize<ProjectInfo>(Protocol.Json)!).Single(item => item.Name == "ERP startup fixture");
     var details = JsonSerializer.SerializeToElement(await CallProject("project.details", new { id = syncedProject.Id }), Protocol.Json);
     Check(details.GetProperty("updatePath").GetString() == @"\\172.168.5.14\CustomerUpdate\ERP startup fixture\update\",
         "Project sync saves the default update folder");
@@ -378,11 +387,14 @@ await using (var projectTools = new DeveloperTools())
         password = "fixture-secret", defaultUser = "ABC", listAllData = "1", sortOrder = "12", homeUpdateCode = "TMP_HOME", notes = "Fixture notes" }))!;
     var createdDetails = JsonSerializer.SerializeToElement(await CallProject("project.details", new { id = created.Id }), Protocol.Json)
         .GetProperty("profile");
+    var profileExportPath = Path.Combine(root, "profile-export.xml");
+    await CallProject("project.export.file", new { path = profileExportPath });
+    var profileExport = await File.ReadAllTextAsync(profileExportPath);
     Check(created.Code == "TMP" && created.Title == "Temporary profile" && created.ProgramPath == @"D:\WebProgram" &&
         createdDetails.GetProperty("version").GetString() == "SP30" &&
         createdDetails.GetProperty("webHost1").GetString() == "https://tmp.test" &&
         createdDetails.GetProperty("homeUpdateCode").GetString() == "TMP_HOME" &&
-        !((string)(await CallProject("project.export", new { }))!).Contains("fixture-secret", StringComparison.Ordinal),
+        !profileExport.Contains("fixture-secret", StringComparison.Ordinal),
         "Full project profile persists and export removes its password");
     var collectionVersions = JsonSerializer.SerializeToElement(await CallProject("sourceCollection.versions", new { }), Protocol.Json);
     await CallProject("sourceCollection.default.save", new { version = "sp30" });
@@ -680,8 +692,15 @@ if (args.Contains("--sql"))
         var externalJs=(LSCode.Core.SqlSuggestion[])(await Call("javascript.complete",new{language="xml",text="<root>f.ge",beforeCaret="<root>f.ge"}))!;
         Check(externalJs.Length==0,"JS completion adapter rejects XML outside script");
         var projectXml="<NewDataSet><project><FolderName>Fixture</FolderName><servername>.</servername><Password>not-real</Password><Unknown><Nested>preserved</Nested></Unknown></project></NewDataSet>";
-        await Call("project.import",new{xml=projectXml,overwrite=false});
-        var export=(string)(await Call("project.export",new{}))!;
+        var projectImportPath = Path.Combine(root, "project-import.xml");
+        await File.WriteAllTextAsync(projectImportPath, projectXml);
+        var projectPreview = JsonSerializer.SerializeToElement(await Call("project.import.previewFile", new { path = projectImportPath, overwrite = false }), Protocol.Json);
+        Check(projectPreview.GetProperty("total").GetInt32() == 1 && projectPreview.GetProperty("added").GetInt32() == 1,
+            "File import preview returns compact counts without sending XML through the bridge");
+        await Call("project.import.applyFile",new{path=projectImportPath,overwrite=false});
+        var projectExportPath = Path.Combine(root, "project-export.xml");
+        await Call("project.export.file",new{path=projectExportPath});
+        var export=await File.ReadAllTextAsync(projectExportPath);
         Check(export.Contains("<Nested>preserved</Nested>")&&!export.Contains("not-real"),"DPAPI catalog import/export preserves metadata and redacts password");
         var profileId=LSCode.Core.ProjectImporter.Read(projectXml)[0].Id;
         var updatedProfile=(ProjectInfo)(await Call("project.update",new{id=profileId,name="Fixture updated",server=".",database,sourcePath=root,programPath=Path.Combine(root,"program.exe")}))!;
@@ -704,21 +723,6 @@ if (args.Contains("--sql"))
         Check(legacyController.GetProperty("files").EnumerateArray()
             .Select(item => item.GetString()).ToHashSet().SetEquals(new[] { fOnly, fGrid }),
             "Controller discovery follows grid references in an F-only controller without an ASPX");
-        var syncConfig = Path.Combine(root, "web.config");
-        await File.WriteAllTextAsync(syncConfig, """
-            <configuration><connectionStrings>
-              <add name="appConnectionString" connectionString="Server=.;Database=Fixture_App;Integrated Security=True" />
-              <add name="sysConnectionString" connectionString="Server=.;Database=Fixture_Sys;Integrated Security=True" />
-            </connectionStrings></configuration>
-            """);
-        var synced = (ProjectInfo)(await Call("project.sync", new { name = "Dự án A", configPath = syncConfig }))!;
-        var syncedDetails = JsonSerializer.SerializeToElement(await Call("project.details", new { id = synced.Id }), Protocol.Json);
-        Check(syncedDetails.GetProperty("programPath").GetString() == "http://172.168.5.14/D%E1%BB%B1%20%C3%A1n%20A/Main/Login.aspx",
-            "Project sync assigns the encoded default login URL");
-        await Call("project.update", new { id = synced.Id, name = synced.Name, server = synced.Server, database = synced.Database, sourcePath = synced.SourcePath, programPath = "https://example.test/custom" });
-        await Call("project.sync", new { name = "Dự án A", configPath = syncConfig });
-        var resynced = JsonSerializer.SerializeToElement(await Call("project.details", new { id = synced.Id }), Protocol.Json);
-        Check(resynced.GetProperty("programPath").GetString() == "https://example.test/custom", "Project sync preserves a custom program URL");
         var signature = loaded.GetProperty("signature").GetString();
         var records = new string?[][] { [":text::null", "Tiếng Việt", null, null, null, null], ["second", ":empty", null, null, null, null] };
         var insertion = JsonSerializer.SerializeToElement(await Call("catalog.preview", new { targetId = target.Id, schema = "dbo", table = "catalog", creating = false, signature, fields = Array.Empty<CatalogField>(), rows = records }), Protocol.Json);

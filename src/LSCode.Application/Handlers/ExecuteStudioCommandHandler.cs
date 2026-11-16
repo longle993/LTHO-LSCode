@@ -35,6 +35,10 @@ internal sealed class ExecuteStudioCommandHandler(
                 return opened;
             case "file.pick":
                 return dialogs.OpenFile();
+            case "project.import.choose":
+                return dialogs.OpenFile("LSCode Project Catalog (*.xml)|*.xml|Tất cả file|*.*");
+            case "project.export.choose":
+                return dialogs.SaveFile(Text("name", "projects.xml"), "LSCode Project Catalog (*.xml)|*.xml");
             case "document.save":
                 var path = Text("path");
                 if (Flag("saveAs") || path.Length == 0) path = dialogs.SaveFile(Text("name", path));

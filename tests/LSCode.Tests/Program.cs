@@ -173,6 +173,22 @@ try
     Assert(ProjectImporter.Merge(importedProjects, revisedProject, false).Projects[0].Field("CustomFlag") == "42", "Project merge keep existing");
     Assert(ProjectImporter.Merge(importedProjects, revisedProject, true).Projects[0].Field("CustomFlag") == "43", "Project merge explicit overwrite");
     Assert(!ProjectImporter.Export(importedProjects).Contains("fixture-only") && ProjectImporter.Export(importedProjects).Contains("Nested"), "Project export blanks credential fields, retains metadata");
+    var catalogInput = Path.Combine(root, "catalog-input.xml");
+    await File.WriteAllTextAsync(catalogInput, projectXml);
+    var filePreview = ProjectImporter.PreviewFile([], catalogInput, false);
+    Assert(filePreview is { Total: 1, Added: 1, Updated: 0, Skipped: 0 } &&
+        ProjectImporter.ReadFile(catalogInput).Single().Field("CustomFlag") == "42",
+        "Project file import streams XML and returns compact counts");
+    var catalogOutput = Path.Combine(root, "catalog-output.xml");
+    Assert(ProjectImporter.ExportFile(importedProjects, catalogOutput) == 1 &&
+        (await File.ReadAllTextAsync(catalogOutput)).Contains("Nested") &&
+        !(await File.ReadAllTextAsync(catalogOutput)).Contains("fixture-only") &&
+        !Directory.EnumerateFiles(root, ".catalog-output.xml.*.tmp").Any(),
+        "Project file export replaces atomically and redacts credentials");
+    var dtdCatalog = Path.Combine(root, "catalog-dtd.xml");
+    await File.WriteAllTextAsync(dtdCatalog, "<!DOCTYPE x [<!ENTITY e 'x'>]><NewDataSet/>");
+    await Throws<System.Xml.XmlException>(() => Task.Run(() => ProjectImporter.ReadFile(dtdCatalog)),
+        "Project file import prohibits DTD processing");
     var customerRoot = Path.Combine(root, "CustomerPro");
     var application = Path.Combine(customerRoot, "FBI", "DEMO", "FBISP24"); Directory.CreateDirectory(application);
     var configPath = Path.Combine(application, "web.config");

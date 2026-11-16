@@ -11,7 +11,7 @@
 ## Hiện trạng
 
 - LSCode dùng React 18, Tailwind v4 và Monaco trong WPF WebView2. Thanh công cụ đã có lối mở công cụ và các tab làm việc. Giao diện dùng chung component và token cho Light, Dark và High Contrast.
-- Dự án `D:/FAST/Code/LTHO/New/lthoToolApi` là **Dynamic Template Studio**, một ứng dụng WPF trên .NET 10. `DynamicTemplateStudio.App` sở hữu giao diện. `Core` và `Infrastructure` sở hữu model, validation, mapping preview, serialization và lưu project.
+- Dynamic Template Studio ban đầu đến từ `D:/FAST/Code/LTHO/New/lthoToolApi`. Snapshot `Core` và `Infrastructure` hiện đã nằm trong solution LSCode; repo ngoài chỉ còn là nguồn lịch sử để đối chiếu.
 - Studio đã có luồng thiết kế bảng, field, quan hệ cha–con, JSON Preview, Test Mapping, lưu và xuất project. Project Studio có `project.json`, thư mục `templates/`, `samples/` và metadata/draft dưới `.studio/`. Thư mục project ERP đang mở trong LSCode và thư mục project Studio là hai ngữ cảnh riêng.
 - Điểm khởi động hiện có của Studio hỗ trợ màn Projects và các tham số demo/kiểm thử. Qua kiểm tra mã nguồn, chưa có tham số công khai để mở thẳng một thư mục project.
 
@@ -35,7 +35,7 @@ Từ LSCode, mở trình thiết kế, chọn project template, sửa bảng và
 
 Mở **Thiết kế template API** trên thanh công cụ hoặc tìm lệnh bằng Ctrl+Shift+P. Trong tab **Dynamic Template Studio**, chọn thư mục có `project.json`. Chọn template và bảng, sửa field, rồi dùng **JSON Preview**, **Test Mapping** hoặc **Lưu project**.
 
-Build LSCode cần checkout Studio ở `../New/lthoToolApi` tính từ thư mục gốc LSCode, hoặc truyền `-p:TemplateStudioRoot=<đường dẫn tuyệt đối>` nhất quán khi restore, build và publish. Bản publish mang theo hai DLL Studio và giao diện đã build, nên chạy độc lập với checkout Studio.
+Build hiện tại dùng trực tiếp `src/DynamicTemplateStudio.Core` và `src/DynamicTemplateStudio.Infrastructure`. Không cần checkout `../New/lthoToolApi` và không còn property `TemplateStudioRoot`. Chi tiết đợt chuyển đổi nằm tại [SELF-CONTAINED-PROJECT-CATALOG-AND-TEMPLATE-STUDIO.vi.md](SELF-CONTAINED-PROJECT-CATALOG-AND-TEMPLATE-STUDIO.vi.md).
 
 Tab WebView hỗ trợ tạo project trong thư mục trống, thêm template, chọn bảng cha, thêm/đổi tên/kéo sắp xếp field, chỉnh cặp khóa cha–con, sao chép nhiều field bằng cột **Chọn**, dán field qua clipboard, hoàn tác/làm lại, tự lưu sau 800 ms và xuất sang thư mục trống. Tắt **Tự lưu** nếu muốn thử thay đổi rồi chọn **Lưu template** hoặc **Lưu project** thủ công. **Khôi phục lượt lưu** hoàn nguyên giao dịch bị gián đoạn. Khi mở project có draft, Studio cho chọn mở bản nháp.
 

@@ -36,9 +36,12 @@ export const folderKind = (name: string) =>
 
 export default function ControllerExplorer({
   root, files, activePath, onOpen, onCopy, onReveal, onDuplicate, onRename, onSourceCollection,
+  selectedFiles, onToggleFile,
   emptyMessage = "Mở một chức năng ERP để xem file của controller.",
 }: {
   root: string;
+  selectedFiles?: string[];
+  onToggleFile?: (path: string, checked: boolean) => void;
   files?: string[];
   activePath?: string | null;
   onOpen: (path: string) => void;
@@ -133,7 +136,11 @@ export default function ControllerExplorer({
         aria-current={item.path.toLowerCase() === activePath?.toLowerCase() ? "page" : undefined}
         {...actions(item)}
         onClick={() => onOpen(item.path)}
-      ><FileIcon path={item.path} /><span>{item.name}</span></button>;
+      >{onToggleFile && <input type="checkbox" aria-label={"Chọn " + item.name}
+        checked={selectedFiles?.some(path => path.toLowerCase() === item.path.toLowerCase()) ?? false}
+        onClick={event => event.stopPropagation()}
+        onChange={event => onToggleFile(item.path, event.target.checked)} />}
+        <FileIcon path={item.path} /><span>{item.name}</span></button>;
       const category = folderKind(item.name);
       const kind = category === "folder" ? inheritedKind : category;
       const open = !collapsed.has(item.path);

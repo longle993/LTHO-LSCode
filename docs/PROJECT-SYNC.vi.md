@@ -8,19 +8,15 @@
 
 Trong FSD Studio, nút **Synchronize from standard project list** lấy `CurrUser` đã lưu qua `Reg.GetRegValue("CurrUser")`, kết nối DB danh mục chuẩn bằng tài khoản nhúng, gọi `ns_getListDept`, rồi cập nhật các dòng `dmda` đang hoạt động và thêm dự án còn thiếu. FSD Studio tự làm các bước này trong một lần bấm và làm mới lưới dự án.
 
-Trong **Dự án của bạn → Đồng bộ dự án** của LSCode, nhập `CurrUser` FSD Studio một lần; tên này được nhớ cục bộ trong WebView. Bấm **Đồng bộ từ danh mục chuẩn** để đọc, lập kế hoạch và ghi catalog trong cùng một thao tác. Nút **Xem trước** vẫn cho xem số dự án mới, cập nhật, không đổi và bỏ qua trước khi bấm **Đồng bộ toàn bộ**. Nút **Dừng** hủy truy vấn đang chạy. LSCode không tự đọc `CurrUser` từ FSD Studio vì mã nguồn FSD chỉ gọi thư viện `Reg` ngoài dự án; nơi lưu giá trị chưa được xác minh.
+Trong **Dự án của bạn**, nhập `CurrUser` FSD Studio một lần; tên này được lưu trong settings LSCode. Các lần sau chỉ cần bấm **Đồng bộ** để đọc danh mục chuẩn, lập kế hoạch và ghi catalog trong cùng một thao tác. Nút **Dừng** hủy truy vấn đang chạy. LSCode không tự đọc Registry của FSD Studio.
 
-LSCode chỉ giải mã kết nối nhúng trong bộ nhớ lúc gọi DB, không sao chép mật khẩu vào mã nguồn, cài đặt hay kết quả trả về UI. File nguồn FSD Studio phải có trên máy chạy; đường dẫn mặc định là `D:\FAST\Code\LTHO\FSDStudioSource\FSDStudio\clsDatabase.cs` và có thể sửa. `CurrUser` là tên người dùng mà FSD Studio lưu riêng, có thể khác tên đăng nhập Windows.
+LSCode chỉ giải mã kết nối nhúng trong bộ nhớ lúc gọi DB và không trả connection string về UI hoặc log. Payload tương thích nằm trong embedded resource của `LSCode.Infrastructure`; máy chạy không cần cài FSD Studio hoặc có `clsDatabase.cs`. `CurrUser` là tên người dùng danh mục chuẩn và có thể khác tên đăng nhập Windows.
 
 Mỗi dòng chuẩn dùng `ma_da` làm mã đối chiếu; lấy đường dẫn từ `dir_pro_web`, rồi `dir_src_web`, `dir_pro_app`, `dir_src_app`; lấy server từ `ten_server`, SYS DB từ `db_sys`, thư mục update từ `dir_update`. Đồng bộ hàng loạt chỉ ghi đường dẫn `web.config`; khi mở một dự án, LSCode mới đọc kết nối App/SYS của dự án đó. Cách này tránh việc gần 3.000 lần kiểm tra đường dẫn mạng làm nút đồng bộ đứng lâu. Profile hiện có được giữ ID, đường dẫn chương trình và thư mục update đã chỉnh; dự án cũ vắng trong danh mục chuẩn không bị xóa. Dòng thiếu mã, server, SYS DB hoặc đường dẫn nguồn bị bỏ qua và hiện lý do. Nếu `web.config` không có hoặc không đọc được, lỗi được báo khi mở dự án tương ứng.
 
-Phần **Đồng bộ một dự án từ web.config** bên dưới vẫn dùng được khi cần chọn riêng một ứng dụng.
+Luồng **Đồng bộ một dự án từ web.config** đã được bỏ khỏi giao diện. Profile đã có vẫn giữ `WebConfigPath`; khi mở dự án, LSCode đọc App/SYS hiện tại từ file đó. Nếu file không còn đọc được, LSCode dùng connection string đã lưu trong catalog khi có.
 
-1. Mở `artifacts/publish/LSCode.exe`, chọn **Project → Đồng bộ dự án** hoặc nút **Đồng bộ…** bên trái.
-2. Nhập tên, ví dụ `BACHVIET`, rồi nhấn **Enter**. Ứng dụng tìm đúng tên thư mục dưới các nhóm của `\\172.168.5.14\CustomerPro`, sau đó tìm `web.config` trong các thư mục ứng dụng con một cấp. Nếu có nhiều kết quả, chọn ứng dụng trong danh sách.
-3. LS Code đọc `appConnectionString` và `sysConnectionString`. Cây chức năng lấy từ DB sys; file explorer trỏ tới thư mục ứng dụng. Đồng bộ lại cập nhật cùng profile, không nhân bản.
-4. **Ctrl+Shift+Q** mở tab SQL mặc định App của project hiện tại. App đã lưu hoặc database cụ thể trong cấu hình được ưu tiên; nếu cấu hình còn placeholder, tìm DB cùng tiền tố theo `_S`/`_Sys` → `_A`/`_App` (ưu tiên `_A`), không có ứng viên thì cho chọn. Tab SQL cũ giữ target riêng; cây chức năng luôn dùng SYS. F5 chạy trực tiếp, không hiện hộp xác nhận. Tab chờ chọn/kết nối App hoàn tất trước khi chạy; không tự chạy trên SYS khi App lỗi.
-5. **Ctrl+Shift+T** mở cửa sổ bảng theo target tab SQL đang chọn; nếu đang chọn file khác thì dùng kết nối hiện tại. Chọn database, gõ tên bảng/view để hiện tối đa 10 kết quả, chọn một dòng, đánh dấu cột hoặc nhập SELECT; nhập WHERE/ORDER BY rồi nhấn **Run**. Có nút **Dừng**. Giới hạn 1000 dòng; không hỗ trợ sửa dữ liệu trong grid. SQL editor vẫn cho phép thực thi SQL theo quyền tài khoản.
+**Ctrl+Shift+Q** mở tab SQL mặc định App của project hiện tại. **Ctrl+Shift+T** mở phần cấu trúc và dữ liệu theo target tab đang chọn. Tab SQL cũ giữ target riêng; cây chức năng luôn dùng SYS.
 
 Ví dụ bộ lọc cho `dbo.freecolumns`: SELECT `*`, WHERE `controller LIKE 'GLDetail'`. Danh sách cột hiển thị kiểu dữ liệu và tooltip nullable. Có thể gõ tên nhanh để tìm trong combo database/bảng.
 
@@ -60,6 +56,6 @@ Gợi ý SQL lấy metadata bằng truy vấn chỉ đọc từ target hiện t�
 
 ## Kiểm chứng
 
-Build Release sạch; 44 kiểm tra Core và 11 kiểm tra WPF nội bộ đạt. 15 kiểm tra tích hợp thật BACHVIET gồm tìm qua CustomerPro, đọc named connections, truy vấn menu sys, lưu catalog trong thư mục kiểm thử riêng, tải file explorer, kế thừa SQL target, schema completion và chèn prefix từ popup, render Projects, kết nối App giữ menu SYS, kiểm tra SELECT, đọc schema/dữ liệu bảng và render bố cục.
+Build solution sạch; 144 kiểm tra Core và 78 kiểm tra WebView nội bộ đạt trong đợt triển khai ngày 16/11/2026. Bộ kiểm tra mới bao gồm import/export catalog qua file, chặn DTD, thay file export nguyên tử, đóng gói kết nối chuẩn và build Dynamic Template Studio hoàn toàn từ source trong LSCode.
 
 Kiểm tra tích hợp dùng `LSCODE_TEST_WEB_CONFIG` và `LSCODE_DATA_HOME` trỏ thư mục trống, chạy `LSCode.exe --project-smoke`; chỉ chạy thủ công khi có quyền đọc share/DB. Báo cáo không chứa connection string. Đây là kiểm thử từ bên trong ứng dụng, chưa thay thế kiểm thử thao tác chuột/bàn phím đầy đủ.

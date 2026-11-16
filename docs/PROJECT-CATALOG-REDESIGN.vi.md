@@ -2,11 +2,13 @@
 
 Trạng thái: đã triển khai ngày 14/11/2026.
 
+Đợt nâng cấp tự chứa đã hoàn tất; thiết kế và kiểm thử được ghi tại [SELF-CONTAINED-PROJECT-CATALOG-AND-TEMPLATE-STUDIO.vi.md](SELF-CONTAINED-PROJECT-CATALOG-AND-TEMPLATE-STUDIO.vi.md).
+
 ## Mục tiêu và phạm vi
 
 Màn hình desktop dành cho lập trình viên ERP: tìm và mở dự án, đồng bộ danh mục chuẩn, tạo/sửa hồ sơ đầy đủ. Ảnh FSD là tham chiếu các trường thông tin. LSCode sử dụng component và theme hiện có.
 
-Các thao tác nằm ngay trên danh sách: **Đồng bộ**, **Đồng bộ web.config**, **Tạo profile**, **Import XML**, **Export XML**. Bỏ thanh tab hiện tại. Form và trình nhập/xuất mở khi chọn thao tác, có đường quay về danh sách và giữ từ khóa/trang đang xem.
+Các thao tác nằm ngay trên danh sách: **Đồng bộ**, **Tạo profile**, **Import XML**, **Export XML**. Không còn đồng bộ web.config thủ công. Form và bản xem trước import mở khi chọn thao tác, có đường quay về danh sách và giữ từ khóa/trang đang xem.
 
 ## Thông tin hồ sơ
 
@@ -46,13 +48,13 @@ DTO danh sách chỉ chứa thuộc tính cần hiển thị/tìm. Chi tiết, m
 4. Lưu kết quả một lần, cập nhật danh sách một lần; không gọi preview rồi query và lập kế hoạch lần hai.
 5. Không dò web.config trên hàng nghìn UNC trong đồng bộ. Dùng chỉ mục đối chiếu mã; không tìm tuyến tính và parse XML lại cho từng cặp dự án.
 
-Đồng bộ web.config mở form riêng từ nút bên danh sách, giữ khả năng tìm thư mục và nhập từng dự án. Đường dẫn file nguồn FSD là thiết lập nâng cao, không chiếm diện tích danh sách.
+Không còn form đồng bộ web.config riêng hoặc đường dẫn source FSD trong UI. Kết nối chuẩn nằm trong bản build LSCode; `web.config` chỉ được đọc theo `WebConfigPath` khi mở profile đã lưu.
 
 ## Form và XML
 
 Tạo và sửa dùng chung schema trường, chia nhóm Nhận diện / Đường dẫn / Kết nối / Thiết lập. Nhãn trên ô, nhập bằng Tab theo thứ tự; mật khẩu che mặc định. Mã bắt buộc, kiểm tra trùng không phân biệt hoa thường; số thứ tự và các trường kiểu số được kiểm tra trước khi ghi.
 
-Import XML xem trước, báo trùng mã và lựa chọn ghi đè rõ ràng. Export XML bảo toàn các trường không nhạy cảm và tương thích nhập lại; mặc định loại mật khẩu/chuỗi kết nối chứa bí mật. Không để giá trị mật khẩu bị che trong UI ghi đè mật khẩu thật khi sửa trường khác.
+Import XML chọn file native, hiển thị summary số mới/cập nhật/bỏ qua và yêu cầu làm mới bản xem trước nếu đổi lựa chọn ghi đè. Export ghi thẳng ra file bằng Save As. Cả hai xử lý streaming ở .NET, không đưa toàn bộ XML vào textarea WebView. Export bảo toàn các trường không nhạy cảm và mặc định loại mật khẩu/chuỗi kết nối chứa bí mật.
 
 ## Kiểm chứng trước giao
 

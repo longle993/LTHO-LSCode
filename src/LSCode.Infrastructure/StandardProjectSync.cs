@@ -1,7 +1,6 @@
 using System.Data;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using LSCode.Core;
 using Microsoft.Data.SqlClient;
@@ -18,36 +17,13 @@ public sealed record StandardProjectPlan(StandardProjectSummary Summary, List<Le
 
 public static class StandardProjectSync
 {
-    private static readonly Regex EmbeddedConnection = new(
-        "string\\s+cVal\\s*=\\s*\"(?<encoded>[A-Za-z0-9+/=]+)\"",
-        RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(300));
+    private static readonly IStandardCatalogConnectionProvider ConnectionProvider = new EmbeddedStandardCatalogConnectionProvider();
 
-    public static string ReadFsdConnection(string sourceFile)
-    {
-        if (!File.Exists(sourceFile)) throw new FileNotFoundException("Không tìm thấy clsDatabase.cs của FSD Studio.", sourceFile);
-        if (new FileInfo(sourceFile).Length > 2_000_000) throw new InvalidDataException("File nguồn FSD Studio quá lớn.");
-        var match = EmbeddedConnection.Match(File.ReadAllText(sourceFile));
-        if (!match.Success) throw new InvalidDataException("Không tìm thấy kết nối danh mục chuẩn trong clsDatabase.cs.");
-        var encoded = match.Groups["encoded"].Value;
-        var padded = encoded.PadRight((encoded.Length + 3) / 4 * 4, '=');
-        string decoded;
-        try { decoded = Encoding.UTF32.GetString(Convert.FromBase64String(padded)); }
-        catch (FormatException ex) { throw new InvalidDataException("Kết nối FSD Studio không đúng định dạng.", ex); }
-        var connection = new SqlConnectionStringBuilder(decoded);
-        if (string.IsNullOrWhiteSpace(connection.DataSource) || string.IsNullOrWhiteSpace(connection.InitialCatalog))
-            throw new InvalidDataException("Kết nối FSD Studio thiếu server hoặc database.");
-        connection.ConnectTimeout = 15;
-        connection.ApplicationName = "LS Code Standard Project Sync";
-        if (!decoded.Contains("Encrypt=", StringComparison.OrdinalIgnoreCase))
-            connection.Encrypt = SqlConnectionEncryptOption.Optional;
-        return connection.ConnectionString;
-    }
-
-    public static async Task<StandardProjectRow[]> ReadAsync(string sourceFile, string currentUser, CancellationToken token)
+    public static async Task<StandardProjectRow[]> ReadAsync(string currentUser, CancellationToken token)
     {
         currentUser = currentUser.Trim();
-        if (currentUser.Length == 0) throw new ArgumentException("Nhập CurrUser của FSD Studio.");
-        await using var connection = new SqlConnection(ReadFsdConnection(sourceFile));
+        if (currentUser.Length == 0) throw new ArgumentException("Nhập tên người dùng.");
+        await using var connection = new SqlConnection(ConnectionProvider.GetConnectionString());
         await connection.OpenAsync(token).ConfigureAwait(false);
         await using var command = new SqlCommand("dbo.ns_getListDept", connection)
         {

@@ -49,6 +49,7 @@ export type Settings = {
   trustCertificate: boolean;
   crystalPath: string;
   profiler18Path: string;
+  standardCatalogUser?: string;
   shortcuts: Record<string, string[]>;
   projectLastAccess?: Record<string, string>;
   activityCommands?: string[] | null;
