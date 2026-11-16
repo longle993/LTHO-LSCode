@@ -29,6 +29,15 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
     private readonly ConcurrentDictionary<string, TableSnapshot> tableSnapshots = new();
     public DeveloperTools() => http.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "Mozilla/5.0");
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    private sealed record SourceVersion(string Version, string[] Roots);
+    private static SourceVersion[] SourceVersions() => ProjectStore.Load()
+        .Select(project => new { Version = project.Field("ProjectVersion").Trim(), Root = project.SourcePath.Trim() })
+        .Where(item => item.Version.Length != 0 && Path.IsPathFullyQualified(item.Root))
+        .Concat(SourceVersionCatalog.Load().Select(item => new { item.Version, item.Root }))
+        .GroupBy(item => item.Version, StringComparer.OrdinalIgnoreCase)
+        .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+        .Select(group => new SourceVersion(group.Key, group.Select(item => item.Root).Distinct(StringComparer.OrdinalIgnoreCase).ToArray()))
+        .ToArray();
     private (SqlTarget Connection, bool IsProjectSys) RegisteredTarget(JsonElement p) =>
         targets.TryGetValue(p.GetProperty("targetId").GetString() ?? "", out var t)
             ? t : throw new InvalidOperationException("Chọn kết nối cho tab hiện tại.");
@@ -128,7 +137,9 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                 try
                 {
                     var preferences = p.GetProperty("settings").Deserialize<StudioSettings>(Json) ?? throw new ArgumentException("Settings không hợp lệ.");
-                    foreach (var (id, timestamp) in SettingsStore.Load().ProjectLastAccess)
+                    var storedPreferences = SettingsStore.Load();
+                    preferences.SourceCollectionVersion = storedPreferences.SourceCollectionVersion;
+                    foreach (var (id, timestamp) in storedPreferences.ProjectLastAccess)
                         if (!preferences.ProjectLastAccess.TryGetValue(id, out var previousAccess) || timestamp > previousAccess)
                             preferences.ProjectLastAccess[id] = timestamp;
                     SettingsStore.Save(preferences);
@@ -273,6 +284,42 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                 return true;
             case "workspace.duplicate":
                 return await WorkspaceFiles.DuplicateAsync(S("path"), ct);
+            case "sourceCollection.versions":
+                return SourceVersions();
+            case "sourceCollection.catalog":
+                return SourceVersionCatalog.Load();
+            case "sourceCollection.default.read":
+                return SettingsStore.Load().SourceCollectionVersion;
+            case "sourceCollection.default.save":
+                var requestedVersion = S("version").Trim();
+                await persistenceGate.WaitAsync(ct);
+                try
+                {
+                    var sourceVersion = requestedVersion.Length == 0 ? "" : SourceVersions().FirstOrDefault(item =>
+                        item.Version.Equals(requestedVersion, StringComparison.OrdinalIgnoreCase))?.Version
+                        ?? throw new ArgumentException("Phiên bản nguồn không tồn tại.");
+                    var sourceSettings = SettingsStore.Load();
+                    sourceSettings.SourceCollectionVersion = sourceVersion;
+                    SettingsStore.Save(sourceSettings);
+                    return sourceVersion;
+                }
+                finally { persistenceGate.Release(); }
+            case "sourceCollection.sync":
+                var sourceGroup = S("group");
+                var discovered = SourceVersionCatalog.Discover(sourceGroup, ct);
+                await persistenceGate.WaitAsync(ct);
+                try { return SourceVersionCatalog.SaveGroup(sourceGroup, discovered, ct); }
+                finally { persistenceGate.Release(); }
+            case "sourceCollection.find":
+                var sourceRoots = p.GetProperty("roots").Deserialize<string[]>(Json) ?? [];
+                var sourceSamples = p.GetProperty("samples").Deserialize<string[]>(Json) ?? [];
+                return await Task.Run(() => SourceCollection.Find(sourceRoots, sourceSamples, ct), ct);
+            case "sourceCollection.copy":
+                var sourceFiles = p.GetProperty("files").Deserialize<SourceCollection.Match[]>(Json) ?? [];
+                return await Task.Run(() => SourceCollection.CopyAsync(S("destination"), sourceFiles, ct), ct);
+            case "sourceCollection.content":
+                var contentFiles = p.GetProperty("files").Deserialize<SourceCollection.Match[]>(Json) ?? [];
+                return await SourceCollection.FindContentAsync(contentFiles, S("query"), ct);
             case "project.discover": return await Task.Run(() => ProjectDiscovery.Find(S("root", @"\\172.168.5.14\CustomerPro"), S("name"), ct), ct);
             case "project.standard.preview":
                 var standardRows = await StandardProjectSync.ReadAsync(S("sourceFile"), S("currentUser"), ct);

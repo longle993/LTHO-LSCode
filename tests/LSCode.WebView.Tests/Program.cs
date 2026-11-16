@@ -384,6 +384,17 @@ await using (var projectTools = new DeveloperTools())
         createdDetails.GetProperty("homeUpdateCode").GetString() == "TMP_HOME" &&
         !((string)(await CallProject("project.export", new { }))!).Contains("fixture-secret", StringComparison.Ordinal),
         "Full project profile persists and export removes its password");
+    var collectionVersions = JsonSerializer.SerializeToElement(await CallProject("sourceCollection.versions", new { }), Protocol.Json);
+    await CallProject("sourceCollection.default.save", new { version = "sp30" });
+    await CallProject("settings.save", new { settings = new { theme = "Dark" } });
+    Check((string?)await CallProject("sourceCollection.default.read", new { }) == "SP30",
+        "Source Collection default version persists through ordinary settings saves");
+    await CallProject("sourceCollection.default.save", new { version = "" });
+    Check((string?)await CallProject("sourceCollection.default.read", new { }) == "",
+        "Source Collection default version can be cleared");
+    Check(collectionVersions.EnumerateArray().Any(item => item.GetProperty("version").GetString() == "SP30" &&
+        item.GetProperty("roots").EnumerateArray().Any(source => source.GetString() == root)),
+        "Source Collection groups saved project source paths by project version");
     await Reject<InvalidOperationException>(() => CallProject("project.create", new { name = created.Name, server = ".", database = "Test", sourcePath = root }),
         "Duplicate project creation is rejected");
     await CallProject("project.delete", new { id = created.Id });
@@ -428,6 +439,61 @@ await using (var projectTools = new DeveloperTools())
     File.Delete(configPath);
     Check((await OpenDatabases()).SequenceEqual(new[] { "Saved_App", "Saved_Sys" }),
         "Opening ERP registers saved App/SYS when web.config is unavailable");
+}
+{
+    await using var tools = new DeveloperTools();
+    async Task<object?> Call(string method, object payload) => await tools.ExecuteAsync(method, JsonSerializer.SerializeToElement(payload, Protocol.Json), default);
+    var syncedHrm = JsonSerializer.SerializeToElement(await Call("sourceCollection.sync", new { group = "HRM" }), Protocol.Json);
+    var hrmRoots = syncedHrm.EnumerateArray().ToDictionary(item => item.GetProperty("version").GetString()!,
+        item => item.GetProperty("root").GetString());
+    Check(hrmRoots.Count == 2 && hrmRoots["SP24"] == @"\\172.168.5.14\CustomerPro\HRM\DEMO24\SP24" &&
+        hrmRoots["SP227"] == @"\\172.168.5.14\CustomerPro\HRM\HRM227\SP227", "Source catalog registers exactly the two HRM paths");
+    await Call("sourceCollection.sync", new { group = "HRM" });
+    var savedVersions = JsonSerializer.SerializeToElement(await Call("sourceCollection.catalog", new { }), Protocol.Json);
+    Check(savedVersions.GetArrayLength() == 2, "Repeated HRM synchronization persists without duplicate entries");
+    var searchVersions = JsonSerializer.SerializeToElement(await Call("sourceCollection.versions", new { }), Protocol.Json);
+    Check(searchVersions.EnumerateArray().Any(item => item.GetProperty("version").GetString() == "SP227" &&
+        item.GetProperty("roots").EnumerateArray().Any(source => source.GetString() == hrmRoots["SP227"])),
+        "Synchronized paths are available to version search");
+    var collectionSource = Directory.CreateDirectory(Path.Combine(root, "collection-source")).FullName;
+    var collectionTarget = Directory.CreateDirectory(Path.Combine(root, "collection-target")).FullName;
+    foreach (var relative in new[] { Path.Combine("Grid", "Item.f"), Path.Combine("Dir", "Item.xml"), Path.Combine("Grid", "Other.xml") })
+    {
+        var input = Path.Combine(collectionSource, relative);
+        Directory.CreateDirectory(Path.GetDirectoryName(input)!);
+        await File.WriteAllTextAsync(input, relative);
+    }
+    var collection = JsonSerializer.SerializeToElement(await Call("sourceCollection.find", new
+    {
+        roots = new[] { Path.Combine(root, "missing-source"), collectionSource },
+        samples = new[] { Path.Combine(collectionTarget, "GRID", "item.xml") }
+    }), Protocol.Json);
+    var matches = collection.GetProperty("files");
+    Check(matches.GetArrayLength() == 2 && matches[0].GetProperty("checked").GetBoolean() &&
+        !matches[1].GetProperty("checked").GetBoolean() && collection.GetProperty("errors").GetArrayLength() == 1,
+        "Source Collection matches stems, checks matching parents, and continues after an unavailable source");
+    var contentMatches = JsonSerializer.SerializeToElement(await Call("sourceCollection.content", new
+    {
+        files = matches.EnumerateArray().ToArray(), query = "ITEM.F"
+    }), Protocol.Json);
+    Check(contentMatches.GetProperty("indices").EnumerateArray().Select(index => index.GetInt32()).SequenceEqual([0]),
+        "Source Collection searches ERP .f content without changing match indices");
+    var copyRequest = new { destination = collectionTarget, files = new[] { matches[0] } };
+    var firstCollectionCopy = JsonSerializer.SerializeToElement(await Call("sourceCollection.copy", copyRequest), Protocol.Json);
+    var copiedCollectionFile = Path.Combine(collectionTarget, "Grid", "Item.f");
+    Check(firstCollectionCopy.GetProperty("copied").GetInt32() == 1 && File.Exists(copiedCollectionFile),
+        "Source Collection copies selected files preserving their relative paths");
+    await File.WriteAllTextAsync(copiedCollectionFile, "existing");
+    var retryCollection = JsonSerializer.SerializeToElement(await Call("sourceCollection.copy", copyRequest), Protocol.Json);
+    Check(retryCollection.GetProperty("skipped").GetInt32() == 1 && await File.ReadAllTextAsync(copiedCollectionFile) == "existing",
+        "Source Collection skips an existing destination");
+    var escapedCollection = JsonSerializer.SerializeToElement(await Call("sourceCollection.copy", new
+    {
+        destination = collectionTarget,
+        files = new[] { new { root = collectionSource, relativePath = Path.Combine("..", "outside-collection.txt") } }
+    }), Protocol.Json);
+    Check(escapedCollection.GetProperty("errors").GetArrayLength() == 1 &&
+        !File.Exists(Path.Combine(root, "outside-collection.txt")), "Source Collection rejects paths outside the selected root");
 }
 if (args.Contains("--sql"))
 {

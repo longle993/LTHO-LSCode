@@ -2721,3 +2721,79 @@ kbd {
   .project-row-heading { grid-template-columns: minmax(0, 110px) minmax(0, 1fr); gap: 8px; }
   .project-row-heading b { min-width: 0; }
 }
+.source-collection {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  padding: 16px 20px;
+}
+.source-collection-controls,
+.source-collection-path {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px;
+  min-width: 0;
+}
+.source-collection-path { flex: 1 1 280px; }
+.source-collection-path label { display: grid; gap: 4px; flex: 1 1 150px; min-width: 0; }
+.source-collection-path input { width: 100%; min-width: 0; }
+.source-collection-modal .select { max-width: 100%; }
+.source-collection-modal .select-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.select-options.select-options-floating {
+  position: fixed;
+  inset: auto;
+  right: auto;
+  margin: 0;
+  min-width: 0;
+  max-width: none;
+  animation: none;
+}
+.source-collection-modal .select-options input {
+  position: sticky;
+  top: 0;
+  width: 100%;
+  min-width: 0;
+  margin-bottom: 4px;
+  background: var(--surface);
+}
+.source-collection-controls > input[type="search"] { flex: 1 1 210px; min-width: 0; }
+@media (max-width: 560px) {
+  .source-collection-modal .source-collection-controls > .select { flex: 1 0 100%; }
+}
+.source-collection-results,
+.source-collection-errors {
+  max-height: 36vh;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.source-collection-results,
+.source-tree-children {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+}
+.source-tree-children { margin-inline-start: 12px; border-inline-start: 1px solid var(--border); }
+.source-tree-folder,
+.source-tree-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: start;
+  min-height: 32px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.source-tree-folder:hover, .source-tree-file:hover { background: var(--item-hover); }
+.source-tree-folder svg, .source-tree-file svg, .source-tree-file input { flex: none; }
+.source-tree-folder span, .source-tree-file span { min-width: 0; }
+.source-collection-errors { padding: 8px 24px; overflow-wrap: anywhere; }
+.source-version-catalog { display: grid; gap: 8px; min-width: 0; }
+.source-version-catalog .data-grid { max-height: 30vh; min-width: 0; }

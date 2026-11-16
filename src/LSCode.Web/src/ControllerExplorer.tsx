@@ -35,7 +35,7 @@ export const folderKind = (name: string) =>
   categories.find((category) => category.toLowerCase() === name.toLowerCase())?.toLowerCase() ?? "folder";
 
 export default function ControllerExplorer({
-  root, files, activePath, onOpen, onCopy, onReveal, onDuplicate, onRename,
+  root, files, activePath, onOpen, onCopy, onReveal, onDuplicate, onRename, onSourceCollection,
   emptyMessage = "Mở một chức năng ERP để xem file của controller.",
 }: {
   root: string;
@@ -45,6 +45,7 @@ export default function ControllerExplorer({
   onCopy: (text: string) => void;
   onReveal: (path: string) => void;
   onDuplicate?: (path: string) => void;
+  onSourceCollection?: (samples: string[]) => void;
   onRename?: (path: string, name: string) => Promise<string>;
   emptyMessage?: string;
 }) {
@@ -186,6 +187,13 @@ export default function ControllerExplorer({
           onReveal(menu.item.path);
         }}>{menu.item.directory ? "Mở thư mục" : "Mở thư mục chứa file"}</Button>
         {!menu.item.directory && onDuplicate && <Button role="menuitem" variant="ghost" onClick={() => { closeMenu(); onDuplicate(menu.item.path); }}>Nhân bản file</Button>}
+        {onSourceCollection && <Button role="menuitem" variant="ghost" onClick={() => {
+          const samples = menu.item.directory
+            ? (files ?? []).filter(path => pathIsWithin(path, menu.item.path))
+            : [menu.item.path];
+          closeMenu();
+          if (samples.length) onSourceCollection(samples);
+        }}>Source Collection</Button>}
       </div>, document.body)}
     {renaming && onRename && <Modal title={renaming.directory ? "Đổi tên thư mục" : "Đổi tên file"} onClose={() => { if (!renameBusy) setRenaming(undefined); }}>
       <form className="tool-body" onSubmit={(event) => {

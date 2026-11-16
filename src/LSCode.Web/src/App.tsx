@@ -1,4 +1,5 @@
 import ControllerExplorer, { FileIcon } from "./ControllerExplorer";
+import { SourceCollectionDialog } from "./features/SourceCollectionDialog";
 import { pathIsWithin, rebasePath, tabFolderLabel } from "./fileLabels";
 import { FileSections } from "./features/FileSections";
 import { ControllerPreview } from "./features/ControllerPreview";
@@ -208,6 +209,7 @@ export default function App({
   const controllerSelection = useRef(0);
   const [historyRevision, setHistoryRevision] = useState(0);
   const [history, setHistory] = useState<{ projectId: string; files: string[] }[]>();
+  const [sourceCollection, setSourceCollection] = useState<{ samples: string[]; destination: string }>();
   const [historySearch, setHistorySearch] = useState("");
   const historyResults = useMemo(() => {
     const query = historySearch.trim().toLowerCase();
@@ -779,6 +781,33 @@ export default function App({
         if (xml.diagnostic) throw new Error("XML analysis");
         const data = await request<Snippet[]>("snippet.list");
         if (data.length === 0) throw new Error("Snippet assets missing");
+        await request("sourceCollection.sync", { group: "HRM" });
+        setSourceCollection({ samples: [], destination: workspace ?? "" });
+        const waitFor = async <T,>(read: () => T | null | undefined): Promise<T> => {
+          for (let attempt = 0; attempt < 100; attempt++) {
+            const value = read();
+            if (value) return value;
+            await new Promise(resolve => window.setTimeout(resolve, 20));
+          }
+          throw new Error("Source Collection did not finish rendering");
+        };
+        try {
+          const selector = await waitFor(() => {
+            const button = document.querySelector<HTMLButtonElement>('.source-collection-modal button[aria-label="Phiên bản"]');
+            return button && !button.disabled ? button : null;
+          });
+          selector.click();
+          const popup = await waitFor(() => document.querySelector<HTMLElement>(".source-collection-modal :popover-open"));
+          await new Promise(resolve => window.setTimeout(resolve, 230));
+          const rect = popup.getBoundingClientRect();
+          const modal = popup.closest("dialog")!.getBoundingClientRect();
+          const outsideY = rect.bottom > modal.bottom + 12 ? rect.bottom - 12 : rect.top + 12;
+          if ((outsideY >= modal.top && outsideY <= modal.bottom) ||
+              !popup.contains(document.elementFromPoint(rect.left + 12, outsideY)))
+            throw new Error("Source Collection dropdown is clipped by its dialog");
+        } finally {
+          setSourceCollection(undefined);
+        }
         newDocument(
           "-- Kiểm tra WebView2\r\nSELECT 1 AS [Giá trị];",
           "webview-smoke.sql",
@@ -794,6 +823,7 @@ export default function App({
             "Monaco editor",
             "native file open/save/BOM",
             "shared split model",
+            "Source Collection dropdown escapes dialog clipping",
           ],
         });
       } catch (e) {
@@ -1759,6 +1789,7 @@ export default function App({
                             onReveal={revealWorkspacePath}
                             onDuplicate={(path) => void guard(() => duplicateWorkspaceItem(path))}
                             onRename={renameWorkspaceItem}
+                            onSourceCollection={samples => setSourceCollection({ samples, destination: workspace })}
                           />
                         </div>}
                       </div>;
@@ -2569,6 +2600,7 @@ export default function App({
           }}
         />
       )}
+      {sourceCollection && <SourceCollectionDialog {...sourceCollection} onClose={() => setSourceCollection(undefined)} />}
       {dialog === "projects" && (
         <ProjectDialog
           projects={projects}
