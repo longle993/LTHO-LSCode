@@ -23,6 +23,7 @@ public sealed class StudioSettings
     public string SqlUser { get; set; } = "";
     public string CrystalPath { get; set; } = "";
     public string Profiler18Path { get; set; } = "";
+    public string SourceCollectionVersion { get; set; } = "";
 }
 public static class SettingsStore
 {

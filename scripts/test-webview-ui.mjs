@@ -357,7 +357,7 @@ try{
   await page.getByRole('button',{name:'Chức năng',exact:true}).click();
   await page.getByRole('button',{name:'Nhân viên',exact:true}).click();
   await page.keyboard.press('F3');
-  const menuDialog=page.getByRole('dialog',{name:'Thông tin menu ERP'});
+  const menuDialog=page.getByLabel('Thông tin menu ERP');
   await menuDialog.waitFor();
   check(await menuDialog.getByRole('tab').allTextContents().then(tabs=>tabs.join('|')==='Dir (1)|Filter (1)|Grid (1)|Report (1)|Lookup (0)|Upload (1)'),
     'F3 opens menu details with all resource tabs');

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Button, Modal } from "./ui";
 import { pathIsWithin, rebasePath } from "./fileLabels";
-import { FileActionMenu, type FileMenuItem, type FileMenuState } from "./FileActionMenu";
 import { ChevronRight, ChevronDown, Folder, FileCode2, PanelsTopLeft,
   ChartNoAxesCombined, FileSpreadsheet, FileText, FileChartColumn } from "lucide-react";
 
@@ -24,7 +24,7 @@ export function FileIcon({ path }: { path: string }) {
   return <Icon size={15} className={"file-icon file-" + ext} />;
 }
 
-type ExplorerItem = FileMenuItem;
+type ExplorerItem = { name: string; path: string; directory: boolean };
 const pathKey = (path: string) => path.replaceAll("\\", "/").replace(/\/+$/, "").toLowerCase();
 const parentFolder = (path: string) => {
   const separator = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
@@ -35,7 +35,7 @@ export const folderKind = (name: string) =>
   categories.find((category) => category.toLowerCase() === name.toLowerCase())?.toLowerCase() ?? "folder";
 
 export default function ControllerExplorer({
-  root, files, activePath, onOpen, onCopy, onReveal, onDuplicate, onRename,
+  root, files, activePath, onOpen, onCopy, onReveal, onDuplicate, onRename, onSourceCollection,
   emptyMessage = "Mở một chức năng ERP để xem file của controller.",
 }: {
   root: string;
@@ -45,6 +45,7 @@ export default function ControllerExplorer({
   onCopy: (text: string) => void;
   onReveal: (path: string) => void;
   onDuplicate?: (path: string) => void;
+  onSourceCollection?: (samples: string[]) => void;
   onRename?: (path: string, name: string) => Promise<string>;
   emptyMessage?: string;
 }) {
@@ -71,14 +72,24 @@ export default function ControllerExplorer({
     ]));
   }, [files, root]);
   const [selected, setSelected] = useState<string>();
-  const [menu, setMenu] = useState<FileMenuState>();
+  const [menu, setMenu] = useState<{ item: ExplorerItem; x: number; y: number }>();
   const [renaming, setRenaming] = useState<ExplorerItem>();
   const [newName, setNewName] = useState("");
   const [renameBusy, setRenameBusy] = useState(false);
   const [renameError, setRenameError] = useState("");
+  const menuElement = useRef<HTMLDivElement>(null);
   const menuOwner = useRef<HTMLButtonElement>();
   const renameInput = useRef<HTMLInputElement>(null);
 
+  useEffect(() => {
+    if (!menu) return;
+    const dismiss = (event: PointerEvent) => {
+      if (!menuElement.current?.contains(event.target as Node)) setMenu(undefined);
+    };
+    document.addEventListener("pointerdown", dismiss);
+    menuElement.current?.querySelector("button")?.focus();
+    return () => document.removeEventListener("pointerdown", dismiss);
+  }, [menu]);
   useEffect(() => {
     if (renaming) renameInput.current?.focus();
   }, [renaming]);
@@ -112,6 +123,8 @@ export default function ControllerExplorer({
       }
     },
   });
+  const closeMenu = () => { setMenu(undefined); menuOwner.current?.focus(); };
+
   function tree(path: string, inheritedKind = "folder"): React.ReactNode {
     return directories.get(pathKey(path))?.map((item) => {
       if (!item.directory) return <button
@@ -148,15 +161,40 @@ export default function ControllerExplorer({
   return <>
     <div className="project-file-tree">{files?.length ? tree(root) :
       <div className="explorer-message">{emptyMessage}</div>}</div>
-    <FileActionMenu
-      menu={menu}
-      onClose={() => setMenu(undefined)}
-      onCopy={onCopy}
-      onReveal={onReveal}
-      onDuplicate={onDuplicate}
-      onRenameRequest={onRename ? beginRename : undefined}
-      restoreFocus={() => menuOwner.current?.focus()}
-    />
+    {menu && createPortal(
+      <div
+        ref={menuElement}
+        className="table-action-menu explorer-action-menu"
+        role="menu"
+        aria-label="Thao tác file và thư mục"
+        style={{ left: menu.x, top: menu.y }}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") { event.preventDefault(); closeMenu(); }
+          if (event.key === "Tab") setMenu(undefined);
+          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            event.preventDefault();
+            const buttons = Array.from(menuElement.current?.querySelectorAll("button") ?? []);
+            const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+            buttons[(index + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length]?.focus();
+          }
+        }}
+      >
+        <Button role="menuitem" variant="ghost" onClick={() => { closeMenu(); onCopy(menu.item.name); }}>Sao chép tên <kbd>Ctrl+C</kbd></Button>
+        <Button role="menuitem" variant="ghost" onClick={() => { closeMenu(); onCopy(menu.item.path); }}>Sao chép đường dẫn</Button>
+        {onRename && <Button role="menuitem" variant="ghost" onClick={() => beginRename(menu.item)}>Đổi tên <kbd>F2</kbd></Button>}
+        <Button role="menuitem" variant="ghost" onClick={() => {
+          closeMenu();
+          onReveal(menu.item.path);
+        }}>{menu.item.directory ? "Mở thư mục" : "Mở thư mục chứa file"}</Button>
+        {!menu.item.directory && onDuplicate && <Button role="menuitem" variant="ghost" onClick={() => { closeMenu(); onDuplicate(menu.item.path); }}>Nhân bản file</Button>}
+        {onSourceCollection && <Button role="menuitem" variant="ghost" onClick={() => {
+          const samples = menu.item.directory
+            ? (files ?? []).filter(path => pathIsWithin(path, menu.item.path))
+            : [menu.item.path];
+          closeMenu();
+          if (samples.length) onSourceCollection(samples);
+        }}>Source Collection</Button>}
+      </div>, document.body)}
     {renaming && onRename && <Modal title={renaming.directory ? "Đổi tên thư mục" : "Đổi tên file"} onClose={() => { if (!renameBusy) setRenaming(undefined); }}>
       <form className="tool-body" onSubmit={(event) => {
         event.preventDefault();

@@ -179,3 +179,53 @@ Bố cục được chọn theo yêu cầu “dựng luôn”: một vùng đi�
 - Probe UI đã quét 1440→375px qua 55 độ rộng, không thấy điểm vỡ bố cục. Sau sửa đường kẻ tab, lượt cuối ở 375/1280/1440/1920 không đo ra lỗi; report ở `artifacts/webview-ui/probe-final/report.json`. Báo cáo full sweep trước đó vẫn giữ ở `artifacts/webview-ui/probe/report.json`.
 
 Không dùng kết quả fixture để khẳng định đã thử các database/dịch vụ khách hàng thật.
+
+## Danh sách dự án và tab menu ERP (15/11/2026)
+
+- Mã dự án dùng chữ đậm và nền highlight theo màu nhấn trong **Cài đặt → Theme** (`--primary`); tên dự án nằm trong cột cố định, không dịch theo độ dài mã. Mã dài tự xuống dòng; tên/đường dẫn dài vẫn có nội dung đầy đủ qua tooltip.
+- Cây **Menu chức năng** hiển thị thêm `wmenu_id` bên phải mỗi dòng; kết quả tìm kiếm cũng hiển thị mã này.
+- Nhấn **F3** hoặc chuột phải trên menu để mở **Menu ERP** trong vùng tab làm việc. Cây menu vẫn cuộn và thao tác được. Chuyển tab giữ bản nháp; đóng tab, tải lại hoặc mở menu khác có xác nhận nếu chưa lưu. Ctrl+W đóng tab menu đang chọn. Tab giữ đúng kết nối/dự án lúc mở.
+- **Thêm mới**: mã cây tiếp tục được sinh theo nhánh; mã command độc lập, lấy mã chưa dùng từ `AA.00.00` tới `AA.99.99`, tăng phần cuối trước, kiểm tra cả `dbo.wcommand.menu_id` và `dbo.command.menu_id`. Khi hết mã thì báo lỗi. Lúc lưu vẫn kiểm tra trùng trong transaction; mã đã tồn tại không bị ghi đè.
+- Không đổi mã command của menu cũ. Hệ thống không có cột `menu_id` vẫn dùng schema hiện hữu.
+
+### Kiểm tra rủi ro CRAP cho mã command
+
+Phạm vi: `MenuEditor.NextCommandId` trong `src/LSCode.Infrastructure/MenuEditor.cs`. Độ phức tạp đếm thủ công là **3**: cơ sở 1 + vòng `for` 1 + `if` 1. Có kiểm tra điểm bắt đầu, lỗ trống, chuyển nhóm và hết 10.000 mã. Chưa công bố điểm CRAP: bộ kiểm thử là console runner, chưa có provider/converter Cobertura trong repository; cần báo cáo Cobertura chứa phương thức này để tính coverage thực. Kết quả test pass không thay thế coverage.
+
+## Thanh công cụ, đóng nhóm file và SQL Debug / Watch (15/11/2026)
+
+### Giao diện và lịch sử
+
+- Bỏ nhãn `WebView`, `.NET Desktop` trên thanh tiêu đề.
+- **Chức năng ERP** chỉ giữ ô tìm kiếm và cây menu; bỏ hai nút Tải chức năng / Đồng bộ. Nút tải lại ở góc trên sidebar vẫn nạp lại cây chức năng. Nút tải lại trong tab sửa menu là thao tác riêng, vẫn giữ để đọc lại bản ghi.
+- Chuột phải vào **tên dự án cấp trên cùng** trong Lịch sử: **Close project** đóng các tab thuộc dự án đó; **Close all projects** đóng tab thuộc tất cả dự án. File được nhận diện theo dự án gắn với tab hoặc thư mục dự án gần nhất chứa file; SQL chưa lưu không thuộc dự án được giữ lại. Các thao tác này không xóa file, profile hay lịch sử.
+- Bản nháp được hỏi một lần cho cả nhóm: Lưu thay đổi / Đóng không lưu / Hủy. Hủy lưu hoặc lưu lỗi giữ các tab mở. Khi query editor đang chạy, dừng query trước khi đóng nhóm.
+
+### Watch và bảng dữ liệu trong LSCode
+
+1. Bấm **SQL Debug / Watch** ở thanh editor, chọn database.
+2. Nhập **SQL ngữ cảnh**, hoặc bấm **Lấy SQL từ editor** để sao chép nội dung tab editor đang chọn.
+3. Chọn **Biểu thức / biến**, ví dụ SQL ngữ cảnh `DECLARE @id int = 7;`, Watch `@id + 1` trả về `8`.
+4. Chọn **Query xem dữ liệu** để nhập `SELECT TOP (100) ...`; có thể thêm nhiều Watch và chuyển giữa chúng.
+5. **Chạy Watch** chỉ chạy Watch đang chọn. Mỗi lần chạy thực thi lại toàn bộ SQL ngữ cảnh và query Watch trên một kết nối mới. Không tự refresh, không tự rollback; SQL ngữ cảnh có lệnh ghi vẫn có tác dụng như chạy SQL bình thường. `GO` trong ngữ cảnh có quy tắc batch của SQL Server: biến chỉ tồn tại trong batch khai báo.
+6. Các bảng kết quả hiển thị riêng, hỗ trợ quét vùng và Ctrl+C; tối đa 5.000 dòng/bảng, 30 bảng theo SQL runner. Dừng Watch hủy request đang chạy; đang chạy thì không đóng tab hoặc đóng app. Thay đổi kết nối/nội dung xóa kết quả cũ để tránh hiểu nhầm.
+
+### Breakpoint, step và Watch biến trong stored procedure
+
+**Debug bằng SSDT** là tích hợp mở script sang debugger T-SQL thật của **Visual Studio + SQL Server Data Tools**, không phải debugger nhúng trong Monaco. Máy hiện tại đã phát hiện được Visual Studio 2026 có SSDT.
+
+- Nhập script gọi procedure vào SQL ngữ cảnh, chọn đúng database, bấm **Debug bằng SSDT**. App xuất file UTF-8 dưới `%LOCALAPPDATA%\LSCode\SqlDebug` (hoặc `LSCODE_DATA_HOME/SqlDebug`) rồi mở trong Visual Studio.
+- Trong Visual Studio, kết nối đúng server/database qua SQL Server Object Explorer / SQL query editor rồi chọn **Execute with Debugger / Alt+F5**. Việc mở file không tự chạy SQL.
+- **F9** bật/tắt breakpoint, **F10** Step Over, **F11** Step Into, **Shift+F11** Step Out; mở **Debug → Windows → Watch / Locals** để xem biến tại điểm dừng. Có thể xem các result set của script trong query editor.
+- Kết nối cần quyền `sysadmin`; debug SQL Server từ xa cần cấu hình firewall/debugger. LSCode không tự thay đổi quyền hay cấu hình máy chủ. Mật khẩu kết nối không được xuất vào file hoặc tham số tiến trình; đăng nhập trong Visual Studio khi cần.
+- Watch trong LSCode chạy phiên độc lập, không đọc được biến cục bộ của procedure đang dừng bên SSDT. Xem các biến đó tại Watch/Locals của SSDT. Chưa triển khai breakpoint/step trực tiếp trong editor LSCode.
+
+Nguồn: [Microsoft — T-SQL debugger](https://learn.microsoft.com/en-us/sql/ssms/scripting/transact-sql-debugger), [Run the Transact-SQL debugger](https://learn.microsoft.com/en-us/sql/ssdt/debugger/run-transact-sql-debugger).
+
+### Kiểm chứng
+
+- `scripts/test-workbench-ui.mjs`: kiểm tra nhãn/nút đã bỏ, đóng nhóm với hủy/lưu/bỏ bản nháp, giữ lịch sử/tab ngoài dự án; Watch biểu thức/query, kết nối, lỗi, hủy request, nhiều bảng và handoff SSDT bằng transport giả. Chạy preview ở `127.0.0.1:4173`, sau đó `node scripts/test-workbench-ui.mjs artifacts/ui-test-tools` khi Playwright đã có.
+- SQL integration trên LocalDB kiểm tra SQL ngữ cảnh, biến scalar và bảng biến cùng phạm vi thực thi. Kiểm tra script SSDT xác nhận quote database và giữ nguyên SQL gốc.
+- Chưa chạy phiên breakpoint thực tế vào stored procedure ERP trên máy chủ của người dùng; cần kết nối/quyền debugger tại môi trường đó.
+
+Kết quả kiểm tra bản này: **131 checks backend/LocalDB**, **16 checks UI**, **8 checks native WebView smoke** đều đạt; frontend build và desktop publish thành công. Kiểm tra UI dùng dữ liệu mẫu, không phải dữ liệu ERP thật. Probe bổ sung còn ghi nhận các hạn chế bố cục sẵn có: nhãn Chức năng xuống dòng ở sidebar 1280px; ở viewport 375px, nút Mở thư mục xuống dòng và vùng tìm kiếm trên header nhỏ. Các điểm này chưa được sửa trong phạm vi bổ sung Watch/đóng nhóm file.

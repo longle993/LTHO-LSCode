@@ -133,7 +133,7 @@ export function ProjectDialog({ projects, lastAccess, onProjects, onOpen, onClos
               onContextMenu={event => { event.preventDefault(); void edit(project); }} onClick={() => void task.run(() => open(project))}>
               <FolderOpen size={18} className="project-icon" />
               <span className="project-row-content">
-                <span className="project-row-heading"><b>{project.code}</b><strong>{project.title || project.code}</strong>{!project.active && <em>Ngừng dùng</em>}</span>
+                <span className="project-row-heading"><b title={project.code}>{project.code}</b><strong title={project.title || project.code}>{project.title || project.code}</strong>{!project.active && <em>Ngừng dùng</em>}</span>
                 <small title={project.programPath}>{project.programPath || "Chưa khai báo đường dẫn chương trình"}</small>
               </span><ArrowRight size={16} />
             </button>

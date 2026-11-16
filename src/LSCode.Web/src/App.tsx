@@ -1,4 +1,5 @@
 import ControllerExplorer, { FileIcon } from "./ControllerExplorer";
+import { SourceCollectionDialog } from "./features/SourceCollectionDialog";
 import { pathIsWithin, rebasePath, tabFolderLabel } from "./fileLabels";
 import { FileSections } from "./features/FileSections";
 import { ControllerPreview } from "./features/ControllerPreview";
@@ -46,6 +47,7 @@ import { PanelResizeHandle, WorkspaceResizeHandle } from "./PanelResizeHandle";
 import { ProfilerTool } from "./features/ProfilerTool";
 import { TableTool } from "./features/TableTool";
 import { TemplateStudio } from "./features/TemplateStudio";
+import { SqlWatchTool } from "./features/SqlWatchTool";
 import { MenuEditor } from "./features/MenuEditor";
 import type {
   Bootstrap,
@@ -125,6 +127,13 @@ export default function App({
     [selectedTool, setSelectedTool] = useState<string>(),
     [profilerBusy, setProfilerBusy] = useState(false),
     [closingProfiler, setClosingProfiler] = useState(false);
+  const [watchTab, setWatchTab] = useState<{ target?: Target }>();
+  const watchBusy = useRef(false);
+  function closeWatchTab() {
+    if (watchBusy.current) { setStatus("Dừng Watch trước khi đóng tab."); return; }
+    setWatchTab(undefined);
+    setSelectedTool(current => current === "sql-watch" ? undefined : current);
+  }
   const [formatMenuOpen, setFormatMenuOpen] = useState(false);
   const formatMenuRef = useRef<HTMLDivElement>(null);
   const profilerSelected = selectedTool === "profiler";
@@ -200,6 +209,7 @@ export default function App({
   const controllerSelection = useRef(0);
   const [historyRevision, setHistoryRevision] = useState(0);
   const [history, setHistory] = useState<{ projectId: string; files: string[] }[]>();
+  const [sourceCollection, setSourceCollection] = useState<{ samples: string[]; destination: string }>();
   const [historySearch, setHistorySearch] = useState("");
   const historyResults = useMemo(() => {
     const query = historySearch.trim().toLowerCase();
@@ -308,7 +318,25 @@ export default function App({
     currentEditor.focus();
   }, [active?.id]);
   const [selectedCommand, setSelectedCommand] = useState("");
-  const [menuEditor, setMenuEditor] = useState<CommandNode>();
+  const [menuEditor, setMenuEditor] = useState<{ command: CommandNode; target: Target; root: string }>();
+  const menuDirty = useRef(false);
+  const menuBusy = useRef(false);
+  function closeMenuEditor() {
+    if (menuBusy.current || (menuDirty.current && !window.confirm("Bỏ thay đổi menu chưa lưu?"))) return;
+    setMenuEditor(undefined);
+    menuDirty.current = false;
+    setSelectedTool(current => current === "menu-editor" ? undefined : current);
+  }
+  function openMenuEditor(command: CommandNode) {
+    if (!projectSysTarget.current) return;
+    if (menuEditor?.command.entry.id === command.entry.id && menuEditor.target.id === projectSysTarget.current.id) {
+      setSelectedTool("menu-editor"); return;
+    }
+    if (menuBusy.current || (menuDirty.current && !window.confirm("Bỏ thay đổi menu chưa lưu để mở menu khác?"))) return;
+    menuDirty.current = false;
+    setMenuEditor({ command, target: projectSysTarget.current, root: workspace });
+    setSelectedTool("menu-editor");
+  }
   useEffect(() => {
     setObjects(undefined);
     dbLoadedQuery.current = "";
@@ -565,6 +593,9 @@ export default function App({
     [],
   );
   const closeWindow = useCallback(async () => {
+    if (watchBusy.current) { setStatus("Dừng Watch trước khi đóng ứng dụng."); return; }
+    if (menuBusy.current) { setStatus("Menu đang xử lý. Thử đóng lại khi hoàn tất."); return; }
+    if (menuDirty.current && !window.confirm("Menu ERP còn thay đổi chưa lưu. Đóng ứng dụng?")) return;
     if (studioBusy.current) { setStatus("Studio đang xử lý. Thử đóng lại khi hoàn tất."); return; }
     if (studioDirty.current && !window.confirm("Dynamic Template Studio còn thay đổi chưa lưu. Đóng ứng dụng?"))
       return;
@@ -750,6 +781,33 @@ export default function App({
         if (xml.diagnostic) throw new Error("XML analysis");
         const data = await request<Snippet[]>("snippet.list");
         if (data.length === 0) throw new Error("Snippet assets missing");
+        await request("sourceCollection.sync", { group: "HRM" });
+        setSourceCollection({ samples: [], destination: workspace ?? "" });
+        const waitFor = async <T,>(read: () => T | null | undefined): Promise<T> => {
+          for (let attempt = 0; attempt < 100; attempt++) {
+            const value = read();
+            if (value) return value;
+            await new Promise(resolve => window.setTimeout(resolve, 20));
+          }
+          throw new Error("Source Collection did not finish rendering");
+        };
+        try {
+          const selector = await waitFor(() => {
+            const button = document.querySelector<HTMLButtonElement>('.source-collection-modal button[aria-label="Phiên bản"]');
+            return button && !button.disabled ? button : null;
+          });
+          selector.click();
+          const popup = await waitFor(() => document.querySelector<HTMLElement>(".source-collection-modal :popover-open"));
+          await new Promise(resolve => window.setTimeout(resolve, 230));
+          const rect = popup.getBoundingClientRect();
+          const modal = popup.closest("dialog")!.getBoundingClientRect();
+          const outsideY = rect.bottom > modal.bottom + 12 ? rect.bottom - 12 : rect.top + 12;
+          if ((outsideY >= modal.top && outsideY <= modal.bottom) ||
+              !popup.contains(document.elementFromPoint(rect.left + 12, outsideY)))
+            throw new Error("Source Collection dropdown is clipped by its dialog");
+        } finally {
+          setSourceCollection(undefined);
+        }
         newDocument(
           "-- Kiểm tra WebView2\r\nSELECT 1 AS [Giá trị];",
           "webview-smoke.sql",
@@ -765,6 +823,7 @@ export default function App({
             "Monaco editor",
             "native file open/save/BOM",
             "shared split model",
+            "Source Collection dropdown escapes dialog clipping",
           ],
         });
       } catch (e) {
@@ -884,7 +943,9 @@ export default function App({
         await chooseFolder();
         break;
       case "file.close":
-        if (profilerSelected) await closeProfilerTab();
+        if (selectedTool === "sql-watch") closeWatchTab();
+        else if (selectedTool === "menu-editor") closeMenuEditor();
+        else if (profilerSelected) await closeProfilerTab();
         else if (selectedTool === "template-studio") closeStudio();
         else if (tableTab) closeTableTab(tableTab.id);
         else if (active) await closeTab(active);
@@ -1273,6 +1334,42 @@ export default function App({
       await request("text.export", { name: "results.csv", text: csv });
     });
   }
+  const closingProjectFiles = useRef(false);
+  async function closeProjectFiles(owner?: Project) {
+    if (closingProjectFiles.current) return;
+    if (running) { setStatus("Dừng query đang chạy trước khi đóng nhóm file."); return; }
+    closingProjectFiles.current = true;
+    const closed = new Set<string>();
+    try {
+      const ownerIds = new Set((owner ? [owner] : projects).map(item => item.id));
+      const closing = latest.current.tabs.filter(tab => {
+        const projectId = tab.project ?? projects.filter(item => tab.path && item.sourcePath && pathIsWithin(tab.path, item.sourcePath))
+          .sort((left, right) => right.sourcePath.length - left.sourcePath.length)[0]?.id;
+        return !!projectId && ownerIds.has(projectId);
+      });
+      const edited = closing.filter(dirty);
+      if (edited.length) {
+        const choice = await askUnsaved(edited.map(tab => tab.name));
+        if (choice === "cancel") return;
+        if (choice === "save") for (const tab of edited) if (!(await save(tab))) return;
+      }
+      for (const tab of closing) {
+        if (native) await request("document.close", { id: tab.id });
+        closed.add(tab.id);
+        disposeModel(tab);
+        resultsByTab.current.delete(tab.id);
+      }
+      setStatus(closing.length ? "Đã đóng " + closing.length + " tab của " + (owner?.name ?? "tất cả dự án") : "Không có tab dự án đang mở.");
+    } finally {
+      if (closed.size) {
+        const remaining = latest.current.tabs.filter(tab => !closed.has(tab.id));
+        setTabs(current => current.filter(tab => !closed.has(tab.id)));
+        setActiveIdRaw(current => closed.has(current) ? remaining.at(-1)?.id ?? "" : current);
+        setPaneIds(current => current.map(id => closed.has(id) ? remaining.at(-1)?.id ?? "" : id));
+      }
+      closingProjectFiles.current = false;
+    }
+  }
   async function openHistoryFile(p: Project, path: string) {
     if (switchingHistoryProject.current) return;
     switchingHistoryProject.current = true;
@@ -1397,7 +1494,6 @@ export default function App({
         <div className="brand">
           <img className="brand-mark app-logo" src={logo} alt="" />
           <strong>Studio Code</strong>
-          <span className="edition">WebView</span>
         </div>
         <button
           className="command-search"
@@ -1421,10 +1517,6 @@ export default function App({
             <ArrowUpRight size={17} />
             Mở chương trình
           </Button>
-          <span className="connection-state">
-            <i />
-            {native ? ".NET Desktop" : "Xem giao diện"}
-          </span>
           <IconButton
             label="Đổi theme"
             onClick={() => void guard(() => execute("theme.switch"))}
@@ -1649,6 +1741,8 @@ export default function App({
                   const owner = projects.find((entry) => entry.id === projectId);
                   return owner && <ProjectHistory key={projectId} name={owner.name}
                     root={owner.sourcePath} files={files} activePath={active?.path}
+                    onCloseProject={() => void guard(() => closeProjectFiles(owner))}
+                    onCloseAllProjects={() => void guard(() => closeProjectFiles())}
                     onOpen={(path) => void guard(() => openHistoryFile(owner, path))}
                     onRemove={(path) => void guard(async () => {
                       await request("project.history.remove", { id: projectId, path });
@@ -1695,6 +1789,7 @@ export default function App({
                             onReveal={revealWorkspacePath}
                             onDuplicate={(path) => void guard(() => duplicateWorkspaceItem(path))}
                             onRename={renameWorkspaceItem}
+                            onSourceCollection={samples => setSourceCollection({ samples, destination: workspace })}
                           />
                         </div>}
                       </div>;
@@ -1900,12 +1995,7 @@ export default function App({
                       if (e.key === "Enter") nextMenu();
                     }}
                   />
-                  <div className="inline-checks">
-                    <Button onClick={() => void guard(loadCommands)}>
-                      Tải chức năng
-                    </Button>
-                    <Button onClick={() => setDialog("sync")}>Đồng bộ</Button>
-                  </div>
+
                 </div>
                 <div className="side-content side-wide loading-region" aria-busy={controllerRequests > 0}>
                   <LoadingLine busy={controllerRequests > 0} label="Đang tải cây controller…" />
@@ -1916,7 +2006,7 @@ export default function App({
                       onSelect={setSelectedCommand}
                       onOpen={(node) => void guard(() => openController(node.entry.link, false, node.entry.sysId))}
                       onOpenSource={(node) => void guard(() => openController(node.entry.link, false, node.entry.sysId, true))}
-                      onEdit={setMenuEditor}
+                      onEdit={openMenuEditor}
                     />
                   )}
                   {(menuQuery ? matches : []).map((n, i) => (
@@ -1932,13 +2022,13 @@ export default function App({
                         onKeyDown={(event) => {
                           if (event.key === "F3") {
                             event.preventDefault();
-                            setMenuEditor(n);
+                            openMenuEditor(n);
                           }
                         }}
                         onContextMenu={(event) => {
                           event.preventDefault();
                           setSelectedCommand(n.entry.id);
-                          setMenuEditor(n);
+                          openMenuEditor(n);
                         }}
                       >
                         <strong>{n.entry.caption}</strong>
@@ -2019,8 +2109,19 @@ export default function App({
                   "Không gian làm việc"}
               </span>
             </div>
-            {(profilerTab || studioOpen || tableTabs.length > 0) && (
-              <div className="workspace-tools" role="tablist" aria-label="Công cụ SQL">
+            {(watchTab || menuEditor || profilerTab || studioOpen || tableTabs.length > 0) && (
+              <div className="workspace-tools" role="tablist" aria-label="Công cụ làm việc">
+                {watchTab && <div className={`document-tab ${selectedTool === "sql-watch" ? "active" : ""}`}>
+                  <button id="sql-watch-tab" role="tab" aria-controls="sql-watch-panel" aria-selected={selectedTool === "sql-watch"} onClick={() => setSelectedTool("sql-watch")}>SQL Debug / Watch</button>
+                  <IconButton label="Đóng SQL Watch" onClick={closeWatchTab}><X size={13} /></IconButton>
+                </div>}
+                {menuEditor && <div className={`document-tab ${selectedTool === "menu-editor" ? "active" : ""}`}>
+                  <button id="menu-editor-tab" role="tab" aria-controls="menu-editor-panel" aria-selected={selectedTool === "menu-editor"}
+                    onClick={() => setSelectedTool("menu-editor")} title={menuEditor.command.entry.caption}>
+                    <span>Menu ERP · {menuEditor.command.entry.id}</span>
+                  </button>
+                  <IconButton label="Đóng thông tin menu ERP" onClick={closeMenuEditor}><X size={13} /></IconButton>
+                </div>}
                 {studioOpen && <div className={`document-tab ${selectedTool === "template-studio" ? "active" : ""}`}>
                   <button id="template-studio-tab" role="tab" aria-controls="template-studio-panel"
                     aria-selected={selectedTool === "template-studio"} onClick={() => setSelectedTool("template-studio")}>
@@ -2049,6 +2150,7 @@ export default function App({
               </div>
             )}
             <div className="toolbar-spacer" />
+            <Button onClick={() => { setWatchTab(current => current ?? { target }); setSelectedTool("sql-watch"); }}>SQL Debug / Watch</Button>
             {active && !selectedTool && (
               <>
                 <div className="editor-search">
@@ -2161,6 +2263,28 @@ export default function App({
               </>
             )}
           </div>
+          {watchTab && <section id="sql-watch-panel" className="profiler-panel" role="tabpanel" aria-labelledby="sql-watch-tab" hidden={selectedTool !== "sql-watch"}>
+            <SqlWatchTool targets={targets} initialTarget={watchTab.target}
+              onFromEditor={() => active ? textOf(active) : ""} onBusyChange={value => { watchBusy.current = value; }} />
+          </section>}
+          {menuEditor && <section id="menu-editor-panel" className="profiler-panel" role="tabpanel"
+            aria-labelledby="menu-editor-tab" hidden={selectedTool !== "menu-editor"}>
+            <MenuEditor key={menuEditor.target.id + ":" + menuEditor.command.entry.id}
+              target={menuEditor.target} command={menuEditor.command} root={menuEditor.root}
+              onClose={closeMenuEditor} onDirtyChange={value => { menuDirty.current = value; }}
+              onBusyChange={value => { menuBusy.current = value; }}
+              onOpenPath={path => void guard(() => open(path))}
+              onCopy={copyWorkspaceText}
+              onReveal={revealWorkspacePath}
+              onDuplicate={path => guard(() => duplicateWorkspaceItem(path))}
+              onRename={renameWorkspaceItem}
+              onSaved={async id => {
+                if (projectSysTarget.current?.id === menuEditor.target.id) {
+                  await loadCommands(); setSelectedCommand(id);
+                }
+                setStatus("Đã lưu thông tin menu " + id);
+              }} />
+          </section>}
           {studioOpen && <section id="template-studio-panel" className="profiler-panel" role="tabpanel"
             aria-labelledby="template-studio-tab" hidden={selectedTool !== "template-studio"}>
             <TemplateStudio onDirty={(dirty) => { studioDirty.current = dirty; }}
@@ -2480,6 +2604,7 @@ export default function App({
           }}
         />
       )}
+      {sourceCollection && <SourceCollectionDialog {...sourceCollection} onClose={() => setSourceCollection(undefined)} />}
       {dialog === "projects" && (
         <ProjectDialog
           projects={projects}
@@ -2498,36 +2623,6 @@ export default function App({
             await request("settings.save", { settings: next });
             setSettings(next);
             setDialog("");
-          }}
-        />
-      )}
-      {menuEditor && projectSysTarget.current && (
-        <MenuEditor
-          target={projectSysTarget.current}
-          command={menuEditor}
-          root={workspace}
-          onClose={() => setMenuEditor(undefined)}
-          onCopy={copyWorkspaceText}
-          onReveal={revealWorkspacePath}
-          onDuplicate={(path) => guard(() => duplicateWorkspaceItem(path))}
-          onRename={renameWorkspaceItem}
-          onOpenPath={(path) => {
-            const command = menuEditor;
-            setMenuEditor(undefined);
-            setNav("files");
-            setSide(true);
-            void guard(async () => {
-              try {
-                await openController(command.entry.link, false, command.entry.sysId);
-              } finally {
-                await open(path);
-              }
-            });
-          }}
-          onSaved={async (id) => {
-            await loadCommands();
-            setSelectedCommand(id);
-            setStatus("Đã lưu thông tin menu " + id);
           }}
         />
       )}
@@ -2767,6 +2862,7 @@ function FunctionTree({
             <div className="function-row">
               <button
                 className="tree-row"
+                 aria-label={node.entry.caption}
                 aria-current={selected === node.entry.id ? "page" : undefined}
                 aria-expanded={
                   node.children.length ? expanded.has(node.entry.id) : undefined
@@ -2812,7 +2908,7 @@ function FunctionTree({
                 ) : (
                   <span className="tree-spacer" />
                 )}
-                <span>{node.entry.caption}</span>
+                <span className="min-w-0 truncate">{node.entry.caption}</span><small className="ml-auto shrink-0 text-[var(--muted)]" title="wmenu_id">{node.entry.id}</small>
               </button>
               {!node.children.length && (node.entry.link || node.entry.sysId) && <button
                 type="button"

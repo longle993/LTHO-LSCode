@@ -39,16 +39,56 @@ export function Select({
   onChange,
   label,
   disabled = false,
+  searchOptions,
+  floating = false,
 }: {
   value: string;
   options: { value: string; label: string }[];
   onChange: (v: string) => void;
   label: string;
   disabled?: boolean;
+  searchOptions?: string;
+  floating?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [filter, setFilter] = useState("");
+  const visible = options.filter(option => !searchOptions || option.label.toLowerCase().includes(filter.trim().toLowerCase()));
   const listId = useId();
   const root = useRef<HTMLDivElement>(null);
+  const popup = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    const menu = popup.current;
+    const button = trigger.current;
+    if (!open || !floating || !menu || !button) return;
+    if (typeof menu.showPopover === "function") {
+      menu.setAttribute("popover", "manual");
+      menu.showPopover();
+    }
+    const place = () => {
+      const rect = button.getBoundingClientRect();
+      const below = window.innerHeight - rect.bottom - 12;
+      const above = rect.top - 12;
+      const upward = below < 240 && above > below;
+      const width = Math.min(Math.max(rect.width, 248), window.innerWidth - 24);
+      Object.assign(menu.style, {
+        width: width + "px",
+        left: Math.max(12, Math.min(rect.left, window.innerWidth - width - 12)) + "px",
+        maxHeight: Math.min(280, Math.max(0, upward ? above : below)) + "px",
+        top: upward ? "auto" : rect.bottom + 4 + "px",
+        bottom: upward ? window.innerHeight - rect.top + 4 + "px" : "auto",
+      });
+    };
+    place();
+    menu.querySelector("input")?.focus({ preventScroll: true });
+    window.addEventListener("resize", place);
+    document.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      document.removeEventListener("scroll", place, true);
+      if (menu.hasAttribute("popover") && menu.matches(":popover-open")) menu.hidePopover();
+    };
+  }, [open, floating]);
   useEffect(() => {
     const outside = (e: PointerEvent) => {
       if (!root.current?.contains(e.target as Node)) setOpen(false);
@@ -61,7 +101,9 @@ export function Select({
       className="select"
       ref={root}
       onKeyDown={(e) => {
-        if (e.key === "Escape") {
+        if (e.key === "Escape" && open) {
+          e.preventDefault();
+          e.stopPropagation();
           setOpen(false);
           root.current?.querySelector("button")?.focus();
         }
@@ -71,13 +113,15 @@ export function Select({
           e.key === "Home" ||
           e.key === "End"
         ) {
+          if (e.target instanceof HTMLInputElement && (e.key === "Home" || e.key === "End")) return;
           e.preventDefault();
           if (!open) {
+            setFilter("");
             setOpen(true);
             requestAnimationFrame(() =>
               root.current
-                ?.querySelector<HTMLButtonElement>("[role=option]")
-                ?.focus(),
+                ?.querySelector<HTMLElement>(searchOptions ? "input" : "[role=option]")
+                ?.focus({ preventScroll: floating }),
             );
             return;
           }
@@ -94,20 +138,21 @@ export function Select({
               ? 0
               : e.key === "End"
                 ? items.length - 1
-                : (index + (e.key === "ArrowDown" ? 1 : -1) + items.length) %
+                : ((index < 0 && e.key === "ArrowUp" ? 0 : index) + (e.key === "ArrowDown" ? 1 : -1) + items.length) %
                   items.length;
           items[next]?.focus();
         }
       }}
     >
       <button
+        ref={trigger}
         className="select-trigger"
         disabled={disabled}
         aria-label={label}
         aria-expanded={open}
         aria-haspopup="listbox"
         aria-controls={open ? listId : undefined}
-        onClick={() => setOpen(!open)}
+        onClick={() => { setFilter(""); setOpen(!open); }}
       >
         <span
           className="select-value"
@@ -119,12 +164,14 @@ export function Select({
       </button>
       {open && (
         <div
+          ref={popup}
           id={listId}
-          className="select-options"
-          role="listbox"
-          aria-label={label}
+          className={floating ? "select-options select-options-floating" : "select-options"}
         >
-          {options.map((o) => (
+          {searchOptions && <input type="search" aria-label={searchOptions} placeholder={searchOptions}
+            autoFocus={!floating} value={filter} onChange={event => setFilter(event.target.value)} />}
+          <div role="listbox" aria-label={label}>
+          {visible.map((o) => (
             <button
               role="option"
               aria-selected={o.value === value}
@@ -139,6 +186,8 @@ export function Select({
               {o.value === value && <Check size={14} />}
             </button>
           ))}
+          </div>
+          {!visible.length && <p role="status">Không có kết quả.</p>}
         </div>
       )}
     </div>
@@ -149,11 +198,13 @@ export function Modal({
   children,
   onClose,
   wide = false,
+  className = "",
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
   wide?: boolean;
+  className?: string;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
@@ -166,7 +217,7 @@ export function Modal({
     <dialog
       ref={dialog}
       aria-labelledby={titleId}
-      className={`modal ${wide ? "wide" : ""}`}
+      className={`modal ${wide ? "wide" : ""} ${className}`.trim()}
       onCancel={(e) => {
         e.preventDefault();
         onClose();

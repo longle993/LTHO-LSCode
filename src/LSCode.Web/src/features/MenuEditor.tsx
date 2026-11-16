@@ -39,7 +39,9 @@ const labels: Record<string, string> = {
 };
 const primaryFields = new Set(["wmenu_id", "wmenu_id0", "bar", "bar2", "menu_id", "link", "sysid"]);
 
-export function MenuEditor({ target, command, root, onClose, onSaved, onOpenPath, onCopy, onReveal, onDuplicate, onRename }: {
+export function MenuEditor({ target, command, root, onClose, onSaved, onOpenPath, onDirtyChange, onBusyChange, onCopy, onReveal, onDuplicate, onRename }: {
+  onDirtyChange: (dirty: boolean) => void;
+  onBusyChange: (busy: boolean) => void;
   target: Target;
   command: MenuCommand;
   root: string;
@@ -67,6 +69,8 @@ export function MenuEditor({ target, command, root, onClose, onSaved, onOpenPath
   const menuOwner = useRef<HTMLButtonElement>();
   const renameInput = useRef<HTMLInputElement>(null);
   const dirty = useMemo(() => !!model && JSON.stringify(values) !== JSON.stringify(model.values), [model, values]);
+
+  useEffect(() => { onDirtyChange(dirty); onBusyChange(busy); }, [dirty, busy, onDirtyChange, onBusyChange]);
 
   async function load() {
     setFileMenu(undefined);
@@ -113,6 +117,7 @@ export function MenuEditor({ target, command, root, onClose, onSaved, onOpenPath
       <input
         value={values[field.name] ?? ""}
         readOnly={field.readOnly || (model?.mode === "edit" && field.name === "wmenu_id")}
+        disabled={busy}
         maxLength={limit}
         onChange={(event) => setValues((old) => ({ ...old, [field.name]: event.target.value }))}
       />
@@ -147,10 +152,10 @@ export function MenuEditor({ target, command, root, onClose, onSaved, onOpenPath
     }
   }
 
-  return <div className="menu-editor-shell"><Modal wide title={model?.mode === "new" ? "Thêm menu ERP" : "Thông tin menu ERP"} onClose={onClose}>
+  return <div className="menu-editor-shell" aria-label={model?.mode === "new" ? "Thêm menu ERP" : "Thông tin menu ERP"}>
     <div className="menu-editor-toolbar">
       <div><strong>{command.entry.caption}</strong><span>{target.database} · {target.server}</span></div>
-      <Button onClick={() => void load()} disabled={busy}><RefreshCw size={15} />Tải lại</Button>
+      <Button onClick={() => { if (!dirty || window.confirm("Bỏ thay đổi chưa lưu và tải lại menu?")) void load(); }} disabled={busy}><RefreshCw size={15} />Tải lại</Button>
       <Button onClick={() => void createNew()} disabled={busy || dirty}><Plus size={15} />Thêm mới</Button>
       <Button variant="primary" onClick={() => void save()} disabled={busy || !model?.canSave || !dirty}><Save size={15} />Lưu</Button>
     </div>
@@ -217,7 +222,7 @@ export function MenuEditor({ target, command, root, onClose, onSaved, onOpenPath
         </div>
       </section>
     </div>
-    <div className="modal-footer"><span className="menu-editor-dirty">{dirty ? "Có thay đổi chưa lưu" : "Không có thay đổi"}</span><Button onClick={onClose}>Đóng</Button><Button variant="primary" onClick={() => void save()} disabled={busy || !dirty}><Save size={15} />Lưu</Button></div>
+    <div className="modal-footer"><span className="menu-editor-dirty">{dirty ? "Có thay đổi chưa lưu" : "Không có thay đổi"}</span><Button onClick={onClose}>Đóng</Button><Button variant="primary" onClick={() => void save()} disabled={busy || !model?.canSave || !dirty}><Save size={15} />Lưu</Button></div>
     <FileActionMenu
       menu={fileMenu}
       onClose={() => setFileMenu(undefined)}
@@ -228,7 +233,6 @@ export function MenuEditor({ target, command, root, onClose, onSaved, onOpenPath
       restoreFocus={() => menuOwner.current?.focus()}
       inline
     />
-  </Modal>
   {renaming && onRename && <Modal title="Đổi tên file" onClose={() => { if (!renameBusy) setRenaming(undefined); }}>
     <form className="tool-body" onSubmit={submitRename}>
       <label>Tên mới<input ref={renameInput} aria-label="Tên mới" value={newName} disabled={renameBusy}
