@@ -18,7 +18,8 @@ internal static class MenuEditor
     ];
 
     internal sealed record Field(string Name, string Type, int MaxLength, bool Nullable, bool ReadOnly, bool HasDefault);
-    internal sealed record Resource(string Kind, string Status, string[] Paths);
+    internal sealed record ResourceFile(string Path, string[] Tables);
+    internal sealed record Resource(string Kind, string Status, string[] Paths, ResourceFile[] Files);
 
     public static async Task<object> ReadAsync(SqlTarget target, string wmenuId, CancellationToken token)
     {
@@ -116,19 +117,25 @@ internal static class MenuEditor
             var fallback = Path.GetFileNameWithoutExtension(main ?? Uri.UnescapeDataString(link.Split('?', '#')[0]));
             var controllers = (names.Count > 0 ? names : [fallback]).Where(name => !string.IsNullOrWhiteSpace(name)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
             var related = files.Where(path => controllers.Contains(Path.GetFileNameWithoutExtension(path), StringComparer.OrdinalIgnoreCase)).ToArray();
-            var resources = new[] { "Dir", "Filter", "Grid" }.Select(kind =>
-            {
-                var paths = related.Where(path => HasFolder(path, kind)).Select(path => Path.GetRelativePath(root, path)).ToArray();
-                return new Resource(kind, paths.Length == 0 ? "missing" : paths.Length == 1 ? "found" : "multiple", paths);
-            }).Append(new Resource("Main", main == null ? "missing" : "found", main == null ? [] : [Path.GetRelativePath(root, main)])).ToArray();
             var dirFiles = related.Where(path => HasFolder(path, "Dir") && Path.GetExtension(path).ToLowerInvariant() is ".xml" or ".f").ToArray();
             var tables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var tablesByPath = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
             foreach (var path in dirFiles)
             {
+                var relative = Path.GetRelativePath(root, path);
+                var fileTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var text = await File.ReadAllTextAsync(path, token).ConfigureAwait(false);
                 foreach (Match match in Regex.Matches(text, """\b(?:table|tableName|baseTable)\s*=\s*['"](?<v>[\w.$]+)['"]|<table\b[^>]*>\s*(?<v>[\w.$]+)\s*</table>""", RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(300)))
-                    if (match.Groups["v"].Success) tables.Add(match.Groups["v"].Value);
+                    if (match.Groups["v"].Success) { fileTables.Add(match.Groups["v"].Value); tables.Add(match.Groups["v"].Value); }
+                tablesByPath[relative] = fileTables.OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToArray();
             }
+            var resources = new[] { "Dir", "Filter", "Grid", "Report", "Lookup", "Upload" }.Select(kind =>
+            {
+                var paths = related.Where(path => HasFolder(path, kind)).Select(path => Path.GetRelativePath(root, path))
+                    .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToArray();
+                var filesForKind = paths.Select(path => new ResourceFile(path, tablesByPath.GetValueOrDefault(path, []))).ToArray();
+                return new Resource(kind, paths.Length == 0 ? "missing" : paths.Length == 1 ? "found" : "multiple", paths, filesForKind);
+            }).Append(new Resource("Main", main == null ? "missing" : "found", main == null ? [] : [Path.GetRelativePath(root, main)], main == null ? [] : [new ResourceFile(Path.GetRelativePath(root, main), [])])).ToArray();
             return new { controllers, resources, tables = tables.ToArray() };
         }, token).ConfigureAwait(false);
     }

@@ -42,7 +42,29 @@ await page.addInitScript(()=>{
       case 'project.refreshConfig':result=projectRoot+'\\web.config';break;
       case 'project.structure.preview':result={path:projectRoot+'\\Controller\\Structure\\App',count:2};break;
       case 'project.structure.clear':result=2;break;
-      case 'project.commands':result=[{entry:{id:'menu1',caption:'Nhân viên',sysId:'HR',commandId:'Dir',link:'nhanvien.aspx'},children:[]},{entry:{id:'menu2',caption:'Bộ phận',sysId:'HR',commandId:'Dept',link:'bophan.aspx'},children:[]},{entry:{id:'menu3',caption:'Thông tin nhân viên',sysId:'HR',commandId:'Info',link:'hrEmployeeInformation.aspx'},children:[]},{entry:{id:'separator',caption:'-',sysId:'',commandId:'',link:''},children:[]}];break;
+      case 'project.commands':result=[{entry:{id:'menu1',caption:'Nhân viên',sysId:'HR',commandId:'Dir',link:'nhanvien.aspx'},children:[]},{entry:{id:'menu2',caption:'Bộ phận',sysId:'HR',commandId:'Dept',link:'bophan.aspx'},children:[]},{entry:{id:'menu3',caption:'Thông tin nhân viên',sysId:'HR',commandId:'Info',link:'hrEmployeeInformation.aspx'},children:[]},{entry:{id:'menu-parent',caption:'Tổng hợp',sysId:'HR',commandId:'Summary',link:'tonghop.aspx'},children:[{entry:{id:'menu-child',caption:'Chi tiết tổng hợp',sysId:'HR',commandId:'Detail',link:'chitiet.aspx'},children:[]}]},{entry:{id:'separator',caption:'-',sysId:'',commandId:'',link:''},children:[]}];break;
+      case 'project.menu.details':result={mode:'edit',fields:[
+        {name:'wmenu_id',type:'varchar',maxLength:32,nullable:false,readOnly:true},
+        {name:'wmenu_id0',type:'varchar',maxLength:32,nullable:true,readOnly:false},
+        {name:'bar',type:'nvarchar',maxLength:120,nullable:false,readOnly:false},
+        {name:'bar2',type:'nvarchar',maxLength:120,nullable:true,readOnly:false},
+        {name:'menu_id',type:'varchar',maxLength:32,nullable:true,readOnly:false},
+        {name:'link',type:'varchar',maxLength:240,nullable:true,readOnly:false},
+        {name:'sysid',type:'varchar',maxLength:64,nullable:true,readOnly:false},
+      ],values:{wmenu_id:'menu1',wmenu_id0:'',bar:'Nhân viên',bar2:'Employees',menu_id:'Dir',link:'nhanvien.aspx',sysid:'HR'},version:'fixture',canSave:true};break;
+      case 'project.menu.resources':{
+        const files=folder=>({path:`App_Data\\Controllers\\${folder}\\nhanvien.xml`,tables:['m29$000000']});
+        result={controllers:['nhanvien'],resources:[
+          {kind:'Dir',status:'found',paths:[files('Dir').path],files:[files('Dir')]},
+          {kind:'Filter',status:'found',paths:[files('Filter').path],files:[files('Filter')]},
+          {kind:'Grid',status:'found',paths:[files('Grid').path],files:[files('Grid')]},
+          {kind:'Report',status:'found',paths:[files('Report').path],files:[files('Report')]},
+          {kind:'Lookup',status:'missing',paths:[],files:[]},
+          {kind:'Upload',status:'found',paths:[files('Templates').path],files:[files('Templates')]},
+          {kind:'Main',status:'found',paths:['Main\\nhanvien.aspx'],files:[{path:'Main\\nhanvien.aspx',tables:[]}]},
+        ],tables:['m29$000000']};
+        break;
+      }
       case 'project.employeeTabs':result=[{sysId:'hrPIGeneralInformation',caption:'Thông tin chung'},{sysId:'hrPIPassportVisa',caption:'Hộ chiếu, thị thực'}];break;
       case 'project.controller':{
         const link=request.payload.link;
@@ -289,13 +311,23 @@ try{
   const openedBefore=await page.evaluate(()=>window.__nativeCalls.filter(c=>c.method==='document.open').length);
   await page.getByRole('button',{name:'Chức năng',exact:true}).click();
   check(await page.locator('.function-separator').count()===1,'Dash function renders as horizontal separator');
-  await page.getByRole('button',{name:'Nhân viên',exact:true}).click();
+  const functionRow=page.getByRole('button',{name:'Nhân viên',exact:true});
+  await functionRow.click();
+  check(await functionRow.getAttribute('aria-current')==='page' && await page.locator('.project-file-tree').count()===0,
+    'A single function click only highlights the selected row');
+  check(await page.getByRole('button',{name:'Mở source Tổng hợp',exact:true}).count()===0,
+    'Parent functions with children do not show a source arrow');
+  await page.getByRole('button',{name:'Mở source Nhân viên',exact:true}).click();
   const fileTree=page.locator('.project-file-tree');
   const dirPath='C:\\Fixture\\App_Data\\Controllers\\Dir';
   const gridPath='C:\\Fixture\\App_Data\\Controllers\\Grid';
   const dirFile=fileTree.getByTitle(dirPath+'\\nhanvien.xml',{exact:true});
   const gridFile=fileTree.getByTitle(gridPath+'\\nhanvien.xml',{exact:true});
   await dirFile.waitFor();await gridFile.waitFor();
+  await page.getByRole('tab',{name:'nhanvien.aspx',exact:true}).waitFor();
+  check(await fileTree.getByTitle('C:\\Fixture\\Main\\nhanvien.aspx',{exact:true}).getAttribute('aria-current')==='page' &&
+    await page.evaluate(before=>window.__nativeCalls.filter(c=>c.method==='document.open').length===before+1,openedBefore),
+    'Source arrow opens the main file and focuses its folder');
   const workspaceResize=page.getByRole('separator',{name:'Đổi chiều rộng Không gian dự án'});
   const sidebar=page.locator('#project-sidebar');
   const initialWidth=(await sidebar.boundingBox()).width;
@@ -320,8 +352,31 @@ try{
   check(await fileTree.getByRole('button',{name:'App_Data',exact:true}).getAttribute('aria-expanded')==='true' &&
     await fileTree.getByRole('button',{name:'Controllers',exact:true}).getAttribute('aria-expanded')==='true',
     'ERP function reveals actual App_Data and Controllers ancestors');
-  check(await page.evaluate(before=>window.__nativeCalls.filter(c=>c.method==='document.open').length===before,openedBefore),
-    'Opening a function expands folders without opening a document');
+  check(await page.evaluate(before=>window.__nativeCalls.filter(c=>c.method==='document.open').length===before+1,openedBefore),
+    'Opening a function keeps the focused source document active');
+  await page.getByRole('button',{name:'Chức năng',exact:true}).click();
+  await page.getByRole('button',{name:'Nhân viên',exact:true}).click();
+  await page.keyboard.press('F3');
+  const menuDialog=page.getByRole('dialog',{name:'Thông tin menu ERP'});
+  await menuDialog.waitFor();
+  check(await menuDialog.getByRole('tab').allTextContents().then(tabs=>tabs.join('|')==='Dir (1)|Filter (1)|Grid (1)|Report (1)|Lookup (0)|Upload (1)'),
+    'F3 opens menu details with all resource tabs');
+  await menuDialog.getByRole('tab',{name:/Dir/}).click();
+  const resourceRow=menuDialog.getByRole('button',{name:/App_Data\\Controllers\\Dir\\nhanvien\.xml/});
+  await resourceRow.click({button:'right'});
+  const resourceMenu=page.getByRole('menu',{name:'Thao tác file và thư mục'});
+  check(await resourceMenu.getByRole('menuitem').allTextContents().then(items=>
+    ['Sao chép tên','Sao chép đường dẫn','Đổi tên','Mở thư mục chứa file','Nhân bản file'].every(label=>items.some(item=>item.startsWith(label)))),
+    'F3 file rows expose the same context actions as the File tab');
+  await resourceMenu.getByRole('menuitem',{name:/^Sao chép tên/}).click();
+  await page.waitForFunction(()=>window.__nativeCalls.some(c=>c.method==='clipboard.write'&&c.payload.text==='nhanvien.xml'));
+  await resourceRow.click({button:'right'});
+  await page.getByRole('menu',{name:'Thao tác file và thư mục'}).getByRole('menuitem',{name:'Mở thư mục chứa file',exact:true}).click();
+  await page.waitForFunction(path=>window.__nativeCalls.some(c=>c.method==='workspace.reveal'&&c.payload.path===path),dirPath);
+  await resourceRow.click();
+  await page.getByRole('tab',{name:'nhanvien.xml — Dir',exact:true}).waitFor();
+  check(await page.getByRole('button',{name:'File',exact:true}).getAttribute('aria-selected')==='true',
+    'Clicking a related file switches to File and opens the source');
   check(await fileTree.getByTitle(dirPath+'\\bophan.xml',{exact:true}).count()===0,
     'The controller tree excludes files from other controllers in the same directory');
   check(await fileTree.locator('.category-heading').allTextContents().then(names=>
