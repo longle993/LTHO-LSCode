@@ -26,6 +26,7 @@ Trạng thái: đã triển khai trong WebView LSCode. Ảnh WCOMMAND được d
 LSCode dùng React 18/Tailwind v4 trong WPF WebView2, native .NET 10 và Microsoft.Data.SqlClient. Dùng lại Modal, Select, Button tại `src/LSCode.Web/src/ui.tsx`; màu/font tại `styles.css`, giữ Light/Dark/High Contrast.
 
 - `src/LSCode.Shell/Services/ProjectDatabase.cs`, `CommandsAsync`: cây lấy từ SYS.dbo.wcommand; `wmenu_id` được alias thành `menu_id` cho kết quả cây, nhưng metadata giữ `wcommand.menu_id` riêng ở CommandId. App DB cung cấp denyunitright và Startup.
+- Cây menu dựng theo FSD Studio: sắp xếp `wmenu_id`, lấy gốc có `wmenu_id0=''`, sau đó ghép cấp hai và cấp ba bằng quan hệ `wmenu_id0 → wmenu_id`. Dòng mồ côi, vòng lặp và cấp sâu hơn không hiển thị.
 - `src/LSCode.Core/ProjectDiscovery.cs`: CommandEntry hiện chỉ giữ Id, ParentId, Caption, Link, CommandId, SysId; không đủ dữ liệu để cập nhật nguyên bản ghi.
 - `src/LSCode.Infrastructure/DeveloperTools.cs`, `project.controller`: resolve Main từ link, đọc controller trong ASPX, tìm XML/.f theo controller và lần theo grid detail.
 - Vì cây đã lọc status/quyền, không dùng danh sách cây để kiểm tra trùng mã. Phải đọc bảng gốc, kể cả menu ẩn.

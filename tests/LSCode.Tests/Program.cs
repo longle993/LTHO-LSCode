@@ -205,8 +205,17 @@ try
     await Throws<ArgumentException>(() => Task.FromResult(ProjectDiscovery.Find(customerRoot, "../escape", CancellationToken.None)), "Reject project traversal");
     var secondApplication = Path.Combine(customerRoot, "FBI", "DEMO", "FBISP25"); Directory.CreateDirectory(secondApplication); File.Copy(configPath, Path.Combine(secondApplication, "web.config"));
     Assert(ProjectDiscovery.Find(customerRoot, "DEMO", CancellationToken.None).Count == 2, "Preserve multiple application candidates");
-    var hierarchy = CommandHierarchy.Build([new("01", "", "Root", "", ""), new("01.01", "01", "Child", "", ""), new("orphan", "missing", "Orphan", "", ""), new("cycleA", "cycleB", "A", "", ""), new("cycleB", "cycleA", "B", "", "")]);
-    Assert(hierarchy.Count == 4 && hierarchy.Single(n => n.Entry.Id == "01").Children.Count == 1, "Command tree parent mapping, orphan preservation and cycle protection");
+    var hierarchy = CommandHierarchy.Build([
+        new("01", "", "Root", "", ""),
+        new("01.01", "01", "Child", "", ""),
+        new("01.01.01", "01.01", "Grandchild", "", ""),
+        new("01.01.01.01", "01.01.01", "Fourth level", "", ""),
+        new("orphan", "missing", "Orphan", "", ""),
+        new("cycleA", "cycleB", "A", "", ""),
+        new("cycleB", "cycleA", "B", "", "")]);
+    var hierarchyRoot = hierarchy.Single();
+    Assert(hierarchyRoot.Entry.Id == "01" && hierarchyRoot.Children.Single().Children.Single().Entry.Id == "01.01.01", "FSD menu tree maps root, child and grandchild");
+    Assert(hierarchyRoot.Children.Single().Children.Single().Children.Count == 0, "FSD menu tree excludes fourth level, orphans and cycles");
     var searchable = CommandHierarchy.Build([new("1", "", "Kế toán", "", "", "root"), new("2", "1", "Phiếu thu", "", "", "GLTran")]);
     Assert(CommandHierarchy.Filter(searchable, "gltran").Single().Children.Single().Entry.Id == "2", "Menu sysid search preserves ancestor path");
     Assert(CommandHierarchy.Filter(searchable, "phiếu").Count == 1 && CommandHierarchy.Filter(searchable, "missing").Count == 0, "Menu name search and no-result state");
