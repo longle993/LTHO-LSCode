@@ -42,11 +42,11 @@ Chưa triển khai decrypt, ERP generators, DB/data/folder compare đầy đủ,
 - Công cụ Computer Use lỗi `native pipe unavailable` sau retry/reset. Chưa kiểm thử chuột/bàn phím bằng công cụ đó; render/smoke không thay thế acceptance test tương tác đầy đủ.
 - Đã kiểm tra tích hợp SQL Server thật với BACHVIET: discovery, cây chức năng, catalog/file explorer, query target, cấu trúc và dữ liệu bảng. Chưa gọi Google Dịch, Crystal hay Profiler thật; chưa có chứng nhận parity với Fcode.
 
-Chạy `./build.ps1 -Test -Smoke -Publish` để tái tạo build và báo cáo. Xem [hướng dẫn chạy](../README.md).
+Chạy `./build.ps1 -Test -Smoke -Publish` để tái tạo build và báo cáo. Xem [hướng dẫn chạy](README-WPF.vi.md).
 
 ## Tiếp theo theo roadmap đã duyệt
 
-Yêu cầu ngày 03/11/2026: [Tạo danh mục — thiết kế bảng và nhập dữ liệu](CATALOG-TABLE-DESIGNER.vi.md). Source màn danh mục và preview đã được thêm ở commit `13967fb`; đây là công cụ riêng với cửa sổ TableBrowser chỉ đọc. Chưa kiểm chứng lại đầy đủ chức năng trong lượt cập nhật tài liệu ngày 05/11/2026. Bổ sung mới **duplicate template** (nhân bản cấu trúc bảng danh mục, không kèm dữ liệu — đã được người dùng xác nhận) và **copy/paste nhiều dòng** ở mục 10–11 của đặc tả: **đã bổ sung source và kiểm chứng riêng WPF/SQL Server cục bộ**; nhân bản/dán tạo bản nháp, chỉ ghi database sau khi Lưu, giữ hợp đồng bốn trường hệ thống. Xem mục 12 để chạy lại và biết giới hạn; smoke tổng thể còn dừng ở kiểm tra loading trong phần UI đang có thay đổi sẵn.
+Yêu cầu ngày 03/11/2026: [Tạo danh mục — thiết kế bảng và nhập dữ liệu](../specifications/CATALOG-TABLE-DESIGNER.vi.md). Source màn danh mục và preview đã được thêm ở commit `13967fb`; đây là công cụ riêng với cửa sổ TableBrowser chỉ đọc. Chưa kiểm chứng lại đầy đủ chức năng trong lượt cập nhật tài liệu ngày 05/11/2026. Bổ sung mới **duplicate template** (nhân bản cấu trúc bảng danh mục, không kèm dữ liệu — đã được người dùng xác nhận) và **copy/paste nhiều dòng** ở mục 10–11 của đặc tả: **đã bổ sung source và kiểm chứng riêng WPF/SQL Server cục bộ**; nhân bản/dán tạo bản nháp, chỉ ghi database sau khi Lưu, giữ hợp đồng bốn trường hệ thống. Xem mục 12 để chạy lại và biết giới hạn; smoke tổng thể còn dừng ở kiểm tra loading trong phần UI đang có thay đổi sẵn.
 
 Phân tích sâu `fsystem`/`fcontrol`/`feditor`/FCodeViewer đã bổ sung; mở rộng viewer XML và nghiệp vụ sau đồng bộ; ánh xạ metadata catalog vào hành vi ERP; kiểm thử SQL integration; dịch Google trong IDE qua provider phù hợp; chuyển từng ERP tool bằng fixtures đầu vào/đầu ra. Không yêu cầu source gốc như điều kiện thực hiện.
 

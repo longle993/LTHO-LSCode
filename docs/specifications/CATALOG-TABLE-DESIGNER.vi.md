@@ -1,6 +1,6 @@
 # Tạo danh mục — thiết kế bảng và nhập dữ liệu
 
-Yêu cầu thao tác bổ sung 05/11/2026: nhấn một lần vào ô được phép sửa để nhập liệu/chọn kiểu hoặc tick checkbox, không cần nhấn đúp. Các trường chỉ đọc và trường hệ thống vẫn khóa; thao tác sửa ô không tự lưu hay thực thi SQL. Xem [kế hoạch tinh chỉnh UI](UI-DENSITY-AND-EDITOR.vi.md).
+Yêu cầu thao tác bổ sung 05/11/2026: nhấn một lần vào ô được phép sửa để nhập liệu/chọn kiểu hoặc tick checkbox, không cần nhấn đúp. Các trường chỉ đọc và trường hệ thống vẫn khóa; thao tác sửa ô không tự lưu hay thực thi SQL. Xem [kế hoạch tinh chỉnh UI](../history/UI-DENSITY-AND-EDITOR.vi.md).
 
 Trạng thái: **đã bổ sung duplicate template và copy/paste nhiều dòng trong source**, dựa trên màn danh mục từ commit `13967fb`. Đã kiểm tra WPF ba theme và tích hợp SQL Server cục bộ bằng database thử nghiệm riêng; phạm vi kiểm chứng và giới hạn ở mục 12. Cập nhật ngày 05/11/2026.
 

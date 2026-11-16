@@ -1,6 +1,6 @@
-> [Cài đặt LSCode WebView trên Windows x64](CAI-DAT-LSCODE.vi.md) · [Lịch sử file và thao tác dự án](WORKBENCH-PROJECT-HISTORY.vi.md)
+> [Cài đặt LSCode WebView trên Windows x64](CAI-DAT-LSCODE.vi.md) · [Lịch sử file và thao tác dự án](../history/WORKBENCH-PROJECT-HISTORY.vi.md)
 
-> Cập nhật mới: [Workbench 10/11/2026](WEBVIEW-UPDATE-2026-11-10.vi.md), thay thế mô tả explorer, split editor, startup và Profiler cũ.
+> Cập nhật mới: [Workbench 10/11/2026](../history/WEBVIEW-UPDATE-2026-11-10.vi.md), thay thế mô tả explorer, split editor, startup và Profiler cũ.
 
 # LSCode React + WebView2 — hướng dẫn và trạng thái chuyển đổi
 
@@ -16,7 +16,7 @@ Mở `artifacts/publish-webview/LSCode.WebView.exe`. Giữ nguyên toàn bộ th
 - Trong **Chức năng ERP**, chọn một mục để xem các file liên quan của controller theo cây thư mục vật lý trong tab **File**. Chọn file để mở editor. Chọn file hoặc thư mục và nhấn **F2** để đổi tên.
 - Khi mở **Thông tin nhân viên** (`hrPIGeneralInformation`), bấm **Tab chức năng** ở đáy khung **File**. Danh sách đọc từ `dbo.hrtabinfo` của DB hệ thống, dùng `bar` làm tên và sắp xếp theo `id`. Chọn một mục để mở cây file của controller theo `sysid`. Bấm **Thông tin chung** để quay lại cây ban đầu.
 - Trong SQL nhúng của file XML, gõ `@@` để xem các biến phiên FAST kèm mô tả. Gõ tiếp tên để lọc, rồi nhấn Enter hoặc Tab để chèn. Ví dụ `@@userID`, `@@sysDatabaseName` và `@@prime$partition$current`.
-- Trong **Dự án của bạn**, bấm **Đồng bộ dự án** để thêm dự án khác. Đường dẫn chương trình mặc định là `http://172.168.5.14/<tên dự án>/Main/Login.aspx`. App mã hóa tên dự án trong URL và giữ đường dẫn đã chỉnh khi đồng bộ lại cùng hồ sơ.
+- Trong **Dự án của bạn**, bấm **Đồng bộ** để lấy hồ sơ từ danh mục chuẩn. Dùng **Tạo profile** cho hồ sơ thủ công hoặc **Import XML** / **Export XML** để làm việc qua tệp. Xem [đợt chuyển sang danh mục tự chứa](../history/SELF-CONTAINED-PROJECT-CATALOG-AND-TEMPLATE-STUDIO.vi.md).
 - Khi vào dự án, vùng editor bắt đầu trống. Bấm **SQL mới** khi cần viết truy vấn.
 - Trong tab **DB**, gõ tên object để tìm. App đợi 280 ms sau lần gõ cuối, hoặc 500 ms khi bật **Tìm nội dung**, hủy yêu cầu cũ và giữ kết quả trước trong lúc chờ. Kết quả phân trang 200 dòng bằng `ROW_NUMBER()` và `TOP`, tương thích SQL Server không hỗ trợ `OFFSET … FETCH`. Bộ nhớ đệm tối đa 24 trang trong 30 giây. Nút **Tìm**, Enter và **Tải lại** truy vấn trực tiếp.
 - Bấm **Ẩn không gian dự án** ở đầu sidebar. Bấm biểu tượng **File dự án**, **Chức năng ERP** hoặc **Database** ở thanh dọc để hiện lại vùng tương ứng.
@@ -118,7 +118,7 @@ Một số adapter thuần .NET vẫn dùng `Compile Link` tới file dịch v�
 
 ## Bao phủ tính năng
 
-Đối chiếu các ID với [ma trận chuyển đổi](WEBVIEW-MIGRATION.vi.md). “Có source/UI” và “đã kiểm chứng trên dự án thật” là hai trạng thái khác nhau.
+Đối chiếu các ID với [ma trận chuyển đổi](../specifications/WEBVIEW-MIGRATION.vi.md). “Có source/UI” và “đã kiểm chứng trên dự án thật” là hai trạng thái khác nhau.
 
 | Nhóm | Đã chuyển trong bản mới | Bằng chứng và phạm vi |
 |---|---|---|

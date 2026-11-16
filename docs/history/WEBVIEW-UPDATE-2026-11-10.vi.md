@@ -15,7 +15,7 @@ Bản này dùng React + TypeScript / WebView2 và .NET với các lớp Domain,
 | Controller explorer | Mỗi chức năng mở thêm nhóm controller, gập nhóm/thư mục và đóng riêng từng nhóm. Không dựng cây toàn bộ dự án trong explorer. Quick Open và tìm kiếm dự án vẫn hoạt động. |
 | Icon file | Folder vàng; ASPX tím; .f hổ phách; XML cam; XLSX xanh lá; FRX hồng; RPT xanh dương; TXT xám. Spreadsheet/report/text có icon riêng, đuôi file luôn hiện. |
 | Sao chép bảng | Nhấp cell, Shift+nhấp chọn vùng, Ctrl+C sao chép. Nhấp số dòng để chọn dòng; tiêu đề cột để chọn cột. Thanh thao tác sao chép ô/vùng, dòng, cột. TSV quote tab/xuống dòng; NULL thành ô trống. Sao chép cả dữ liệu đã tải ngoài vùng virtual scrolling. |
-| Profiler | Mặc định user profiler, password fsd; sửa trong hộp Profiler. Mật khẩu chỉ trong bộ nhớ phiên, không ghi settings; target SQL giữ xác thực riêng. Nhập/chọn PROFILER.EXE trực tiếp, kiểm tra thư viện rồi lưu đường dẫn. Chọn SSMS Trace hoặc Extended Events. |
+| Profiler | Nhập thông tin đăng nhập trong hộp Profiler. Mật khẩu chỉ trong bộ nhớ phiên, không ghi settings; target SQL giữ xác thực riêng. Nhập/chọn PROFILER.EXE trực tiếp, kiểm tra thư viện rồi lưu đường dẫn. Chọn SSMS Trace hoặc Extended Events. |
 | Mở chương trình | Nút mũi tên trên titlebar mở ProgramPath của dự án: file, thư mục hoặc HTTP(S). Khai báo trong chi tiết dự án. Đường dẫn tương đối tính từ SourcePath. |
 | Theme | Icon SunMoon khác icon Cài đặt. Có thể thêm lệnh Đổi theme vào activity bar qua Cài đặt. |
 | Chia editor | Ctrl+\ hoặc Chia editor. Mỗi pane chọn file độc lập. Nhấp pane để chọn nơi mở file/thực thi thao tác. Cùng file dùng chung model; caret/scroll riêng theo pane. |
