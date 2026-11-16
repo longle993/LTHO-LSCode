@@ -39,7 +39,8 @@ internal static class MenuEditor
         var values = fields.ToDictionary(field => field.Name, field => DefaultValue(field), StringComparer.OrdinalIgnoreCase);
         values["wmenu_id"] = candidate.Id;
         if (values.ContainsKey("wmenu_id0")) values["wmenu_id0"] = candidate.Parent;
-        if (values.ContainsKey("menu_id")) values["menu_id"] = candidate.Id;
+        if (values.ContainsKey("menu_id"))
+            values["menu_id"] = await GenerateCommandIdAsync(connection, token).ConfigureAwait(false);
         if (values.ContainsKey("status")) values["status"] = "1";
         return new { mode = "new", fields, values, version = "", canSave = true };
     }
@@ -189,6 +190,29 @@ internal static class MenuEditor
             if (!used.Contains(candidate)) return (candidate, parent);
         }
         throw new InvalidOperationException("Không còn mã trống trong nhánh " + prefix + ".xx.");
+    }
+
+    private static async Task<string> GenerateCommandIdAsync(SqlConnection connection, CancellationToken token)
+    {
+        var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var table in new[] { "dbo.wcommand", "dbo.command" })
+        {
+            if (!await HasColumnAsync(connection, null, table, "menu_id", token).ConfigureAwait(false)) continue;
+            await using var command = new SqlCommand($"SELECT RTRIM(menu_id) FROM {table} WHERE menu_id LIKE 'AA.__.__'", connection);
+            await using var reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);
+            while (await reader.ReadAsync(token).ConfigureAwait(false)) used.Add(reader.GetString(0));
+        }
+        return NextCommandId(used);
+    }
+
+    internal static string NextCommandId(IReadOnlySet<string> used)
+    {
+        for (var number = 0; number < 10000; number++)
+        {
+            var candidate = $"AA.{number / 100:00}.{number % 100:00}";
+            if (!used.Contains(candidate)) return candidate;
+        }
+        throw new InvalidOperationException("Không còn mã command trống trong AA.00.00–AA.99.99.");
     }
 
     private static async Task<bool> ExistsAsync(SqlConnection connection, SqlTransaction transaction, string treeId, string? commandId, CancellationToken token)

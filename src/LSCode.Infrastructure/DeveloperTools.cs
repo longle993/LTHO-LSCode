@@ -310,6 +310,10 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                     TrustServerCertificate = B("trustCertificate"), ApplicationName = "LS Code", ConnectTimeout = 15 };
                 await using (var connection = new SqlConnection(builder.ConnectionString)) await connection.OpenAsync(ct);
                 return Register(new(builder.DataSource, builder.InitialCatalog, builder.ConnectionString));
+            case "sql.debug.available":
+                return new { available = await SqlDebugLauncher.FindAsync(ct) != null };
+            case "sql.debug.open":
+                return await SqlDebugLauncher.OpenAsync(Target(p), S("sql"), ct);
             case "sql.execute":
                 QueryResult result;
                 try { result = await SqlRunner.ExecuteAsync(Target(p).ConnectionString, S("sql"), ct); }

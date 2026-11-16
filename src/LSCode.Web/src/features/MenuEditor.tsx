@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { FileCode2, FolderSearch, Plus, RefreshCw, Save } from "lucide-react";
 import { request, type Target } from "../bridge";
-import { Button, Modal } from "../ui";
+import { Button } from "../ui";
 import "./menuEditor.css";
 
 export type MenuCommand = {
@@ -29,7 +29,9 @@ const labels: Record<string, string> = {
 };
 const primaryFields = new Set(["wmenu_id", "wmenu_id0", "bar", "bar2", "menu_id", "link", "sysid"]);
 
-export function MenuEditor({ target, command, root, onClose, onSaved, onOpenPath }: {
+export function MenuEditor({ target, command, root, onClose, onSaved, onOpenPath, onDirtyChange, onBusyChange }: {
+  onDirtyChange: (dirty: boolean) => void;
+  onBusyChange: (busy: boolean) => void;
   target: Target;
   command: MenuCommand;
   root: string;
@@ -45,6 +47,8 @@ export function MenuEditor({ target, command, root, onClose, onSaved, onOpenPath
   const [notice, setNotice] = useState("");
   const [recordId, setRecordId] = useState(command.entry.id);
   const dirty = useMemo(() => !!model && JSON.stringify(values) !== JSON.stringify(model.values), [model, values]);
+
+  useEffect(() => { onDirtyChange(dirty); onBusyChange(busy); }, [dirty, busy, onDirtyChange, onBusyChange]);
 
   async function load() {
     setBusy(true); setError(""); setNotice("");
@@ -87,16 +91,17 @@ export function MenuEditor({ target, command, root, onClose, onSaved, onOpenPath
       <input
         value={values[field.name] ?? ""}
         readOnly={field.readOnly || (model?.mode === "edit" && field.name === "wmenu_id")}
+        disabled={busy}
         maxLength={limit}
         onChange={(event) => setValues((old) => ({ ...old, [field.name]: event.target.value }))}
       />
     </label>;
   };
 
-  return <div className="menu-editor-shell"><Modal title={model?.mode === "new" ? "Thêm menu ERP" : "Thông tin menu ERP"} onClose={onClose}>
+  return <div className="menu-editor-shell" aria-label={model?.mode === "new" ? "Thêm menu ERP" : "Thông tin menu ERP"}>
     <div className="menu-editor-toolbar">
       <div><strong>{command.entry.caption}</strong><span>{target.database} · {target.server}</span></div>
-      <Button onClick={() => void load()} disabled={busy}><RefreshCw size={15} />Tải lại</Button>
+      <Button onClick={() => { if (!dirty || window.confirm("Bỏ thay đổi chưa lưu và tải lại menu?")) void load(); }} disabled={busy}><RefreshCw size={15} />Tải lại</Button>
       <Button onClick={() => void createNew()} disabled={busy || dirty}><Plus size={15} />Thêm mới</Button>
       <Button variant="primary" onClick={() => void save()} disabled={busy || !model?.canSave || !dirty}><Save size={15} />Lưu</Button>
     </div>
@@ -125,6 +130,6 @@ export function MenuEditor({ target, command, root, onClose, onSaved, onOpenPath
         </div>
       </aside>
     </div>
-    <div className="modal-footer"><span className="menu-editor-dirty">{dirty ? "Có thay đổi chưa lưu" : "Không có thay đổi"}</span><Button onClick={onClose}>Đóng</Button><Button variant="primary" onClick={() => void save()} disabled={busy || !dirty}><Save size={15} />Lưu</Button></div>
-  </Modal></div>;
+    <div className="modal-footer"><span className="menu-editor-dirty">{dirty ? "Có thay đổi chưa lưu" : "Không có thay đổi"}</span><Button onClick={onClose}>Đóng</Button><Button variant="primary" onClick={() => void save()} disabled={busy || !model?.canSave || !dirty}><Save size={15} />Lưu</Button></div>
+  </div>;
 }

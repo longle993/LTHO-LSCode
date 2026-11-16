@@ -2526,11 +2526,12 @@ kbd {
 .project-catalog .project-list-entry:last-child { border-bottom: 0; }
 .project-catalog .project-row { margin: 0; border-radius: 8px; }
 .project-row-content { overflow: hidden; }
-.project-row-heading { display: flex !important; align-items: baseline; gap: 9px; min-width: 0; }
+.project-row-heading { @apply !grid grid-cols-[minmax(0,180px)_minmax(0,1fr)_auto] items-center gap-3 min-w-0; }
 .project-row-heading b {
   flex: 0 0 auto;
-  min-width: 92px;
-  color: var(--accent);
+  @apply min-w-0 w-fit max-w-full rounded-lg px-2 py-1 break-words;
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
   font-size: 12px;
   font-weight: 700;
 }
@@ -2583,6 +2584,6 @@ kbd {
   .project-actions .project-sync-user { margin-left: 0; }
   .profile-grid { grid-template-columns: 1fr; }
   .profile-grid .profile-span { grid-column: auto; }
-  .project-row-heading { align-items: flex-start; flex-direction: column; gap: 2px; }
+  .project-row-heading { grid-template-columns: minmax(0, 110px) minmax(0, 1fr); gap: 8px; }
   .project-row-heading b { min-width: 0; }
 }

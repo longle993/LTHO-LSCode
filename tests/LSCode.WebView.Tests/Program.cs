@@ -14,6 +14,27 @@ Environment.SetEnvironmentVariable("LSCODE_DATA_HOME", root);
 var checks = 0;
 void Check(bool value, string name) { if (!value) throw new Exception("FAIL " + name); checks++; Console.WriteLine("PASS " + name); }
 async Task Reject<T>(Func<Task> work, string name) where T : Exception { try { await work(); throw new Exception("FAIL " + name); } catch (T) { checks++; Console.WriteLine("PASS " + name); } }
+var nextCommandMethod = typeof(DeveloperTools).Assembly.GetType("LSCode.Infrastructure.MenuEditor")!
+    .GetMethod("NextCommandId", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
+string NextCommand(HashSet<string> used) => (string)nextCommandMethod.Invoke(null, [used])!;
+Check(NextCommand([]) == "AA.00.00", "New command IDs start at AA.00.00 independently of tree IDs");
+Check(NextCommand(new(StringComparer.OrdinalIgnoreCase) { "AA.00.00", "AA.00.02", "03.10.01" }) == "AA.00.01",
+    "New command IDs reuse the first free slot");
+var fullFirstGroup = Enumerable.Range(0, 100).Select(number => $"AA.00.{number:00}").ToHashSet();
+Check(NextCommand(fullFirstGroup) == "AA.01.00", "New command IDs carry from 99 to the next group");
+var allCommandIds = Enumerable.Range(0, 10000).Select(number => $"AA.{number / 100:00}.{number % 100:00}").ToHashSet();
+try { NextCommand(allCommandIds); throw new Exception("FAIL Exhausted command IDs"); }
+catch (System.Reflection.TargetInvocationException ex) when (ex.InnerException is InvalidOperationException)
+{ Check(true, "Exhausted command IDs fail instead of generating duplicates"); }
+var debugScriptMethod = typeof(DeveloperTools).Assembly.GetType("LSCode.Infrastructure.SqlDebugLauncher")!
+    .GetMethod("Script", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
+var debugScript = (string)debugScriptMethod.Invoke(null, ["server\r\nnot-a-command", "db]name", "DECLARE @id int = 7;\r\nSELECT @id;"])!;
+Check(debugScript.Contains("USE [db]]name];\r\nGO\r\nDECLARE @id int = 7;") &&
+    debugScript.StartsWith("-- LSCode: kết nối tới server  not-a-command") &&
+    debugScript.EndsWith("SELECT @id;"), "SSDT handoff quotes the database, keeps script text and confines server metadata to a comment");
+try { debugScriptMethod.Invoke(null, ["server", "db", "  "]); throw new Exception("FAIL Empty debug script"); }
+catch (System.Reflection.TargetInvocationException ex) when (ex.InnerException is ArgumentException)
+{ Check(true, "SSDT handoff rejects an empty SQL script"); }
 await using (var provider = new ServiceCollection().AddLSCodeInfrastructure().BuildServiceProvider())
     Check(provider.GetRequiredService<IDeveloperTools>() is DeveloperTools, "Profiler resolves through its single DI registration");
 checks++;
@@ -414,6 +435,10 @@ if (args.Contains("--sql"))
     async Task<object?> Call(string method, object payload) => await tools.ExecuteAsync(method, JsonSerializer.SerializeToElement(payload, Protocol.Json), default);
     var server = Environment.GetEnvironmentVariable("LSCODE_TEST_SQL_SERVER") ?? ".";
     var admin = (TargetInfo)(await Call("sql.connect", new { server, database = "master", integratedSecurity = true, trustCertificate = true }))!;
+    var watchResult = (ExecutionResult)(await Call("sql.execute", new { targetId = admin.Id,
+        sql = "DECLARE @id int = 7; DECLARE @items table (id int); INSERT @items VALUES (@id);\n;\nSELECT (@id + 1) AS Watch; SELECT * FROM @items;" }))!;
+    Check(watchResult.Tables.Count() == 2 && watchResult.Tables[0].Rows[0][0] == "8" && watchResult.Tables[1].Rows[0][0] == "7",
+        "SQL Watch context and scalar/table queries share variable scope in a single execution");
     var database = "LSCodeWebViewTest_" + Guid.NewGuid().ToString("N");
     if (!Regex.IsMatch(database, "^LSCodeWebViewTest_[a-f0-9]{32}$")) throw new Exception("Unsafe fixture database name");
     var menuAppDatabase = database + "_App";

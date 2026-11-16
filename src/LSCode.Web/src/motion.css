@@ -3,6 +3,10 @@
 @source "./Startup.tsx";
 @source "./LoadingLine.tsx";
 @source "./features/TableTool.tsx";
+@source "./features/SqlWatchTool.tsx";
+@source "./App.tsx";
+/* `outline` is our Button variant, not Tailwind's outline utility. */
+@source not inline("outline");
 
 @theme {
   --animate-studio-enter: startup-reveal 420ms ease-out both;
