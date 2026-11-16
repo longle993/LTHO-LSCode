@@ -372,7 +372,7 @@ try{
   await page.waitForFunction(()=>window.__nativeCalls.some(c=>c.method==='clipboard.write'&&c.payload.text==='nhanvien.xml'));
   await resourceRow.click({button:'right'});
   await page.getByRole('menu',{name:'Thao tác file và thư mục'}).getByRole('menuitem',{name:'Mở thư mục chứa file',exact:true}).click();
-  await page.waitForFunction(path=>window.__nativeCalls.some(c=>c.method==='workspace.reveal'&&c.payload.path===path),dirPath);
+  await page.waitForFunction(path=>window.__nativeCalls.some(c=>c.method==='workspace.reveal'&&c.payload.path===path),dirPath+'\\nhanvien.xml');
   await resourceRow.click();
   await page.getByRole('tab',{name:'nhanvien.xml — Dir',exact:true}).waitFor();
   check(await page.getByRole('button',{name:'File',exact:true}).getAttribute('aria-selected')==='true',
@@ -471,7 +471,7 @@ try{
   await dirFile.click({button:'right'});
   const fileMenu=page.getByRole('menu',{name:'Thao tác file và thư mục'});
   await fileMenu.getByRole('menuitem',{name:'Mở thư mục chứa file',exact:true}).click();
-  await page.waitForFunction(path=>window.__nativeCalls.some(c=>c.method==='workspace.reveal'&&c.payload.path===path),dirPath);
+  await page.waitForFunction(path=>window.__nativeCalls.some(c=>c.method==='workspace.reveal'&&c.payload.path===path),dirPath+'\\nhanvien.xml');
   await dirFile.click({button:'right'});await fileMenu.getByRole('menuitem',{name:'Nhân bản file',exact:true}).click();
   await page.getByRole('tab',{name:'nhanvien_copy.xml',exact:true}).waitFor();
   await fileTree.getByTitle(dirPath+'\\nhanvien_copy.xml',{exact:true}).waitFor();

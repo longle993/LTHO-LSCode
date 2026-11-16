@@ -5,12 +5,6 @@ import { Button } from "./ui";
 export type FileMenuItem = { name: string; path: string; directory: boolean };
 export type FileMenuState = { item: FileMenuItem; x: number; y: number };
 
-export function containingFolder(path: string) {
-  const separator = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
-  if (separator < 0) return path;
-  return path.slice(0, separator === 0 || (separator === 2 && path[1] === ":") ? separator + 1 : separator);
-}
-
 export function FileActionMenu({
   menu,
   onClose,
@@ -72,7 +66,7 @@ export function FileActionMenu({
       {onRenameRequest && <Button type="button" role="menuitem" variant="ghost" onClick={() => { closeMenu(); onRenameRequest(menu.item); }}>Đổi tên <kbd>F2</kbd></Button>}
       <Button type="button" role="menuitem" variant="ghost" onClick={() => {
         closeMenu();
-        onReveal(menu.item.directory ? menu.item.path : containingFolder(menu.item.path));
+        onReveal(menu.item.path);
       }}>{menu.item.directory ? "Mở thư mục" : "Mở thư mục chứa file"}</Button>
       {!menu.item.directory && onDuplicate && <Button type="button" role="menuitem" variant="ghost" onClick={() => { closeMenu(); onDuplicate(menu.item.path); }}>Nhân bản file</Button>}
     </div>;

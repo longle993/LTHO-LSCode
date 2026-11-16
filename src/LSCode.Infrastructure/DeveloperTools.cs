@@ -257,11 +257,19 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                 finally { persistenceGate.Release(); }
                 return new { project = Project(project), targets = available };
             case "workspace.reveal":
-                var folder = S("path");
-                if (!Path.IsPathFullyQualified(folder) ||
-                    !await Task.Run(() => Directory.Exists(folder), ct))
-                    throw new DirectoryNotFoundException("Không tìm thấy thư mục dự án.");
-                Process.Start(new ProcessStartInfo(folder) { UseShellExecute = true });
+                var path = S("path");
+                if (!Path.IsPathFullyQualified(path))
+                    throw new ArgumentException("Đường dẫn phải là tuyệt đối.");
+
+                var isFile = await Task.Run(() => File.Exists(path), ct);
+                var isDirectory = isFile || await Task.Run(() => Directory.Exists(path), ct);
+                if (!isDirectory)
+                    throw new FileNotFoundException("Không tìm thấy file hoặc thư mục.", path);
+
+                if (isFile)
+                    Process.Start(new ProcessStartInfo("explorer.exe", "/select,\"" + path + "\"") { UseShellExecute = true });
+                else
+                    Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
                 return true;
             case "workspace.duplicate":
                 return await WorkspaceFiles.DuplicateAsync(S("path"), ct);
