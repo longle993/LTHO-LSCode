@@ -236,6 +236,7 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
     [status, setStatus] = useState(""),
     [dataError, setDataError] = useState("");
   const task = useTask();
+  const [saveSlot, setSaveSlot] = useState<HTMLSpanElement | null>(null);
   const [previewPending, startPreviewTransition] = useTransition();
   const reading = useRef<ReturnType<typeof operation<Preview>>>();
   const [showQueryCancel, setShowQueryCancel] = useState(false);
@@ -489,10 +490,16 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
     onCaptureData(target, tableName, where.trim() || "1=1");
     setStatus(`Đã gửi ${tableName}: ${where.trim() || "1=1"} vào SQL Data.`);
   }
-  function generateScript(kind: "create" | "drop") {
+  function generateScript(kind: "create" | "drop" | "insert") {
     setScriptMenu(false);
     void task.run(async () => {
       if (!table || !schema || !targetId) return;
+      if (kind === "insert") {
+        if (!currentPreview?.data.rows.length) return;
+        const script = await request<string>("table.insertScript", { scope, snapshotId: currentPreview.snapshotId });
+        onText(script, table + "-insert.sql");
+        return;
+      }
       if (kind === "drop") {
         const qualified = quoteSqlName(schema, table);
         onText(`IF OBJECT_ID(N'${qualified.replaceAll("'", "''")}', N'U') IS NOT NULL\r\nDROP TABLE ${qualified}\r\nGO\r\n`, table + "-drop.sql");
@@ -599,6 +606,13 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
   ];
   const toolbarControls = <div className="table-toolbar-controls">
     {targets.length > 0 && <Select floating label="Cơ sở dữ liệu" value={targetId ?? ""} disabled={task.busy || !!drop}
+      onContextMenu={(event) => {
+        if (!target) return;
+        event.preventDefault();
+        void writeClipboard(target.database)
+          .then(() => setStatus("Đã sao chép tên cơ sở dữ liệu."))
+          .catch((error: Error) => setStatus(error.message));
+      }}
       options={targets.map((entry) => ({
         value: entry.id,
         label: /_S(?:ys)?$/i.test(entry.database) ? "Sys" : "App",
@@ -617,6 +631,8 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
       {scriptMenu && <div ref={scriptPopup} className="table-action-menu table-script-menu" role="menu" aria-label="Loại lệnh SQL">
         <Button role="menuitem" variant="ghost" onClick={captureSqlDataKey}>Thêm key vào SQL Data<kbd>Ctrl+D</kbd></Button>
         <Button role="menuitem" variant="ghost" onClick={() => generateScript("create")}>Tạo lệnh tạo bảng</Button>
+        <Button role="menuitem" variant="ghost" disabled={!view?.rows.length || previewPending}
+          onClick={() => generateScript("insert")}>Tạo lệnh INSERT cho kết quả hiện tại</Button>
         <Button role="menuitem" variant="ghost" onClick={() => generateScript("drop")}>Tạo lệnh xóa bảng</Button>
       </div>}
     </div>
@@ -628,7 +644,7 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
       onKeyDown={event => {
         if (visible && !event.defaultPrevented && (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "s") {
           event.preventDefault();
-          event.currentTarget.querySelector<HTMLButtonElement>(".table-save-bar button")?.click();
+          saveSlot?.querySelector("button")?.click();
           return;
         }
         if (!visible || !(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey || event.key.toLowerCase() !== "d") return;
@@ -650,9 +666,12 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
             onChange={setInput} onChoose={chooseTable} disabled={task.busy} focus={visible} className="table-query-from"
             onSubmit={() => { if (canRead) void readData(); }} />
           <label className="table-readonly"><input type="checkbox" checked={readonly} onChange={(event) => setReadonly(event.target.checked)} /> Readonly</label>
-          <Button variant="primary" disabled={!canRead} onClick={() => void readData()}>
-            <Play size={14} />Chạy
-          </Button>
+          <div className="table-query-actions">
+            <Button variant="primary" disabled={!canRead} onClick={() => void readData()}>
+              <Play size={14} />Chạy
+            </Button>
+            <span ref={setSaveSlot}>{(!currentPreview?.data || !currentMetadata) && <Button disabled>Lưu</Button>}</span>
+          </div>
           <span className="table-query-cancel-slot">
             {showQueryCancel && reading.current && <Button onClick={() => void reading.current?.cancel()}>Dừng</Button>}
           </span>
@@ -706,6 +725,7 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
         </aside>
         <section className="table-inspection-content">
           {currentPreview?.data && currentMetadata ? <TableDataGrid
+            saveSlot={saveSlot}
             table={currentPreview.data} metadata={currentMetadata} readonly={readonly} busy={task.busy || previewPending} onCommit={commitRows}
             emptyMessage={filterField && (filterOperator === "IS NULL" || filterOperator === "IS NOT NULL" || filterValue.trim())
               ? "Không tìm thấy dữ liệu phù hợp."

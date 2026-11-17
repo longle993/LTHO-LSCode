@@ -641,6 +641,15 @@ try{
   await page.getByRole('menuitem',{name:'Tạo lệnh xóa bảng',exact:true}).click();
   await page.getByRole('tab',{name:'DanhMuc-drop.sql'}).waitFor();
   check(true,'Table action menu captures SQL Data keys and opens create/drop scripts');
+  await firstTableTab.click();
+  const queryActions = tablePanel.locator('.table-query-actions');
+  check(await queryActions.getByRole('button',{name:'Chạy',exact:true}).isVisible() &&
+    await queryActions.getByRole('button',{name:'Lưu',exact:true}).isVisible(),'Save sits alongside Run');
+  await page.getByRole('button',{name:'Tập lệnh',exact:true}).click();
+  await page.getByRole('menuitem',{name:'Tạo lệnh INSERT cho kết quả hiện tại'}).click();
+  await page.getByRole('tab',{name:'DanhMuc-insert.sql'}).waitFor();
+  check(await page.evaluate(()=>window.__nativeCalls.some(call=>call.method==='table.insertScript' &&
+    call.payload.scope && call.payload.snapshotId==='fixture-preview')), 'INSERT exports the current scoped snapshot');
   await page.keyboard.press('Control+Shift+t');
   const secondTableTab=page.getByRole('tab',{name:/^Cấu trúc và dữ liệu 2/});
   const secondTablePanel=page.locator('#'+await secondTableTab.getAttribute('aria-controls'));
@@ -660,6 +669,9 @@ try{
   await secondTableTab.click();
   const tableDatabase=page.getByRole('button',{name:'Cơ sở dữ liệu',exact:true});
   const nextDb=(await tableDatabase.textContent()).includes('App')?'Sys':'App';
+  await tableDatabase.click({button:'right'});
+  await page.waitForFunction(name=>window.__nativeCalls.filter(call=>call.method==='clipboard.write').at(-1)?.payload.text===name,
+    nextDb==='Sys'?'Fixture_App':'Fixture_Sys');
   await tableDatabase.click();
   check(await page.getByRole('option',{name:nextDb,exact:true}).isVisible(),'App/Sys database dropdown renders above the workspace');
   await page.keyboard.press('Escape');
