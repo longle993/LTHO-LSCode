@@ -44,7 +44,7 @@ export default function ControllerExplorer({
   onToggleFile?: (path: string, checked: boolean) => void;
   files?: string[];
   activePath?: string | null;
-  onOpen: (path: string) => void;
+  onOpen?: (path: string) => void;
   onCopy: (text: string) => void;
   onReveal: (path: string) => void;
   onDuplicate?: (path: string) => void;
@@ -53,6 +53,7 @@ export default function ControllerExplorer({
   emptyMessage?: string;
 }) {
   const [collapsed, setCollapsed] = useState(new Set<string>());
+  const checkedPaths = useMemo(() => new Set(selectedFiles?.map(pathKey)), [selectedFiles]);
   const directories = useMemo(() => {
     const result = new Map<string, Map<string, ExplorerItem>>();
     for (const file of files ?? []) {
@@ -135,9 +136,9 @@ export default function ControllerExplorer({
         className="tree-row"
         aria-current={item.path.toLowerCase() === activePath?.toLowerCase() ? "page" : undefined}
         {...actions(item)}
-        onClick={() => onOpen(item.path)}
+        onClick={() => onOpen ? onOpen(item.path) : onToggleFile?.(item.path, !checkedPaths.has(pathKey(item.path)))}
       >{onToggleFile && <input type="checkbox" aria-label={"Chọn " + item.name}
-        checked={selectedFiles?.some(path => path.toLowerCase() === item.path.toLowerCase()) ?? false}
+        checked={checkedPaths.has(pathKey(item.path))}
         onClick={event => event.stopPropagation()}
         onChange={event => onToggleFile(item.path, event.target.checked)} />}
         <FileIcon path={item.path} /><span>{item.name}</span></button>;

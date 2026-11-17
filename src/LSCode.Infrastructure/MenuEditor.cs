@@ -140,7 +140,7 @@ internal static class MenuEditor
     private static async Task<Field[]> FieldsAsync(SqlConnection connection, SqlTransaction? transaction, CancellationToken token)
     {
         const string sql = "SELECT c.name,t.name,c.max_length,c.is_nullable,c.is_identity,c.is_computed,CASE WHEN c.default_object_id=0 THEN 0 ELSE 1 END FROM sys.columns c JOIN sys.types t ON c.user_type_id=t.user_type_id WHERE c.object_id=OBJECT_ID('dbo.wcommand') ORDER BY c.column_id";
-        await using var command = new SqlCommand(sql, connection, transaction);
+        await using var command = new SqlCommand(sql, connection, transaction) { CommandTimeout = 0 };
         await using var reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);
         var all = new List<Field>();
         while (await reader.ReadAsync(token).ConfigureAwait(false))
@@ -157,7 +157,7 @@ internal static class MenuEditor
     {
         var hint = lockRow ? " WITH (UPDLOCK,HOLDLOCK)" : "";
         var sql = $"SELECT {string.Join(',', fields.Select(field => Quote(field.Name)))} FROM dbo.wcommand{hint} WHERE RTRIM(wmenu_id)=@id";
-        await using var command = new SqlCommand(sql, connection, transaction);
+        await using var command = new SqlCommand(sql, connection, transaction) { CommandTimeout = 0 };
         command.Parameters.AddWithValue("@id", id);
         await using var reader = await command.ExecuteReaderAsync(CommandBehavior.SingleRow, token).ConfigureAwait(false);
         if (!await reader.ReadAsync(token).ConfigureAwait(false)) return null;
@@ -175,12 +175,12 @@ internal static class MenuEditor
         var usedSql = hasMenuId
             ? "SELECT RTRIM(wmenu_id) FROM dbo.wcommand UNION SELECT RTRIM(menu_id) FROM dbo.wcommand WHERE menu_id IS NOT NULL"
             : "SELECT RTRIM(wmenu_id) FROM dbo.wcommand";
-        await using (var command = new SqlCommand(usedSql, connection, transaction))
+        await using (var command = new SqlCommand(usedSql, connection, transaction) { CommandTimeout = 0 })
         await using (var reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false))
             while (await reader.ReadAsync(token).ConfigureAwait(false)) used.Add(reader.GetString(0));
         if (await HasColumnAsync(connection, transaction, "dbo.command", "menu_id", token).ConfigureAwait(false))
         {
-            await using var command = new SqlCommand("SELECT RTRIM(menu_id) FROM dbo.command WHERE menu_id IS NOT NULL", connection, transaction);
+            await using var command = new SqlCommand("SELECT RTRIM(menu_id) FROM dbo.command WHERE menu_id IS NOT NULL", connection, transaction) { CommandTimeout = 0 };
             await using var reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);
             while (await reader.ReadAsync(token).ConfigureAwait(false)) used.Add(reader.GetString(0));
         }
@@ -198,7 +198,7 @@ internal static class MenuEditor
         foreach (var table in new[] { "dbo.wcommand", "dbo.command" })
         {
             if (!await HasColumnAsync(connection, null, table, "menu_id", token).ConfigureAwait(false)) continue;
-            await using var command = new SqlCommand($"SELECT RTRIM(menu_id) FROM {table} WHERE menu_id LIKE 'AA.__.__'", connection);
+            await using var command = new SqlCommand($"SELECT RTRIM(menu_id) FROM {table} WHERE menu_id LIKE 'AA.__.__'", connection) { CommandTimeout = 0 };
             await using var reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);
             while (await reader.ReadAsync(token).ConfigureAwait(false)) used.Add(reader.GetString(0));
         }
@@ -221,19 +221,19 @@ internal static class MenuEditor
         var sql = hasMenuId
             ? "SELECT CASE WHEN EXISTS(SELECT 1 FROM dbo.wcommand WITH (UPDLOCK,HOLDLOCK) WHERE RTRIM(wmenu_id)=@tree OR RTRIM(menu_id)=@command) THEN 1 ELSE 0 END"
             : "SELECT CASE WHEN EXISTS(SELECT 1 FROM dbo.wcommand WITH (UPDLOCK,HOLDLOCK) WHERE RTRIM(wmenu_id)=@tree) THEN 1 ELSE 0 END";
-        await using var command = new SqlCommand(sql, connection, transaction);
+        await using var command = new SqlCommand(sql, connection, transaction) { CommandTimeout = 0 };
         command.Parameters.AddWithValue("@tree", treeId);
         command.Parameters.AddWithValue("@command", commandId ?? treeId);
         var exists = Convert.ToInt32(await command.ExecuteScalarAsync(token).ConfigureAwait(false)) == 1;
         if (exists || !await HasColumnAsync(connection, transaction, "dbo.command", "menu_id", token).ConfigureAwait(false)) return exists;
-        await using var other = new SqlCommand("SELECT CASE WHEN EXISTS(SELECT 1 FROM dbo.command WITH (UPDLOCK,HOLDLOCK) WHERE RTRIM(menu_id)=@id) THEN 1 ELSE 0 END", connection, transaction);
+        await using var other = new SqlCommand("SELECT CASE WHEN EXISTS(SELECT 1 FROM dbo.command WITH (UPDLOCK,HOLDLOCK) WHERE RTRIM(menu_id)=@id) THEN 1 ELSE 0 END", connection, transaction) { CommandTimeout = 0 };
         other.Parameters.AddWithValue("@id", commandId ?? treeId);
         return Convert.ToInt32(await other.ExecuteScalarAsync(token).ConfigureAwait(false)) == 1;
     }
 
     private static async Task<bool> HasColumnAsync(SqlConnection connection, SqlTransaction? transaction, string table, string column, CancellationToken token)
     {
-        await using var command = new SqlCommand("SELECT CASE WHEN COL_LENGTH(@table,@column) IS NULL THEN 0 ELSE 1 END", connection, transaction);
+        await using var command = new SqlCommand("SELECT CASE WHEN COL_LENGTH(@table,@column) IS NULL THEN 0 ELSE 1 END", connection, transaction) { CommandTimeout = 0 };
         command.Parameters.AddWithValue("@table", table); command.Parameters.AddWithValue("@column", column);
         return Convert.ToInt32(await command.ExecuteScalarAsync(token).ConfigureAwait(false)) == 1;
     }
@@ -263,7 +263,7 @@ internal static class MenuEditor
 
     private static async Task ExecuteAsync(SqlConnection connection, SqlTransaction transaction, string sql, SqlParameter[] parameters, CancellationToken token)
     {
-        await using var command = new SqlCommand(sql, connection, transaction); command.Parameters.AddRange(parameters);
+        await using var command = new SqlCommand(sql, connection, transaction) { CommandTimeout = 0 }; command.Parameters.AddRange(parameters);
         if (await command.ExecuteNonQueryAsync(token).ConfigureAwait(false) != 1) throw new DBConcurrencyException("Không cập nhật được menu.");
     }
 

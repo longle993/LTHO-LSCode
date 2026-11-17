@@ -63,6 +63,7 @@ export type Bootstrap = {
 };
 type Native = {
   postMessage: (data: unknown) => void;
+  postMessageWithAdditionalObjects?: (data: unknown, objects: File[]) => void;
   addEventListener: (type: "message", fn: (e: MessageEvent) => void) => void;
 };
 declare global {
@@ -76,7 +77,8 @@ const pending = new Map<
   string,
   { resolve: (value: unknown) => void; reject: (reason: Error) => void }
 >();
-const listeners = new Set<(event: { type: string }) => void>();
+export type NativeEvent = { type: string; paths?: string[] };
+const listeners = new Set<(event: NativeEvent) => void>();
 export const native = Boolean(window.chrome?.webview);
 window.chrome?.webview?.addEventListener("message", (event) => {
   const data = event.data;
@@ -96,7 +98,7 @@ window.chrome?.webview?.addEventListener("message", (event) => {
     );
   else item.resolve(data.result);
 });
-export function subscribe(fn: (e: { type: string }) => void) {
+export function subscribe(fn: (e: NativeEvent) => void) {
   listeners.add(fn);
   return () => {
     listeners.delete(fn);

@@ -92,7 +92,7 @@ export function ProjectDialog({ projects, lastAccess, onProjects, onOpen, onClos
   async function syncStandard(user: string) {
     await task.run(async () => {
       const current = operation<{ summary: SyncSummary; projects: Project[] }>("project.standard.sync",
-        { currentUser: user.trim() }, 180_000);
+        { currentUser: user.trim() });
       pending.current = current;
       const result = await current.promise;
       onProjects(result.projects);

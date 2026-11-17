@@ -62,7 +62,7 @@ class Program
                 stage = "kiểm tra ALTER TRACE trên " + builder.DataSource;
                 using (var permission = connection.CreateCommand()) {
                     permission.CommandText="SELECT HAS_PERMS_BY_NAME(NULL,NULL,'ALTER TRACE')";
-                    permission.CommandTimeout=10;
+                    permission.CommandTimeout=0;
                     if (Convert.ToString(permission.ExecuteScalar()) != "1")
                         throw new InvalidOperationException("Tài khoản kết nối được nhưng thiếu quyền ALTER TRACE trên server " + builder.DataSource + ". Chọn tài khoản Profiler có quyền này trong Kết nối… hoặc nhờ DBA cấp quyền.");
                 }

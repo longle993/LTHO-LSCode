@@ -5,6 +5,8 @@ using LSCode.Domain;
 using LSCode.Infrastructure;
 using LSCode.Contracts;
 using LSCode.Application;
+using LSCode.Shell.Services;
+using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.DependencyInjection;
 using System.Text.RegularExpressions;
 
@@ -49,6 +51,36 @@ Check(File.Exists(savedNotes.FilePath) && loadedNotes.Items.Length == 1 &&
     "Advance Note persists request, ERP menu and source files in project XML");
 await Reject<InvalidDataException>(() => AdvanceNoteStore.SaveAsync(noteProject,
     [noteItem with { Title = "" }], default), "Advance Note rejects requests without a title");
+var updateProjectRoot = Directory.CreateDirectory(Path.Combine(root, "update-project")).FullName;
+var updateSourceFolder = Directory.CreateDirectory(Path.Combine(updateProjectRoot, "App_Data", "Controllers", "Dir")).FullName;
+var updateSource = Path.Combine(updateSourceFolder, "PNTran.f");
+await File.WriteAllTextAsync(updateSource, "source");
+var updateOutput = Path.Combine(root, "generated-update");
+var updateItem = noteItem with
+{
+    Title = "Phiếu nhập / kiểm tra",
+    SourceFiles = [updateSource],
+    Sql = new Dictionary<string, AdvanceNoteSql>
+    {
+        ["App"] = new("ALTER PROCEDURE dbo.PNTran AS SELECT 1", "UPDATE dmvt SET status = '1'", "SET NOCOUNT ON"),
+        ["Sys"] = new("", "UPDATE command SET status = '1'", "")
+    }
+};
+var generatedUpdate = await AdvanceNoteUpdateGenerator.GenerateAsync(updateProjectRoot, updateOutput, updateItem, default);
+var appScript = generatedUpdate.ScriptFiles.Single(path => path.Contains($"{Path.DirectorySeparatorChar}App{Path.DirectorySeparatorChar}"));
+var scriptBytes = await File.ReadAllBytesAsync(appScript);
+var scriptText = await File.ReadAllTextAsync(appScript, Encoding.Unicode);
+Check(generatedUpdate.FileCount == 1 && Path.GetDirectoryName(generatedUpdate.OutputPath) == updateOutput &&
+    File.Exists(Path.Combine(generatedUpdate.OutputPath, "App_Data", "Controllers", "Dir", "PNTran.f")) &&
+    scriptBytes.AsSpan().StartsWith(Encoding.Unicode.GetPreamble()) &&
+    scriptText.IndexOf("-- TOP SCRIPT", StringComparison.Ordinal) < scriptText.IndexOf("-- OBJECT", StringComparison.Ordinal) &&
+    scriptText.IndexOf("-- OBJECT", StringComparison.Ordinal) < scriptText.IndexOf("-- DATA", StringComparison.Ordinal),
+    "Generate Update copies selected source relatively and writes ordered UTF16 App/Sys SQL scripts");
+var generatedAgain = await AdvanceNoteUpdateGenerator.GenerateAsync(updateProjectRoot, updateOutput, updateItem, default);
+Check(generatedAgain.OutputPath != generatedUpdate.OutputPath && File.Exists(appScript),
+    "Each Generate Update creates a separate package and retains the first package");
+await Reject<InvalidOperationException>(() => AdvanceNoteUpdateGenerator.GenerateAsync(updateProjectRoot, updateOutput,
+    updateItem with { SourceFiles = [], Sql = null }, default), "Generate Update rejects empty packages");
 var workspace = new DocumentWorkspace();
 var path = Path.Combine(root, "unicode.xml");
 var encoding = new UnicodeEncoding(false, true, true);
@@ -766,6 +798,40 @@ if (args.Contains("--sql"))
         var insert = (string)(await Call("table.insertScript", new { snapshotId = view.GetProperty("snapshotId").GetString() }))!;
         Check(view.GetProperty("data").GetProperty("rows").GetArrayLength() == 1 && insert.Contains("N'Việt'' Nam'")
             && insert.Contains("0x0AFF") && insert.Contains("IDENTITY_INSERT") && !insert.Contains("[version]"), "Insert script uses the filtered snapshot and skips rowversion");
+        await Call("sql.execute", new { targetId = target.Id, sql = """
+            CREATE PROCEDURE dbo.advance_proc_fixture AS SELECT 1;
+            GO
+            CREATE FUNCTION dbo.advance_function_fixture() RETURNS int AS BEGIN RETURN 1 END;
+            """ });
+        var updateConnection = new SqlConnectionStringBuilder
+        {
+            DataSource = server, InitialCatalog = database, IntegratedSecurity = true,
+            TrustServerCertificate = true, Encrypt = SqlConnectionEncryptOption.Optional,
+        };
+        var generatedSqlUpdate = await AdvanceNoteUpdateGenerator.GenerateAsync(updateProjectRoot, updateOutput,
+            noteItem with
+            {
+                Title = "Object và data",
+                SourceFiles = [],
+                Sql = new Dictionary<string, AdvanceNoteSql>
+                {
+                    ["App"] = new("dbo.insert_fixture\ndbo.advance_proc_fixture\ndbo.advance_function_fixture",
+                        "dbo.insert_fixture: id=1", "SET NOCOUNT ON"),
+                },
+            }, new Dictionary<string, SqlTarget>
+            {
+                ["App"] = new(server, database, updateConnection.ConnectionString),
+            }, default);
+        var generatedSql = await File.ReadAllTextAsync(generatedSqlUpdate.ScriptFiles.Single(), Encoding.Unicode);
+        Check(generatedSql.Contains("DROP TABLE [dbo].[insert_fixture]") &&
+            generatedSql.Contains("CREATE TABLE [dbo].[insert_fixture]") &&
+            generatedSql.Contains("DROP PROCEDURE [dbo].[advance_proc_fixture]") &&
+            generatedSql.Contains("CREATE PROCEDURE dbo.advance_proc_fixture") &&
+            generatedSql.Contains("DROP FUNCTION [dbo].[advance_function_fixture]") &&
+            generatedSql.Contains("CREATE FUNCTION dbo.advance_function_fixture") &&
+            generatedSql.Contains("-- dbo.insert_fixture: id=1") &&
+            generatedSql.Contains("N'Việt'' Nam'") && !generatedSql.Contains("0x00"),
+            "Advance Note expands object names to DROP/CREATE and filtered table keys to INSERT data");
         var secondView = JsonSerializer.SerializeToElement(await Call("table.view", new
         {
             scope = "inspection-2", targetId = target.Id, table = "insert_fixture", where = "id=2",

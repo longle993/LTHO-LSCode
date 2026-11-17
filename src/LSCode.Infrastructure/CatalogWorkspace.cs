@@ -144,7 +144,7 @@ internal sealed class CatalogWorkspace
         var name = Qualified(draft.Schema, draft.Table);
         // Re-read metadata on the same connection/transaction before every write.
         var current = new DataTable();
-        await using (var check = new SqlCommand(MetadataSql, connection, tx))
+        await using (var check = new SqlCommand(MetadataSql, connection, tx) { CommandTimeout = 0 })
         {
             check.Parameters.AddWithValue("@object", name);
             await using var reader = await check.ExecuteReaderAsync(ct); current.Load(reader);
@@ -152,10 +152,10 @@ internal sealed class CatalogWorkspace
         if (!draft.Creating && Signature(current) != draft.Signature) throw new InvalidOperationException("Cấu trúc đã thay đổi. Tạo preview mới.");
         if (draft.Rows.Length == 0 && draft.Sql.Length > 0)
         {
-            await using var cmd = new SqlCommand(draft.Sql, connection, tx); await cmd.ExecuteNonQueryAsync(ct);
+            await using var cmd = new SqlCommand(draft.Sql, connection, tx) { CommandTimeout = 0 }; await cmd.ExecuteNonQueryAsync(ct);
             if (draft.Creating)
             {
-                await using var marker = new SqlCommand("EXEC sys.sp_addextendedproperty @name=N'LSCode.Catalog',@value=1,@level0type=N'SCHEMA',@level0name=@schema,@level1type=N'TABLE',@level1name=@table", connection, tx);
+                await using var marker = new SqlCommand("EXEC sys.sp_addextendedproperty @name=N'LSCode.Catalog',@value=1,@level0type=N'SCHEMA',@level0name=@schema,@level1type=N'TABLE',@level1name=@table", connection, tx) { CommandTimeout = 0 };
                 marker.Parameters.AddWithValue("@schema", draft.Schema); marker.Parameters.AddWithValue("@table", draft.Table); await marker.ExecuteNonQueryAsync(ct);
             }
         }
@@ -180,7 +180,7 @@ internal sealed class CatalogWorkspace
                 columns.Add(CatalogDefinition.Quote(fieldName)); values.Add("@p" + i); parameters.Add(parameter);
             }
             var sql = columns.Count == 0 ? "INSERT INTO " + name + " DEFAULT VALUES" : "INSERT INTO " + name + " (" + string.Join(",", columns) + ") VALUES (" + string.Join(",", values) + ")";
-            await using var insert = new SqlCommand(sql, connection, tx); insert.Parameters.AddRange(parameters.ToArray()); await insert.ExecuteNonQueryAsync(ct);
+            await using var insert = new SqlCommand(sql, connection, tx) { CommandTimeout = 0 }; insert.Parameters.AddRange(parameters.ToArray()); await insert.ExecuteNonQueryAsync(ct);
         }
         ct.ThrowIfCancellationRequested();
         // Never retry an ambiguous commit; the preview token has already been consumed.

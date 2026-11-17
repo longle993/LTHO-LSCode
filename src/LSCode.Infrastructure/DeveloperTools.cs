@@ -129,6 +129,20 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                 var advanceNotes = p.TryGetProperty("items", out var noteItems)
                     ? noteItems.Deserialize<AdvanceNoteItem[]>(Json) ?? [] : [];
                 return await AdvanceNoteStore.SaveAsync(S("projectId"), advanceNotes, ct);
+            case "advanceNote.generateUpdate":
+                var updateItem = p.GetProperty("item").Deserialize<AdvanceNoteItem>(Json)
+                    ?? throw new ArgumentException("Yêu cầu Generate Update không hợp lệ.");
+                var updateProject = ProjectStore.Load().FirstOrDefault(project => project.Id == S("projectId"))
+                    ?? throw new InvalidOperationException("Dự án đã bị xóa khỏi danh sách.");
+                var updateTargets = new Dictionary<string, SqlTarget>(StringComparer.OrdinalIgnoreCase);
+                foreach (var (database, property) in new[] { ("App", "appTargetId"), ("Sys", "sysTargetId") })
+                {
+                    var id = S(property);
+                    if (id.Length > 0 && targets.TryGetValue(id, out var registered))
+                        updateTargets[database] = registered.Connection;
+                }
+                return await AdvanceNoteUpdateGenerator.GenerateAsync(S("root"), UpdatePath(updateProject), updateItem,
+                    updateTargets, ct);
             case "studio.bootstrap":
                 return await Task.Run(() => new
                 {

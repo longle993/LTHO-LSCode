@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { Search } from "lucide-react";
 import { Button, Modal, Select } from "../ui";
 import type { Settings } from "../bridge";
+import { keyboardGesture, shortcutGroupFor, shortcutGroups } from "../commands";
 import { useTask } from "./useTask";
 export function SettingsDialog({
   settings,
@@ -17,8 +19,18 @@ export function SettingsDialog({
       ...settings,
       shortcuts: { ...settings.shortcuts },
     }),
-    [section, setSection] = useState("general");
+    [section, setSection] = useState("general"),
+    [shortcutQuery, setShortcutQuery] = useState("");
   const task = useTask();
+  const groupedShortcuts = useMemo(() => {
+    const query = shortcutQuery.trim().toLocaleLowerCase();
+    return shortcutGroups.map(group => ({
+      ...group,
+      commands: commands.filter(([id, label, key]) =>
+        shortcutGroupFor(id) === group.id &&
+        (!query || `${label} ${id} ${key}`.toLocaleLowerCase().includes(query))),
+    })).filter(group => group.commands.length);
+  }, [commands, shortcutQuery]);
   function validate() {
     const used = new Map<string, string>();
     for (const [id, label, key] of commands) {
@@ -36,20 +48,26 @@ export function SettingsDialog({
   return (
     <Modal title="Cài đặt không gian làm việc" onClose={onClose} wide>
       <div className="tool-body">
-        <div className="tool-toolbar">
+        <div className="settings-tabs" role="tablist" aria-label="Nhóm cài đặt">
           <Button
+            role="tab"
+            aria-selected={section === "general"}
             variant={section === "general" ? "secondary" : "ghost"}
             onClick={() => setSection("general")}
           >
-            Giao diện & công cụ
+            Giao diện
           </Button>
           <Button
+            role="tab"
+            aria-selected={section === "activity"}
             variant={section === "activity" ? "secondary" : "ghost"}
             onClick={() => setSection("activity")}
           >
             Lối tắt bên trái
           </Button>
           <Button
+            role="tab"
+            aria-selected={section === "shortcuts"}
             variant={section === "shortcuts" ? "secondary" : "ghost"}
             onClick={() => setSection("shortcuts")}
           >
@@ -132,55 +150,50 @@ export function SettingsDialog({
             }
           />
         ) : (
-          <div className="tool-list" style={{ maxHeight: 420 }}>
-            {commands.map(([id, label, key]) => (
-              <div className="form-row" style={{ padding: 8 }} key={id}>
-                <span>{label}</span>
-                <div style={{ display: "flex", gap: 8 }}>
-                  {[0, 1].map((slot) => (
-                    <input
-                      key={slot}
-                      aria-label={`${label} phím ${slot + 1}`}
-                      value={(draft.shortcuts[id] ?? [key, ""])[slot] ?? ""}
-                      readOnly
-                      onKeyDown={(e) => {
-                        if (e.key === "Tab") return;
-                        e.preventDefault();
-                        if (["Control", "Shift", "Alt", "Meta"].includes(e.key))
-                          return;
-                        const values = [...(draft.shortcuts[id] ?? [key, ""])];
-                        values[slot] = ["Backspace", "Delete"].includes(e.key)
-                          ? ""
-                          : [
-                              e.ctrlKey ? "Ctrl" : "",
-                              e.shiftKey ? "Shift" : "",
-                              e.altKey ? "Alt" : "",
-                              e.key === " "
-                                ? "Space"
-                                : e.key.length === 1
-                                  ? e.key.toUpperCase()
-                                  : e.key,
-                            ]
-                              .filter(Boolean)
-                              .join("+");
-                        setDraft({
-                          ...draft,
-                          shortcuts: { ...draft.shortcuts, [id]: values },
-                        });
-                      }}
-                    />
-                  ))}
-                </div>
-              </div>
-            ))}
+          <div className="shortcut-settings">
+            <label className="shortcut-search">
+              <Search size={16} aria-hidden="true" />
+              <input type="search" aria-label="Tìm phím tắt" placeholder="Tìm lệnh hoặc phím tắt…"
+                value={shortcutQuery} onChange={event => setShortcutQuery(event.target.value)} />
+            </label>
+            <div className="shortcut-groups">
+              {groupedShortcuts.map(group => <section className="shortcut-group" key={group.id}>
+                <h3>{group.label}</h3>
+                {group.commands.map(([id, label, key]) => (
+                  <div className="shortcut-row" key={id}>
+                    <div><span>{label}</span><small>{id}</small></div>
+                    <div className="shortcut-inputs">
+                      {[0, 1].map((slot) => (
+                        <input
+                          key={slot}
+                          aria-label={`${label} phím ${slot + 1}`}
+                          value={(draft.shortcuts[id] ?? [key, ""])[slot] ?? ""}
+                          placeholder={slot === 0 ? "Chưa đặt" : "Phím phụ"}
+                          readOnly
+                          onKeyDown={(e) => {
+                            if (e.key === "Tab") return;
+                            e.preventDefault();
+                            if (["Control", "Shift", "Alt", "Meta"].includes(e.key)) return;
+                            const values = [...(draft.shortcuts[id] ?? [key, ""])];
+                            values[slot] = ["Backspace", "Delete"].includes(e.key) ? "" : keyboardGesture(e.nativeEvent);
+                            setDraft({ ...draft, shortcuts: { ...draft.shortcuts, [id]: values } });
+                          }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </section>)}
+              {!groupedShortcuts.length && <p className="empty">Không tìm thấy phím tắt phù hợp.</p>}
+            </div>
           </div>
         )}
         <p className="form-error">{task.error}</p>
       </div>
       <div className="modal-footer">
-        <Button onClick={() => setDraft({ ...draft, shortcuts: {} })}>
+        {section === "shortcuts" && <Button onClick={() => setDraft({ ...draft, shortcuts: {} })}>
           Khôi phục phím mặc định
-        </Button>
+        </Button>}
         <Button onClick={onClose}>Hủy</Button>
         <Button
           variant="primary"

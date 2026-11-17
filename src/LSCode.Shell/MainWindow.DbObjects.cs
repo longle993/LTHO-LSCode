@@ -74,7 +74,7 @@ public partial class MainWindow
         if (state.Busy || generation.IsCancellationRequested) return;
         state.Busy = true;
         using var busy = BeginBusy("Đang tải " + folder.Header + "…");
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(generation); timeout.CancelAfter(TimeSpan.FromSeconds(30));
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(generation);
         try
         {
             state.Target ??= await DefaultAppTargetAsync(); timeout.Token.ThrowIfCancellationRequested();

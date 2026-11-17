@@ -14,7 +14,7 @@ internal static class TableInspection
         await using var connection = new SqlConnection(target.ConnectionString);
         await connection.OpenAsync(ct).ConfigureAwait(false);
         var sql = $"ALTER TABLE {qualified} DROP COLUMN {string.Join(", ", names.Select(ProjectDatabase.Quote))};";
-        await using var command = new SqlCommand(sql, connection) { CommandTimeout = 30 };
+        await using var command = new SqlCommand(sql, connection) { CommandTimeout = 0 };
         await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 

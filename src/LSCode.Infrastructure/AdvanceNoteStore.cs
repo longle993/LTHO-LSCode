@@ -35,16 +35,16 @@ public static class AdvanceNoteStore
                 MaxCharactersInDocument = 16 * 1024 * 1024,
             });
             var document = await XDocument.LoadAsync(reader, LoadOptions.None, cancellationToken);
-            var root = document.Root ?? throw new InvalidDataException("File Advance Note không có phần tử gốc.");
-            if (root.Name.LocalName != "advanceNotes") throw new InvalidDataException("File Advance Note không đúng định dạng.");
+            var root = document.Root ?? throw new InvalidDataException("File Generate Update không có phần tử gốc.");
+            if (root.Name.LocalName != "advanceNotes") throw new InvalidDataException("File Generate Update không đúng định dạng.");
             if (!string.Equals((string?)root.Attribute("projectId"), projectId, StringComparison.Ordinal))
-                throw new InvalidDataException("File Advance Note không thuộc dự án đang mở.");
+                throw new InvalidDataException("File Generate Update không thuộc dự án đang mở.");
             return new(projectId, root.Elements("request").Select(ReadItem)
                 .OrderByDescending(item => item.UpdatedAt).ToArray(), path);
         }
         catch (XmlException exception)
         {
-            throw new InvalidDataException("Không đọc được XML Advance Note. " + exception.Message, exception);
+            throw new InvalidDataException("Không đọc được XML Generate Update. " + exception.Message, exception);
         }
         finally { Gate.Release(); }
     }
@@ -115,7 +115,7 @@ public static class AdvanceNoteStore
 
     private static void ValidateItems(IReadOnlyCollection<AdvanceNoteItem> items)
     {
-        if (items.Count > 10_000) throw new InvalidDataException("Advance Note vượt quá 10.000 yêu cầu.");
+        if (items.Count > 10_000) throw new InvalidDataException("Generate Update vượt quá 10.000 yêu cầu.");
         var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var item in items)
         {

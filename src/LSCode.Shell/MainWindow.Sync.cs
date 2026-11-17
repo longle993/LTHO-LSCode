@@ -21,7 +21,7 @@ public partial class MainWindow
         if (syncCancellation != null) { Log("Đang đồng bộ dự án. Có thể nhấn Dừng trong panel Chức năng."); return; }
         var name = Dialogs.ProjectName(this);
         if (string.IsNullOrWhiteSpace(name)) return;
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(60)); syncCancellation = cancellation;
+        using var cancellation = new CancellationTokenSource(); syncCancellation = cancellation;
         try
         {
             CommandStatus.Text = "Đang tìm " + name.Trim() + "…";
@@ -33,7 +33,6 @@ public partial class MainWindow
                 var choice = Dialogs.Palette(this, found.Select(p => new IdeCommand(p.Folder, p.ToString(), "", () => { selected = p; return Task.CompletedTask; })), "Chọn ứng dụng cần đồng bộ");
                 if (choice == null) return; await choice.Execute();
             }
-            cancellation.CancelAfter(TimeSpan.FromSeconds(60));
             var connections = await Task.Run(() => ProjectDiscovery.ReadConnections(selected!.ConfigPath), cancellation.Token).WaitAsync(cancellation.Token);
             var target = ProjectDatabase.Target(connections.Sys);
             CommandStatus.Text = "Đang đọc cây chức năng từ " + target.Database + "…";
@@ -65,7 +64,7 @@ public partial class MainWindow
     private async Task RefreshCommandsAsync()
     {
         commandCancellation?.Cancel();
-        using var current = new CancellationTokenSource(TimeSpan.FromSeconds(45)); commandCancellation = current;
+        using var current = new CancellationTokenSource(); commandCancellation = current;
         CommandTree.Items.Clear(); menuItems.Clear();
         commandNodes = [];
         try
@@ -157,8 +156,7 @@ public partial class MainWindow
             var connections = await Task.Run(() => ProjectDiscovery.ReadConnections(path));
             var target = ProjectDatabase.Target(connections.Sys);
             report.Add("PASS read named connections from real web.config (credentials omitted)");
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(45));
-            var nodes = await ProjectDatabase.CommandsAsync(target, timeout.Token);
+            var nodes = await ProjectDatabase.CommandsAsync(target, CancellationToken.None);
             if (nodes.Count == 0) throw new InvalidOperationException("No command roots");
             CommitSynchronizedProject(discovered, connections, target, nodes);
             if (ProjectStore.Load().Count != 1 || Explorer.Items.Count == 0) throw new InvalidOperationException("Catalog or project files missing");

@@ -28,7 +28,7 @@ public static class StandardProjectSync
         await using var command = new SqlCommand("dbo.ns_getListDept", connection)
         {
             CommandType = CommandType.StoredProcedure,
-            CommandTimeout = 60
+            CommandTimeout = 0
         };
         command.Parameters.Add("@Name", SqlDbType.VarChar, 128).Value = currentUser;
         await using var reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);

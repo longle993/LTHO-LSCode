@@ -677,7 +677,7 @@ internal sealed partial class CatalogDesigner : Window
         await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync().ConfigureAwait(false);
         foreach (var statement in statements)
         {
-            await using var command = new SqlCommand(statement.Sql, connection, transaction);
+            await using var command = new SqlCommand(statement.Sql, connection, transaction) { CommandTimeout = 0 };
             command.Parameters.AddRange(statement.Parameters);
             await command.ExecuteNonQueryAsync().ConfigureAwait(false);
         }

@@ -181,6 +181,22 @@ try{
     window.__nativeCalls.some(call=>call.method==='settings.save'&&call.payload.settings.accentColor==='#ad82ee')),
     'Accent color applies and persists in workspace settings');
   check(true,'Theme setting updates workbench and Monaco');await page.screenshot({path:out+'/desktop-code-dark.png'});
+  await page.getByRole('button',{name:'Cài đặt',exact:true}).click();
+  await page.getByRole('tab',{name:'Phím tắt',exact:true}).click();
+  check(await page.getByRole('heading',{name:'File & cửa sổ',exact:true}).isVisible() &&
+    await page.getByRole('heading',{name:'SQL & dữ liệu',exact:true}).isVisible(),
+    'Shortcut settings use a dedicated tab grouped by function');
+  await page.getByRole('searchbox',{name:'Tìm phím tắt',exact:true}).fill('Generate Update');
+  check(await page.getByText('Generate Update',{exact:true}).isVisible(),'Shortcut settings can filter commands');
+  await page.getByRole('button',{name:'Hủy',exact:true}).click();
+  await page.keyboard.press('Control+Shift+p');
+  check(await page.getByRole('textbox',{name:'Tìm lệnh hoặc file'}).evaluate(element=>element===document.activeElement),
+    'Ctrl+Shift+P focuses command search immediately');
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Control+Shift+4');
+  await page.getByRole('tabpanel',{name:'Generate Update'}).waitFor();
+  check(true,'Ctrl+Shift+4 opens Generate Update when Shift+4 reports a symbol');
+  await page.getByRole('button',{name:'Đóng Generate Update',exact:true}).click();
   await page.keyboard.press('Control+n');
   await page.getByRole('button',{name:'Kết nối SQL',exact:true}).click();await page.getByRole('textbox',{name:'Database',exact:true}).fill('Fixture_Sys');await page.getByRole('button',{name:'Kết nối',exact:true}).click();await page.locator('dialog').waitFor({state:'detached'});
   await page.getByRole('tab').first().click();check((await page.getByRole('button',{name:'Database của tab',exact:true}).textContent()).includes('Fixture_App'),'Old tab keeps App target after new connection');

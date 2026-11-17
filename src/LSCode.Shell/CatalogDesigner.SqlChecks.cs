@@ -17,7 +17,7 @@ internal sealed partial class CatalogDesigner
         CatalogDesigner? fixtureDesigner = null;
         async Task Execute(string sql)
         {
-            await using var command = new SqlCommand(sql, connection) { CommandTimeout = 30 };
+            await using var command = new SqlCommand(sql, connection) { CommandTimeout = 0 };
             await command.ExecuteNonQueryAsync();
         }
         void Check(bool value, string message) { if (!value) throw new InvalidOperationException(message); }

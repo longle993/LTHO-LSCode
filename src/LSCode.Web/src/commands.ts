@@ -26,7 +26,7 @@ export const commands = [
   ["project.metadata", "Xem metadata dự án", ""],
   ["connection", "Kết nối SQL", ""],
   ["table", "Cấu trúc và dữ liệu", "Ctrl+Shift+T"],
-  ["advance-note", "Advance Note", "Ctrl+Shift+4"],
+  ["advance-note", "Generate Update", "Ctrl+Shift+4"],
   ["catalog", "Danh mục", ""],
   ["snippets", "Snippets", ""],
   ["compare", "So sánh văn bản / thư mục", ""],
@@ -41,6 +41,36 @@ export const commands = [
   ["theme.switch", "Đổi theme", ""],
   ["settings", "Cài đặt & phím tắt", ""],
 ];
+
+export const shortcutGroups = [
+  { id: "files", label: "File & cửa sổ", prefixes: ["file.", "folder.", "window."] },
+  { id: "editor", label: "Editor & XML", prefixes: ["editor.", "xml"] },
+  { id: "sql", label: "SQL & dữ liệu", prefixes: ["sql.", "db.", "table", "connection", "catalog", "profiler"] },
+  { id: "workspace", label: "Dự án & không gian làm việc", prefixes: ["workspace.", "project."] },
+  { id: "tools", label: "Công cụ", prefixes: ["advance-note", "snippets", "compare", "beautify", "template-studio", "translation", "external."] },
+  { id: "system", label: "Giao diện & hệ thống", prefixes: ["theme.", "settings"] },
+] as const;
+
+export function shortcutGroupFor(commandId: string) {
+  return shortcutGroups.find(group => group.prefixes.some(prefix =>
+    commandId === prefix || commandId.startsWith(prefix),
+  ))?.id ?? "tools";
+}
+
+export function keyboardGesture(event: Pick<KeyboardEvent, "ctrlKey" | "shiftKey" | "altKey" | "key" | "code">) {
+  const digit = /^Digit([0-9])$/.exec(event.code)?.[1];
+  const key = digit ?? (event.key === " "
+    ? "Space"
+    : event.key.length === 1
+      ? event.key.toUpperCase()
+      : event.key);
+  return [
+    event.ctrlKey ? "Ctrl" : "",
+    event.shiftKey ? "Shift" : "",
+    event.altKey ? "Alt" : "",
+    key,
+  ].filter(Boolean).join("+");
+}
 export const legacyAliases: Record<string, string> = {
   "sql.new": "file.new",
   "workspace.open": "folder.open",

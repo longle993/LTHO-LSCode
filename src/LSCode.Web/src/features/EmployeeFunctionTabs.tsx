@@ -17,7 +17,7 @@ export function EmployeeFunctionTabs({ targetId, selected, onOpen }: {
   useEffect(() => {
     if (!expanded || tabs || !targetId) return;
     let active = true;
-    const load = operation<FunctionTab[]>("project.employeeTabs", { targetId }, 20_000);
+    const load = operation<FunctionTab[]>("project.employeeTabs", { targetId });
     load.promise.then((rows) => {
       if (active) setTabs(rows.filter((row) => /^[\w$-]+$/.test(row.sysId)));
     }).catch((reason) => {

@@ -229,3 +229,14 @@ Nguồn: [Microsoft — T-SQL debugger](https://learn.microsoft.com/en-us/sql/ss
 - Chưa chạy phiên breakpoint thực tế vào stored procedure ERP trên máy chủ của người dùng; cần kết nối/quyền debugger tại môi trường đó.
 
 Kết quả kiểm tra bản này: **131 checks backend/LocalDB**, **16 checks UI**, **8 checks native WebView smoke** đều đạt; frontend build và desktop publish thành công. Kiểm tra UI dùng dữ liệu mẫu, không phải dữ liệu ERP thật. Probe bổ sung còn ghi nhận các hạn chế bố cục sẵn có: nhãn Chức năng xuống dòng ở sidebar 1280px; ở viewport 375px, nút Mở thư mục xuống dòng và vùng tìm kiếm trên header nhỏ. Các điểm này chưa được sửa trong phạm vi bổ sung Watch/đóng nhóm file.
+
+# Toolbar editor
+
+Generate Update và SQL Watch được mở từ thanh lối tắt hoặc bảng lệnh, không hiển thị thành nút chữ thường trực trên toolbar editor. Với tab SQL, toolbar ưu tiên co ô tìm trong file và ô chọn database; nút **Chạy** cùng các nút icon giữ nguyên kích thước khi phóng to, thu nhỏ hoặc khôi phục cửa sổ.
+
+## Mở nhanh và phím tắt (17/11/2026)
+
+- **Ctrl+Shift+4** mở tab **Generate Update**. ID nội bộ `advance-note` vẫn giữ để tương thích thiết lập và XML đã lưu.
+- **Ctrl+Shift+P** mở bảng lệnh và đặt con trỏ ngay trong ô tìm; có thể gõ tên lệnh mà không cần nhấp chuột.
+- Kéo một hoặc nhiều file từ Windows Explorer vào cửa sổ LSCode để mở. Thư mục và đường dẫn không còn tồn tại bị bỏ qua; tối đa 100 file mỗi lượt. File đã mở được đưa về tab hiện có thay vì tạo bản sao.
+- Trong **Cài đặt → Phím tắt**, các lệnh được chia theo File & cửa sổ, Editor & XML, SQL & dữ liệu, Dự án, Công cụ, Giao diện & hệ thống. Ô tìm lọc theo tên, ID lệnh hoặc phím mặc định; mỗi lệnh vẫn hỗ trợ hai tổ hợp.

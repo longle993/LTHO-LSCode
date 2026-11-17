@@ -132,7 +132,7 @@ function SuggestedInput({ label, placeholder, value, options, disabled, focus, o
   );
 }
 
-export function TableTool({ scope, target, targets, visible, onTargetChange, onText, onConnect, onTableChange }: {
+export function TableTool({ scope, target, targets, visible, onTargetChange, onText, onConnect, onTableChange, onCaptureData }: {
   scope: string;
   target?: Target;
   targets: Target[];
@@ -141,6 +141,7 @@ export function TableTool({ scope, target, targets, visible, onTargetChange, onT
   onText: (text: string, name: string) => void;
   onConnect: () => void;
   onTableChange: (table: string) => void;
+  onCaptureData: (target: Target, table: string, where: string) => void;
 }) {
   const [input, setInput] = useState(""), [where, setWhere] = useState(""),
     [orderBy, setOrderBy] = useState(""), [columns, setColumns] = useState(""),
@@ -333,7 +334,18 @@ export function TableTool({ scope, target, targets, visible, onTargetChange, onT
   }
   const view = mode === "structure" ? currentStructure : currentPreview?.data;
   return (
-    <div className="table-inspection flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-hidden p-3">
+    <div className="table-inspection flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-hidden p-3"
+      onKeyDown={event => {
+        if (!visible || !(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey || event.key.toLowerCase() !== "d") return;
+        event.preventDefault();
+        if (!target || !name || !knownTable) {
+          setStatus("Chọn một bảng hợp lệ trước khi nhấn Ctrl+D.");
+          return;
+        }
+        const tableName = name.schema === "dbo" ? name.table : `${name.schema}.${name.table}`;
+        onCaptureData(target, tableName, where.trim() || "1=1");
+        setStatus(`Đã gửi ${tableName}: ${where.trim() || "1=1"} vào SQL Data.`);
+      }}>
       <div className="flex shrink-0 flex-wrap items-center gap-2">
         <SuggestedInput label="Bảng" placeholder="Tên bảng hoặc schema.bảng" options={names} value={input}
           onChange={setInput} onChoose={chooseTable} disabled={task.busy} focus={visible} className="table-name-input"
@@ -387,6 +399,7 @@ export function TableTool({ scope, target, targets, visible, onTargetChange, onT
         {target ? <span className="muted truncate" title={target.server + " / " + target.database}>{view?.rows.length ?? 0} dòng</span>
           : <Button onClick={onConnect}>Kết nối SQL</Button>}
         {mode === "structure" && fieldNames.length > 0 && <span className="muted">Chọn cột rồi nhấn chuột phải.</span>}
+        {name && knownTable && <span className="muted">Ctrl+D lưu bảng và WHERE vào Generate Update.</span>}
       </div>
       {task.error && <p className="form-error" role="alert">{task.error}</p>}
       {status && <span className="muted" role="status">{status}</span>}
