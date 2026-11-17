@@ -41,6 +41,7 @@ export function Select({
   disabled = false,
   searchOptions,
   floating = false,
+  onContextMenu,
 }: {
   value: string;
   options: { value: string; label: string }[];
@@ -49,6 +50,7 @@ export function Select({
   disabled?: boolean;
   searchOptions?: string;
   floating?: boolean;
+  onContextMenu?: React.MouseEventHandler<HTMLButtonElement>;
 }) {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
@@ -152,6 +154,7 @@ export function Select({
         aria-expanded={open}
         aria-haspopup="listbox"
         aria-controls={open ? listId : undefined}
+        onContextMenu={onContextMenu}
         onClick={() => { setFilter(""); setOpen(!open); }}
       >
         <span

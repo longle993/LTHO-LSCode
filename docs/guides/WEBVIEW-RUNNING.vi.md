@@ -243,6 +243,10 @@ Generate Update và SQL Watch được mở từ thanh lối tắt hoặc bảng
 
 ## Cấu trúc và dữ liệu (17/11/2026)
 
+- Nút **Lưu** nằm cạnh **Chạy**. Nhấn chuột phải vào ô **App/Sys** để sao chép tên database đang chọn.
+- **Tập lệnh → Tạo lệnh INSERT cho kết quả hiện tại** mở script từ các dòng và cột của lần tải gần nhất, theo bộ lọc đã chạy. Các chỉnh sửa chưa lưu chưa có trong script.
+- Lưới hiển thị `datetime` theo `dd/MM/yyyy HH:mm` và `smalldatetime` theo `dd/MM/yyyy`. Dữ liệu gốc dùng khi sửa và tạo script vẫn giữ đầy đủ độ chính xác.
+
 - Các ô trong vùng quét đều có viền. Ô đang nhập có nền xám theo theme.
 - Nhập ở dòng `*` hoặc nhấp đúp để sửa ô, kể cả cột khóa cho phép ghi. **Lưu** hoặc **Ctrl+S** ghi các thay đổi cùng lúc. Khi trùng khóa, SQL Server hoàn tác lần lưu và LSCode đánh dấu dòng lỗi, khôi phục các ô khóa của dòng đó và giữ các chỉnh sửa còn lại để lưu lại.
 

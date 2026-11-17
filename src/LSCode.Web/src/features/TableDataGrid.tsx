@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Button } from "../ui";
 import { KeyRound } from "lucide-react";
 import { writeClipboard, type Table } from "../bridge";
@@ -19,12 +20,23 @@ function isUniqueKey(column?: TableColumn) {
   return !!column && (column.primaryKey || /(?:^|, )(PK|UQ) ·/.test(column.key));
 }
 
+function displayCell(value: string, column?: TableColumn) {
+  const type = column?.sqlType.trim().toLowerCase();
+  if (type !== "datetime" && type !== "smalldatetime") return value;
+  const parts = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}:\d{2})/.exec(value);
+  if (!parts) return value;
+  const [, year, month, day, time] = parts;
+  const date = `${day}/${month}/${year}`;
+  return type === "datetime" ? `${date} ${time}` : date;
+}
+
 export function TableDataGrid({
   table,
   metadata,
   readonly,
   busy,
   onCommit,
+  saveSlot,
   emptyMessage = "Chưa có dữ liệu. Nhập ở dòng * rồi bấm Lưu để thêm.",
 }: {
   table: Table;
@@ -32,6 +44,7 @@ export function TableDataGrid({
   readonly: boolean;
   busy: boolean;
   onCommit: (rows: [number, (string | null)[]][]) => Promise<{ saved: true } | { saved: false; row: number } | undefined>;
+  saveSlot: HTMLSpanElement | null;
   emptyMessage?: string;
 }) {
   const [drafts, setDrafts] = useState<Record<string, (string | null)[]>>({});
@@ -189,7 +202,7 @@ export function TableDataGrid({
                       if (event.key === "Escape") edit(rowIndex, columnIndex, editStart ?? null);
                       setEditing(undefined);
                       grid.current?.focus({ preventScroll: true });
-                    }} /> : value == null ? <span className="muted">NULL</span> : value}
+                    }} /> : value == null ? <span className="muted">NULL</span> : displayCell(value, column)}
                 </td>;
               })}
             </tr>
@@ -234,10 +247,11 @@ export function TableDataGrid({
         }
       }}>
       <style>{selectionRule}</style>
-      <div className="table-save-bar">
-        <Button disabled={readonly || busy || !pending.length} onClick={() => void save()} title="Ctrl+S">Lưu</Button>
-        {conflict !== undefined && <span role="alert" className="error-text">Trùng khóa tại {conflict < 0 ? "dòng mới" : `dòng ${conflict + 1}`}. Đã khôi phục ô khóa.</span>}
-      </div>
+      {saveSlot && createPortal(
+        <Button disabled={readonly || busy || !pending.length} onClick={() => void save()} title="Ctrl+S">Lưu</Button>,
+        saveSlot,
+      )}
+      {conflict !== undefined && <p role="alert" className="table-grid-warning error-text">Trùng khóa tại {conflict < 0 ? "dòng mới" : `dòng ${conflict + 1}`}. Đã khôi phục ô khóa.</p>}
       {showLoading && <div className="table-data-loading" role="status">Đang lọc dữ liệu…</div>}
       {copyError && <span className="table-grid-warning" role="alert">{copyError}</span>}
       {!readonly && !canUpdate && safeRows.length > 0 && (
