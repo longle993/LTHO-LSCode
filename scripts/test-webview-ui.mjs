@@ -108,11 +108,14 @@ await page.addInitScript(()=>{
       case 'table.names':result={columns:['Schema','Name'],rows:[['dbo','DanhMuc']]};break;
       case 'table.catalog':result={columns:['Schema','Name'],rows:[['dbo','DanhMuc_Archive'],['dbo','DanhMuc'],['hr','NhanVien']]};break;
       case 'table.structure':result={columns:['Cột','Kiểu dữ liệu','Khóa'],rows:[['code','INT','PK · PK_DanhMuc'],...(!window.__columnDropped?[['label','NVARCHAR(20)','']]:[])]};break;
+      case 'table.metadata':result={columns:[{name:'code',sqlType:'INT',key:'PK · PK_DanhMuc',primaryKey:true,nullable:false,identity:false,computed:false,generated:0,writable:true},...(!window.__columnDropped?[{name:'label',sqlType:'NVARCHAR(20)',key:'',primaryKey:false,nullable:true,identity:false,computed:false,generated:0,writable:true}]:[])]};break;
       case 'table.addScript':result='ALTER TABLE [dbo].[DanhMuc] ADD [label] NVARCHAR(20) NULL;';break;
       case 'table.alterScript':result='ALTER TABLE [dbo].[DanhMuc] ALTER COLUMN [label] NVARCHAR(20) NULL;';break;
+      case 'table.script':result=request.payload.action==='alter'?'ALTER TABLE [dbo].[DanhMuc] ALTER COLUMN [label] NVARCHAR(20) NULL;':request.payload.action==='drop'?'ALTER TABLE [dbo].[DanhMuc] DROP COLUMN [label];':request.payload.action==='create'?'CREATE TABLE [dbo].[DanhMuc] ([code] INT);':request.payload.action==='log'?'SELECT [label] FROM sys.columns;':request.payload.action==='addmanual'?'ALTER TABLE [dbo].[DanhMuc] ADD [new_column] NVARCHAR(16) NULL;':'ALTER TABLE [dbo].[DanhMuc] ADD [label] NVARCHAR(20) NULL;';break;
+      case 'table.write':result=1;break;
       case 'table.dropColumns':window.__columnDropped=true;result=true;break;
       case 'table.createScript':result='CREATE TABLE [dbo].[DanhMuc] ([code] INT);';break;
-      case 'table.view':result={data:{columns:['code','label'],rows:[['1','x'],['2','y']]},snapshotId:'fixture-preview'};break;
+      case 'table.view':result={data:{columns:['code','label'],rows:request.payload.where?.includes("LIKE N'%ab%'")?[]:[['1','x'],['2','y']]},snapshotId:'fixture-preview'};break;
       case 'table.insertScript':result='INSERT INTO [dbo].[DanhMuc] ([code]) VALUES (1);';break;
       case 'profiler.start':result=true;break;
       case 'profiler.read':result={events:window.__traceBatch.splice(0),dropped:0,truncated:false};break;
@@ -305,13 +308,23 @@ try{
   const openedBefore=await page.evaluate(()=>window.__nativeCalls.filter(c=>c.method==='document.open').length);
   await page.getByRole('button',{name:'Chức năng',exact:true}).click();
   check(await page.locator('.function-separator').count()===1,'Dash function renders as horizontal separator');
-  await page.getByRole('button',{name:'Nhân viên',exact:true}).click();
+  const functionRow=page.getByRole('button',{name:'Nhân viên',exact:true});
+  await functionRow.click();
+  check(await functionRow.getAttribute('aria-current')==='page' && await page.locator('.project-file-tree').count()===0,
+    'A single function click only highlights the selected row');
+  check(await page.getByRole('button',{name:'menu-parent',exact:true}).count()===0,
+    'Parent functions keep menu ID text without a source action');
+  await page.getByRole('button',{name:'menu1',exact:true}).click();
   const fileTree=page.locator('.project-file-tree');
   const dirPath='C:\\Fixture\\App_Data\\Controllers\\Dir';
   const gridPath='C:\\Fixture\\App_Data\\Controllers\\Grid';
   const dirFile=fileTree.getByTitle(dirPath+'\\nhanvien.xml',{exact:true});
   const gridFile=fileTree.getByTitle(gridPath+'\\nhanvien.xml',{exact:true});
   await dirFile.waitFor();await gridFile.waitFor();
+  await page.getByRole('tab',{name:'nhanvien.aspx',exact:true}).waitFor();
+  check(await fileTree.getByTitle('C:\\Fixture\\Main\\nhanvien.aspx',{exact:true}).getAttribute('aria-current')==='page' &&
+    await page.evaluate(before=>window.__nativeCalls.filter(c=>c.method==='document.open').length===before+1,openedBefore),
+    'Menu ID opens the main file and focuses its folder');
   const workspaceResize=page.getByRole('separator',{name:'Đổi chiều rộng Không gian dự án'});
   const sidebar=page.locator('#project-sidebar');
   const initialWidth=(await sidebar.boundingBox()).width;
@@ -515,9 +528,16 @@ try{
   check(await page.locator('.editor-toolbar .workspace-tools').getByRole('tab',{name:'Cấu trúc và dữ liệu'}).isVisible(),
     'Table tool tab is on the editor toolbar next to the breadcrumb');
   check(!(await page.locator('dialog[open]').count())&&!(await tablePanel.getByLabel('Schema',{exact:true}).count()),'Table inspection opens as a tab with a single table field');
-  const tableInput=tablePanel.getByRole('combobox',{name:'Bảng',exact:true});
+  const tableInput=tablePanel.getByRole('combobox',{name:'FROM',exact:true});
   check(await tableInput.evaluate(input=>input===document.activeElement),'Opening table inspection focuses the table field');
-  for(const name of ['Cột SELECT','WHERE','ORDER BY']){
+  await page.getByRole('button',{name:'DB',exact:true}).click();
+  const databaseTableRow=page.locator('.db-row').filter({hasText:'dbo.DanhMuc'});
+  await databaseTableRow.waitFor();
+  await databaseTableRow.click();
+  await tablePanel.locator('.data-grid td[title="1"]').waitFor();
+  check(await tableInput.inputValue()==='DanhMuc',
+    'Clicking a DB table loads the table tab without blanking the WebView');
+  for(const name of ['SELECT','WHERE']){
     await page.keyboard.press('Tab');
     check(await tablePanel.getByRole('combobox',{name,exact:true}).evaluate(input=>input===document.activeElement),
       'Tab focuses '+name+' in input order');
@@ -544,62 +564,69 @@ try{
   check(await page.evaluate(()=>window.__nativeCalls.filter(c=>c.method==='table.catalog').length===1 &&
     !window.__nativeCalls.some(c=>c.method==='table.structure'&&c.payload.table==='danh')),
     'Table search reuses one catalog and opens the selected table immediately');
+  await tablePanel.getByRole('button',{name:'Trường lọc',exact:true}).click();
+  await page.getByRole('option',{name:'code',exact:true}).click();
+  await tablePanel.getByRole('button',{name:'Toán tử',exact:true}).click();
+  await page.getByRole('option',{name:'LIKE',exact:true}).click();
+  await tablePanel.getByRole('textbox',{name:'Giá trị lọc',exact:true}).fill('ab');
+  await tablePanel.getByRole('button',{name:'Lọc',exact:true}).click();
+  await page.waitForFunction(()=>window.__nativeCalls.some(c=>c.method==='table.view'&&c.payload.where==="[code] LIKE N'%ab%'"));
+  await tablePanel.getByText('Không tìm thấy dữ liệu phù hợp.',{exact:true}).waitFor();
+  check(true,'Table filter controls build a contains WHERE condition and show an empty result state');
+  await tablePanel.getByRole('button',{name:'Trường lọc',exact:true}).click();
+  await page.getByRole('option',{name:'Chọn trường',exact:true}).click();
   await tablePanel.getByRole('combobox',{name:'WHERE',exact:true}).fill('co');
   await tablePanel.getByRole('option',{name:'code',exact:true}).waitFor();
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('Tab');
-  check(await tablePanel.getByRole('combobox',{name:'WHERE',exact:true}).inputValue()==='code' &&
-    await tablePanel.getByRole('combobox',{name:'ORDER BY',exact:true}).evaluate(input=>input===document.activeElement),
-    'Tab inserts a selected ordinary column without brackets and moves to the next field');
-  const selectInput=tablePanel.getByRole('combobox',{name:'Cột SELECT',exact:true});
+  check(await tablePanel.getByRole('combobox',{name:'WHERE',exact:true}).inputValue()==='code',
+    'Tab inserts a selected ordinary column without brackets');
+  const selectInput=tablePanel.getByRole('combobox',{name:'SELECT',exact:true});
   await selectInput.fill('cou');
   await selectInput.press('Escape');
   await selectInput.press('Control+Space');
   await tablePanel.getByRole('option',{name:'COUNT',exact:true}).click();
-  await page.waitForFunction(()=>document.querySelector('input[aria-label="Cột SELECT"]')?.selectionStart===6);
+  await page.waitForFunction(()=>document.querySelector('input[aria-label="SELECT"]')?.selectionStart===6);
   check(await selectInput.inputValue()==='COUNT()','SQL function completion inserts parentheses and places the caret inside');
   await selectInput.fill('COUNT(*) AS total');
   const whereInput=tablePanel.getByRole('combobox',{name:'WHERE',exact:true});
   await whereInput.fill('code IS NOT N');
   await tablePanel.getByRole('option',{name:'IS NOT NULL',exact:true}).click();
-  const orderInput=tablePanel.getByRole('combobox',{name:'ORDER BY',exact:true});
-  await orderInput.fill('total DE');
-  await tablePanel.getByRole('option',{name:'DESC',exact:true}).click();
   await page.screenshot({path:out+'/table-catalog-sql.png'});
-  await tablePanel.getByRole('button',{name:'Đọc dữ liệu',exact:true}).click();
+  await tablePanel.getByRole('button',{name:'Chạy',exact:true}).click();
   await page.waitForFunction(()=>window.__nativeCalls.some(c=>c.method==='table.view' &&
-    c.payload.select==='COUNT(*) AS total' && c.payload.where==='code IS NOT NULL' && c.payload.orderBy==='total DESC'));
-  check(true,'SELECT, WHERE and ORDER BY suggestions produce SQL expressions in the query');
+    c.payload.select==='COUNT(*) AS total' && c.payload.where==='code IS NOT NULL' && !c.payload.orderBy));
+  check(true,'SELECT and WHERE suggestions produce SQL expressions in the query');
   await tablePanel.getByRole('button',{name:'Cấu trúc',exact:true}).click();
   await tablePanel.getByText('PK · PK_DanhMuc',{exact:true}).waitFor();
-  await tablePanel.getByText('label',{exact:true}).click({button:'right'});
-  await tablePanel.getByRole('button',{name:'Gen ADD COLUMN',exact:true}).click();
+  await tablePanel.locator('.data-grid').getByText('label',{exact:true}).click({button:'right'});
+  await tablePanel.getByRole('button',{name:'Tạo lệnh THÊM CỘT',exact:true}).click();
   await page.waitForFunction(()=>window.__nativeCalls.some(c=>c.method==='clipboard.write'&&c.payload.text.includes('ADD [label]')));
-  await tablePanel.getByText('label',{exact:true}).click({button:'right'});
-  await tablePanel.getByRole('button',{name:'Gen ALTER COLUMN',exact:true}).click();
+  await tablePanel.locator('.data-grid').getByText('label',{exact:true}).click({button:'right'});
+  await tablePanel.getByRole('button',{name:'Tạo lệnh SỬA CỘT',exact:true}).click();
   await page.waitForFunction(()=>window.__nativeCalls.some(c=>c.method==='clipboard.write'&&c.payload.text.includes('ALTER COLUMN [label]')));
   check(true,'Separate ADD and ALTER actions copy the script for the selected column');
-  await tablePanel.getByText('label',{exact:true}).click({button:'right'});
-  await tablePanel.getByRole('button',{name:'DROP COLUMN',exact:true}).click();
+  await tablePanel.locator('.data-grid').getByText('label',{exact:true}).click({button:'right'});
+  await tablePanel.getByRole('button',{name:'Xóa cột',exact:true}).click();
   check(await page.evaluate(()=>!window.__nativeCalls.some(c=>c.method==='table.dropColumns')),'Drop column waits for explicit confirmation');
   await page.getByRole('dialog',{name:'Xóa cột khỏi bảng'}).getByRole('button',{name:'Xóa cột',exact:true}).click();
   await tablePanel.getByText('Đã xóa cột.',{exact:true}).waitFor();
   check(await tablePanel.getByText('label',{exact:true}).count()===0,'Confirmed drop reloads the table structure');
   await tablePanel.getByRole('button',{name:'Dữ liệu',exact:true}).click();
-  await tablePanel.getByRole('button',{name:'Đọc dữ liệu',exact:true}).click();
+  await tablePanel.getByRole('button',{name:'Chạy',exact:true}).click();
   await tablePanel.locator('.data-grid td[title="1"]').waitFor();
-  await tablePanel.getByRole('button',{name:'Script',exact:true}).click();
-  await tablePanel.getByRole('button',{name:'Script INSERT dữ liệu đang hiển thị'}).click();
+  await page.getByRole('button',{name:'Tập lệnh',exact:true}).click();
+  await page.getByRole('button',{name:'Tạo lệnh thêm dữ liệu đang hiển thị'}).click();
   await page.getByRole('tab',{name:'DanhMuc-insert.sql'}).waitFor();
   await firstTableTab.click();
-  await tablePanel.getByRole('button',{name:'Script',exact:true}).click();
-  await tablePanel.getByRole('button',{name:'Script tạo bảng',exact:true}).click();
+  await page.getByRole('button',{name:'Tập lệnh',exact:true}).click();
+  await page.getByRole('button',{name:'Tạo lệnh tạo bảng',exact:true}).click();
   await page.getByRole('tab',{name:'DanhMuc-create.sql'}).waitFor();
   check(true,'Both table scripts open in editor tabs');
   await page.keyboard.press('Control+Shift+t');
   const secondTableTab=page.getByRole('tab',{name:/^Cấu trúc và dữ liệu 2/});
   const secondTablePanel=page.locator('#'+await secondTableTab.getAttribute('aria-controls'));
-  const secondTableInput=secondTablePanel.getByRole('combobox',{name:'Bảng',exact:true});
+  const secondTableInput=secondTablePanel.getByRole('combobox',{name:'FROM',exact:true});
   await secondTableInput.fill('danh');
   await secondTablePanel.getByRole('option',{name:'DanhMuc_Archive',exact:true}).click();
   await secondTablePanel.locator('.data-grid td[title="1"]').waitFor();
@@ -607,8 +634,8 @@ try{
   await firstTableTab.click();
   check(await tableInput.inputValue()==='DanhMuc' && secondTableName==='DanhMuc_Archive',
     'Independent inspection tabs retain their selected tables');
-  await tablePanel.getByRole('button',{name:'Script',exact:true}).click();
-  await tablePanel.getByRole('button',{name:'Script INSERT dữ liệu đang hiển thị'}).click();
+  await page.getByRole('button',{name:'Tập lệnh',exact:true}).click();
+  await page.getByRole('button',{name:'Tạo lệnh thêm dữ liệu đang hiển thị'}).click();
   await page.waitForFunction(()=>window.__nativeCalls.filter(call=>call.method==='table.insertScript').length===2);
   check(await page.evaluate(()=>new Set(window.__nativeCalls.filter(call=>call.method==='table.view').map(call=>call.payload.scope)).size===2),
     'Inspection data previews use independent native scopes');
@@ -616,13 +643,13 @@ try{
     'Inspection tabs reuse the cached catalog for the same connection');
   await page.getByRole('button',{name:'SQL Profiler',exact:true}).click();
   await secondTableTab.click();
-  const tableDatabase=secondTablePanel.getByRole('button',{name:'Database của cấu trúc và dữ liệu',exact:true});
+  const tableDatabase=page.getByRole('button',{name:'Cơ sở dữ liệu',exact:true});
   const nextDb=(await tableDatabase.textContent()).includes('Fixture_App')?'Fixture_Sys':'Fixture_App';
   await tableDatabase.click();
   await secondTablePanel.getByRole('option',{name:new RegExp(nextDb)}).click();
   check(await secondTablePanel.locator('.data-grid').count()===0 &&
     await secondTableInput.inputValue()==='DanhMuc_Archive','Switching App/Sys keeps the table name and clears the old preview');
-  await secondTablePanel.getByRole('button',{name:'Đọc dữ liệu',exact:true}).click();
+  await secondTablePanel.getByRole('button',{name:'Chạy',exact:true}).click();
   await page.waitForFunction(db=>window.__nativeCalls.filter(c=>c.method==='table.view').at(-1)?.payload.targetId===db,
     nextDb==='Fixture_Sys'?'project-sys':'project-app');
   check(true,'Table inspection reads from the selected App or Sys connection');
