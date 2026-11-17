@@ -11,7 +11,7 @@ public partial class MainWindow
     private async Task OpenDbObjectAsync(DbObjectReference item)
     {
         objectScriptCancellation?.Cancel();
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var cancellation = new CancellationTokenSource();
         objectScriptCancellation = cancellation;
         var destination = Active is { Language: ".sql" } sql ? sql : null;
         var version = destination?.Version;

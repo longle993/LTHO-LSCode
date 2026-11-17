@@ -31,7 +31,7 @@ public static class SqlRunner
         // One connection for all batches in this run: temp tables/transactions survive GO.
         foreach (var batch in SqlBatches.Split(sql))
         {
-            await using var command = new SqlCommand(batch.Text, connection) { CommandTimeout = 60 };
+            await using var command = new SqlCommand(batch.Text, connection) { CommandTimeout = 0 };
             using var registration = ct.Register(() => { try { command.Cancel(); } catch (InvalidOperationException) { } });
             try
             {

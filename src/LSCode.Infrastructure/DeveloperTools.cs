@@ -123,6 +123,26 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
         }
         switch (method)
         {
+            case "advanceNote.load":
+                return await AdvanceNoteStore.LoadAsync(S("projectId"), ct);
+            case "advanceNote.save":
+                var advanceNotes = p.TryGetProperty("items", out var noteItems)
+                    ? noteItems.Deserialize<AdvanceNoteItem[]>(Json) ?? [] : [];
+                return await AdvanceNoteStore.SaveAsync(S("projectId"), advanceNotes, ct);
+            case "advanceNote.generateUpdate":
+                var updateItem = p.GetProperty("item").Deserialize<AdvanceNoteItem>(Json)
+                    ?? throw new ArgumentException("Yêu cầu Generate Update không hợp lệ.");
+                var updateProject = ProjectStore.Load().FirstOrDefault(project => project.Id == S("projectId"))
+                    ?? throw new InvalidOperationException("Dự án đã bị xóa khỏi danh sách.");
+                var updateTargets = new Dictionary<string, SqlTarget>(StringComparer.OrdinalIgnoreCase);
+                foreach (var (database, property) in new[] { ("App", "appTargetId"), ("Sys", "sysTargetId") })
+                {
+                    var id = S(property);
+                    if (id.Length > 0 && targets.TryGetValue(id, out var registered))
+                        updateTargets[database] = registered.Connection;
+                }
+                return await AdvanceNoteUpdateGenerator.GenerateAsync(S("root"), UpdatePath(updateProject), updateItem,
+                    updateTargets, ct);
             case "studio.bootstrap":
                 return await Task.Run(() => new
                 {
@@ -151,12 +171,22 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                 created = ApplyProjectInput(created, false);
                 await SaveProjectAsync(created, ct); return Project(created);
             case "project.list": return ProjectStore.Load().Select(Project).ToArray();
-            case "project.import.preview": return ProjectImporter.Read(S("xml")).Select(Project).ToArray();
-            case "project.import":
+            case "project.import.previewFile":
+                return ProjectImporter.PreviewFile(ProjectStore.Load(), S("path"), B("overwrite"), ct);
+            case "project.import.applyFile":
                 await persistenceGate.WaitAsync(ct);
-                try { var merged = ProjectImporter.Merge(ProjectStore.Load(), ProjectImporter.Read(S("xml")), B("overwrite")); ProjectStore.Save(merged.Projects); return new { projects = merged.Projects.Select(Project), merged.Added, merged.Updated, merged.Skipped }; }
+                try
+                {
+                    var incoming = ProjectImporter.ReadFile(S("path"), ct);
+                    var merged = ProjectImporter.Merge(ProjectStore.Load(), incoming, B("overwrite"));
+                    if (merged.Added > 0 || merged.Updated > 0) ProjectStore.Save(merged.Projects);
+                    return new { projects = merged.Projects.Select(Project).ToArray(), merged.Added, merged.Updated, merged.Skipped };
+                }
                 finally { persistenceGate.Release(); }
-            case "project.export": return ProjectImporter.Export(ProjectStore.Load());
+            case "project.export.file":
+                var exportPath = S("path");
+                var exported = ProjectImporter.ExportFile(ProjectStore.Load(), exportPath, cancellationToken: ct);
+                return new { path = exportPath, projectCount = exported, byteCount = new FileInfo(exportPath).Length };
             case "project.metadata":
                 return ProjectImporter.Export([ProjectStore.Load().First(x => x.Id == S("id"))]);
             case "project.details":
@@ -320,45 +350,22 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
             case "sourceCollection.content":
                 var contentFiles = p.GetProperty("files").Deserialize<SourceCollection.Match[]>(Json) ?? [];
                 return await SourceCollection.FindContentAsync(contentFiles, S("query"), ct);
-            case "project.discover": return await Task.Run(() => ProjectDiscovery.Find(S("root", @"\\172.168.5.14\CustomerPro"), S("name"), ct), ct);
-            case "project.standard.preview":
-                var standardRows = await StandardProjectSync.ReadAsync(S("sourceFile"), S("currentUser"), ct);
-                return StandardProjectSync.Plan(ProjectStore.Load(), standardRows, ct).Summary;
             case "project.standard.sync":
-                var syncRows = await StandardProjectSync.ReadAsync(S("sourceFile"), S("currentUser"), ct);
+                var standardUser = S("currentUser").Trim();
+                var syncRows = await StandardProjectSync.ReadAsync(standardUser, ct);
                 await persistenceGate.WaitAsync(ct);
                 try
                 {
                     var plan = StandardProjectSync.Plan(ProjectStore.Load(), syncRows, ct);
                     if (plan.Summary.Added > 0 || plan.Summary.Updated > 0)
                         ProjectStore.Save(plan.Projects);
+                    var standardSettings = SettingsStore.Load();
+                    standardSettings.StandardCatalogUser = standardUser;
+                    SettingsStore.Save(standardSettings);
                     return new { summary = new { plan.Summary.Added, plan.Summary.Updated, plan.Summary.Unchanged, plan.Summary.Skipped },
                         projects = plan.Projects.Select(Project).ToArray() };
                 }
                 finally { persistenceGate.Release(); }
-            case "project.standard.apply":
-                var applyRows = await StandardProjectSync.ReadAsync(S("sourceFile"), S("currentUser"), ct);
-                await persistenceGate.WaitAsync(ct);
-                try
-                {
-                    var plan = StandardProjectSync.Plan(ProjectStore.Load(), applyRows, ct);
-                    if (plan.Summary.Projects.Length == 0 ||
-                        !plan.Summary.Fingerprint.Equals(S("fingerprint"), StringComparison.OrdinalIgnoreCase))
-                        throw new InvalidOperationException("Danh mục chuẩn đã thay đổi. Hãy xem trước lại trước khi đồng bộ.");
-                    ProjectStore.Save(plan.Projects);
-                    return new { summary = plan.Summary, projects = plan.Projects.Select(Project).ToArray() };
-                }
-                finally { persistenceGate.Release(); }
-            case "project.sync":
-                var config = S("configPath"); var connections = await Task.Run(() => ProjectDiscovery.ReadConnections(config), ct);
-                var identity = new SqlConnectionStringBuilder(connections.Sys);
-                var projectName = S("name").Trim();
-                var profile = ProjectImporter.Create(projectName, identity.DataSource, identity.InitialCatalog, Path.GetDirectoryName(config)!);
-                var raw = XmlTools.Parse(profile.RawXml).Root!;
-                raw.Add(new XElement("WebConfigPath", config), new XElement("AppConnectionString", connections.App), new XElement("SysConnectionString", connections.Sys));
-                raw.SetElementValue("ProgramPath", $"http://172.168.5.14/{Uri.EscapeDataString(projectName)}/Main/Login.aspx");
-                profile = profile with { RawXml = raw.ToString(SaveOptions.DisableFormatting) };
-                await SaveProjectAsync(profile, ct, preserveProgramPath: true); return Project(profile);
             case "sql.connect":
                 var builder = new SqlConnectionStringBuilder { DataSource = S("server"), InitialCatalog = S("database"), IntegratedSecurity = B("integratedSecurity"),
                     UserID = B("integratedSecurity") ? "" : S("user"), Password = B("integratedSecurity") ? "" : S("password"), Encrypt = true,
@@ -467,6 +474,18 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                     "altermanual" => TableInspection.ManualColumnScript(scriptSchema, scriptTable, Identifier(S("column")), S("dataType"), !p.TryGetProperty("nullable", out var alterNull) || alterNull.GetBoolean(), true),
                     _ => throw new ArgumentException("Loại script không hợp lệ."),
                 };
+            case "table.writeBatch":
+                var batchTarget = Target(p);
+                var batchTable = QualifiedTable();
+                var batch = p.GetProperty("rows").Deserialize<TableInspection.GridWrite[]>(Json) ?? [];
+                var conflict = await TableInspection.WriteBatchAsync(batchTarget, batchTable, batch, ct);
+                if (conflict is null)
+                    foreach (var entry in tableSnapshots)
+                        if (entry.Value.Target.Server.Equals(batchTarget.Server, StringComparison.OrdinalIgnoreCase) &&
+                            entry.Value.Target.Database.Equals(batchTarget.Database, StringComparison.OrdinalIgnoreCase) &&
+                            entry.Value.Qualified.Equals(batchTable, StringComparison.Ordinal))
+                            tableSnapshots.TryRemove(entry);
+                return new { conflict };
             case "table.write":
                 var writeTarget = Target(p);
                 var writeNames = ColumnNames();

@@ -9,7 +9,6 @@ import { SnippetTool } from "./features/SnippetTool";
 import { CompareTool } from "./features/CompareTool";
 import { XmlTool } from "./features/XmlTool";
 import { TranslationTool } from "./features/TranslationTool";
-import { SyncTool } from "./features/SyncTool";
 import { BeautifyTool } from "./features/BeautifyTool";
 export function ToolDialog(props: ToolProps) {
   const [dirty, setDirty] = useState(false),
@@ -24,7 +23,6 @@ export function ToolDialog(props: ToolProps) {
     compare: "So sánh",
     xml: "Công cụ XML",
     translation: "Dịch văn bản",
-    sync: "Đồng bộ dự án",
     beautify: "Beautify SQL",
   };
   return (
@@ -55,8 +53,6 @@ export function ToolDialog(props: ToolProps) {
         <XmlTool {...props} />
       ) : props.kind === "translation" ? (
         <TranslationTool {...props} />
-      ) : props.kind === "sync" ? (
-        <SyncTool {...props} />
       ) : (
         <div className="empty">Công cụ không xác định.</div>
       )}

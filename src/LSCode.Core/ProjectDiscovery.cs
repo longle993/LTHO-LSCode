@@ -87,22 +87,41 @@ public static class CommandHierarchy
     }
     public static List<CommandNode> Build(IEnumerable<CommandEntry> entries)
     {
-        var nodes = entries.Where(e => e.Id.Length > 0).GroupBy(e => e.Id, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(g => g.Key, g => new CommandNode(g.First()), StringComparer.OrdinalIgnoreCase);
+        var ordered = entries
+            .Where(entry => entry.Id.Length > 0)
+            .GroupBy(entry => entry.Id, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .OrderBy(entry => entry.Id, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var childrenByParent = ordered
+            .GroupBy(entry => entry.ParentId, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.OrdinalIgnoreCase);
+
+        // FSD Studio presents wcommand as exactly three levels: root, child and grandchild.
+        // Orphans, cycles and deeper rows are left out because they have no visible path in that tree.
         var roots = new List<CommandNode>();
-        foreach (var node in nodes.Values.OrderBy(n => n.Entry.Id, StringComparer.OrdinalIgnoreCase))
+        if (!childrenByParent.TryGetValue(string.Empty, out var rootEntries)) return roots;
+        foreach (var rootEntry in rootEntries)
         {
-            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { node.Entry.Id };
-            var parent = node.Entry.ParentId;
-            bool cycle = false;
-            while (nodes.TryGetValue(parent, out var ancestor))
-            {
-                if (!seen.Add(parent)) { cycle = true; break; }
-                parent = ancestor.Entry.ParentId;
-            }
-            if (!cycle && nodes.TryGetValue(node.Entry.ParentId, out var parentNode)) parentNode.Children.Add(node);
-            else roots.Add(node);
+            var root = new CommandNode(rootEntry);
+            roots.Add(root);
+            AddChildren(root, rootEntry.Id, childrenByParent, remainingLevels: 2);
         }
         return roots;
+    }
+
+    private static void AddChildren(
+        CommandNode parent,
+        string parentId,
+        IReadOnlyDictionary<string, CommandEntry[]> childrenByParent,
+        int remainingLevels)
+    {
+        if (remainingLevels == 0 || !childrenByParent.TryGetValue(parentId, out var children)) return;
+        foreach (var childEntry in children)
+        {
+            var child = new CommandNode(childEntry);
+            parent.Children.Add(child);
+            AddChildren(child, childEntry.Id, childrenByParent, remainingLevels - 1);
+        }
     }
 }

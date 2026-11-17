@@ -1,13 +1,12 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Download, FileCog, FolderOpen, Plus, RefreshCw, Search, Trash2, Upload } from "lucide-react";
+import { ArrowLeft, ArrowRight, Download, FileText, FolderOpen, Plus, RefreshCw, Search, Trash2, Upload } from "lucide-react";
 import { Button, IconButton, Modal, Select } from "../ui";
-import { operation, request, writeClipboard } from "../bridge";
+import { operation, request } from "../bridge";
 import type { Project, Settings } from "../bridge";
 import { useTask } from "./useTask";
 import { LoadingLine } from "../LoadingLine";
-import { SyncTool } from "./SyncTool";
 
-type Mode = "list" | "create" | "edit" | "delete" | "sync-user" | "sync-web" | "import" | "export";
+type Mode = "list" | "create" | "edit" | "delete" | "sync-user" | "import";
 type Profile = {
   code: string; title: string; version: string; active: boolean;
   winProgramPath: string; webProgramPath: string; winSourcePath: string; webSourcePath: string;
@@ -16,10 +15,11 @@ type Profile = {
   listAllData: string; sortOrder: string; homeUpdateCode: string; notes: string;
 };
 type SyncSummary = { added: number; updated: number; unchanged: number; skipped: number };
+type ImportPreview = { total: number; added: number; updated: number; skipped: number; fileName: string; overwrite: boolean };
+type ImportResult = { projects: Project[]; added: number; updated: number; skipped: number };
+type ExportResult = { path: string; projectCount: number; byteCount: number };
 
 const pageSize = 50;
-const fsdSource = "D:\\FAST\\Code\\LTHO\\FSDStudioSource\\FSDStudio\\clsDatabase.cs";
-const currentUserKey = "lscode.fsdStudio.currUser";
 const emptyProfile = (): Profile => ({
   code: "", title: "", version: "", active: true,
   winProgramPath: "", webProgramPath: "", winSourcePath: "", webSourcePath: "",
@@ -27,7 +27,6 @@ const emptyProfile = (): Profile => ({
   user: "", password: "", database: "", defaultUser: "ABC", listAllData: "",
   sortOrder: "9999", homeUpdateCode: "", notes: "",
 });
-function rememberedUser() { try { return localStorage.getItem(currentUserKey) ?? ""; } catch { return ""; } }
 
 export function ProjectDialog({ projects, lastAccess, onProjects, onOpen, onClose }: {
   projects: Project[];
@@ -44,10 +43,10 @@ export function ProjectDialog({ projects, lastAccess, onProjects, onOpen, onClos
   const [editing, setEditing] = useState<Project>();
   const [deleting, setDeleting] = useState<Project>();
   const [metadata, setMetadata] = useState("");
-  const [xml, setXml] = useState("");
-  const [preview, setPreview] = useState<Project[]>([]);
+  const [importPath, setImportPath] = useState("");
+  const [importPreview, setImportPreview] = useState<ImportPreview>();
   const [overwrite, setOverwrite] = useState(false);
-  const [currentUser, setCurrentUser] = useState(rememberedUser);
+  const [currentUser, setCurrentUser] = useState("");
   const [syncMessage, setSyncMessage] = useState("");
   const [sharedAccess, setSharedAccess] = useState<Record<string, string>>();
   const [opening, setOpening] = useState(false);
@@ -56,7 +55,11 @@ export function ProjectDialog({ projects, lastAccess, onProjects, onOpen, onClos
 
   useEffect(() => {
     let alive = true;
-    void request<Settings>("settings.read").then(value => { if (alive) setSharedAccess(value.projectLastAccess); }).catch(() => {});
+    void request<Settings>("settings.read").then(value => {
+      if (!alive) return;
+      setSharedAccess(value.projectLastAccess);
+      setCurrentUser(value.standardCatalogUser?.trim() ?? "");
+    }).catch(() => {});
     return () => { alive = false; void pending.current?.cancel().catch(() => {}); };
   }, []);
 
@@ -71,7 +74,7 @@ export function ProjectDialog({ projects, lastAccess, onProjects, onOpen, onClos
   const visible = useMemo(() => filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize), [filtered, currentPage]);
   useEffect(() => setPage(1), [deferredSearch]);
 
-  const back = () => { setMode("list"); setPreview([]); task.clearError(); };
+  const back = () => { setMode("list"); setImportPreview(undefined); setImportPath(""); task.clearError(); };
   const update = <K extends keyof Profile>(key: K, value: Profile[K]) => setProfile(old => ({ ...old, [key]: value }));
   async function open(project: Project) {
     setOpening(true);
@@ -89,36 +92,72 @@ export function ProjectDialog({ projects, lastAccess, onProjects, onOpen, onClos
   async function syncStandard(user: string) {
     await task.run(async () => {
       const current = operation<{ summary: SyncSummary; projects: Project[] }>("project.standard.sync",
-        { sourceFile: fsdSource, currentUser: user.trim() }, 180_000);
+        { currentUser: user.trim() });
       pending.current = current;
       const result = await current.promise;
       onProjects(result.projects);
-      localStorage.setItem(currentUserKey, user.trim());
       setCurrentUser(user.trim());
       setSyncMessage(`Đã đồng bộ ${result.summary.added} dự án mới, ${result.summary.updated} cập nhật, ${result.summary.skipped} bỏ qua.`);
       setMode("list");
     });
   }
+  async function chooseImport() {
+    await task.run(async () => {
+      const path = await request<string | null>("project.import.choose");
+      if (!path) return;
+      const current = operation<Omit<ImportPreview, "overwrite">>("project.import.previewFile", { path, overwrite }, 180_000);
+      pending.current = current;
+      const result = await current.promise;
+      setImportPath(path);
+      setImportPreview({ ...result, overwrite });
+      setMode("import");
+    });
+  }
+  async function refreshImportPreview(nextOverwrite = overwrite) {
+    if (!importPath) return;
+    await task.run(async () => {
+      const current = operation<Omit<ImportPreview, "overwrite">>("project.import.previewFile",
+        { path: importPath, overwrite: nextOverwrite }, 180_000);
+      pending.current = current;
+      setImportPreview({ ...await current.promise, overwrite: nextOverwrite });
+    });
+  }
+  async function applyImport() {
+    if (!importPath || importPreview?.overwrite !== overwrite) return;
+    await task.run(async () => {
+      const current = operation<ImportResult>("project.import.applyFile", { path: importPath, overwrite }, 180_000);
+      pending.current = current;
+      const result = await current.promise;
+      onProjects(result.projects);
+      setSyncMessage(`Đã import ${result.added} dự án mới, ${result.updated} cập nhật, ${result.skipped} bỏ qua.`);
+      back();
+    });
+  }
   async function exportProjects() {
-    await task.run(async () => { setXml(await request<string>("project.export")); setMode("export"); });
+    await task.run(async () => {
+      const path = await request<string | null>("project.export.choose", { name: "projects.xml" });
+      if (!path) return;
+      const current = operation<ExportResult>("project.export.file", { path }, 180_000);
+      pending.current = current;
+      const result = await current.promise;
+      setSyncMessage(`Đã xuất ${result.projectCount.toLocaleString("vi-VN")} dự án ra ${result.path}.`);
+    });
   }
 
   const title = mode === "list" ? "Dự án của bạn" : mode === "create" ? "Tạo profile dự án" :
-    mode === "edit" ? `Sửa profile · ${profile.code}` : mode === "sync-user" ? "Thiết lập đồng bộ FSD" :
-    mode === "sync-web" ? "Đồng bộ từ web.config" : mode === "import" ? "Import catalog XML" :
-    mode === "export" ? "Export catalog XML" : "Xóa profile";
+    mode === "edit" ? `Sửa profile · ${profile.code}` : mode === "sync-user" ? "Nhập tên" :
+    mode === "import" ? "Import catalog XML" : "Xóa profile";
 
-  return <Modal title={title} onClose={onClose} wide>
+  return <Modal title={title} onClose={onClose} wide className="project-catalog-modal">
     <div className="project-dialog-body">
       {mode !== "list" && <Button className="project-back" variant="ghost" onClick={back}><ArrowLeft size={15} /> Danh sách dự án</Button>}
       {mode === "list" && <>
         <div className="project-actions" aria-label="Thao tác dự án">
           <Button variant="primary" disabled={task.busy} onClick={() => currentUser ? void syncStandard(currentUser) : setMode("sync-user")}><RefreshCw size={15} /> Đồng bộ</Button>
-          <Button disabled={task.busy} onClick={() => setMode("sync-web")}><FileCog size={15} /> Đồng bộ web.config</Button>
           <Button disabled={task.busy} onClick={() => { setEditing(undefined); setProfile(emptyProfile()); setMode("create"); }}><Plus size={15} /> Tạo profile</Button>
-          <Button disabled={task.busy} onClick={() => setMode("import")}><Upload size={15} /> Import XML</Button>
+          <Button disabled={task.busy} onClick={() => void chooseImport()}><Upload size={15} /> Import XML</Button>
           <Button disabled={task.busy} onClick={() => void exportProjects()}><Download size={15} /> Export XML</Button>
-          {currentUser && <Button variant="ghost" className="project-sync-user" onClick={() => setMode("sync-user")}>FSD: {currentUser}</Button>}
+          {currentUser && <Button variant="ghost" className="project-sync-user" onClick={() => setMode("sync-user")}>{currentUser}</Button>}
         </div>
         <LoadingLine busy={task.busy || opening} label={opening ? "Đang mở dự án…" : "Đang đồng bộ danh mục…"} />
         {syncMessage && <p className="project-sync-result" role="status">{syncMessage}</p>}
@@ -146,14 +185,10 @@ export function ProjectDialog({ projects, lastAccess, onProjects, onOpen, onClos
       </>}
 
       {mode === "sync-user" && <form className="project-compact-form" onSubmit={event => { event.preventDefault(); void syncStandard(currentUser); }}>
-        <p className="muted">Nhập CurrUser đúng như FSD Studio. LSCode sẽ ghi nhớ cho các lần đồng bộ sau.</p>
-        <label>CurrUser<input autoFocus required value={currentUser} onChange={event => setCurrentUser(event.target.value)} /></label>
-        <details><summary>Thiết lập nguồn</summary><p className="muted">{fsdSource}</p></details>
-        <div className="form-actions"><Button variant="primary" disabled={task.busy || !currentUser.trim()}>Lưu và đồng bộ</Button>
+        <label>Tên<input autoFocus required value={currentUser} onChange={event => setCurrentUser(event.target.value)} /></label>
+        <div className="form-actions"><Button variant="primary" disabled={task.busy || !currentUser.trim()}>Đồng bộ</Button>
           {task.busy && <Button type="button" onClick={() => void pending.current?.cancel()}>Dừng</Button>}</div>
       </form>}
-
-      {mode === "sync-web" && <SyncTool onProjects={updated => { onProjects(updated); setSyncMessage("Đã đồng bộ dự án từ web.config."); setMode("list"); }} />}
 
       {(mode === "create" || mode === "edit") && <ProjectProfileForm profile={profile} update={update} busy={task.busy}
         editing={mode === "edit"} metadata={metadata} onChooseFolder={() => void task.run(async () => {
@@ -168,16 +203,18 @@ export function ProjectDialog({ projects, lastAccess, onProjects, onOpen, onClos
         <div className="form-actions"><Button onClick={back}>Hủy</Button><Button className="table-drop-action" disabled={task.busy}
           onClick={() => void task.run(async () => { await request("project.delete", { id: deleting.id }); onProjects(await request<Project[]>("project.list")); setDeleting(undefined); setMode("list"); })}>Xóa profile</Button></div></div>}
 
-      {mode === "import" && <div className="project-xml-tool"><label className="field">Catalog XML<textarea className="tool-text" value={xml}
-        onChange={event => { setXml(event.target.value); setPreview([]); }} /></label><div className="inline-checks"><label className="checkbox">
-        <input type="checkbox" checked={overwrite} onChange={event => setOverwrite(event.target.checked)} /> Cập nhật dự án trùng</label>
-        <Button disabled={task.busy || !xml.trim()} onClick={() => void task.run(async () => setPreview(await request<Project[]>("project.import.preview", { xml })))}>Xem trước</Button></div>
-        {preview.length > 0 && <><p>{preview.length.toLocaleString("vi-VN")} dự án hợp lệ.</p><Button variant="primary" disabled={task.busy}
-          onClick={() => void task.run(async () => { const result = await request<{ projects: Project[] }>("project.import", { xml, overwrite }); onProjects(result.projects); setMode("list"); })}>Nhập catalog</Button></>}
+      {mode === "import" && importPreview && <div className="project-import-summary">
+        <div className="project-import-file"><FileText size={18} /><span><strong>{importPreview.fileName}</strong><small title={importPath}>{importPath}</small></span></div>
+        <dl><div><dt>Tổng số</dt><dd>{importPreview.total.toLocaleString("vi-VN")}</dd></div>
+          <div><dt>Dự án mới</dt><dd>{importPreview.added.toLocaleString("vi-VN")}</dd></div>
+          <div><dt>Cập nhật</dt><dd>{importPreview.updated.toLocaleString("vi-VN")}</dd></div>
+          <div><dt>Bỏ qua</dt><dd>{importPreview.skipped.toLocaleString("vi-VN")}</dd></div></dl>
+        <label className="checkbox"><input type="checkbox" checked={overwrite} onChange={event => setOverwrite(event.target.checked)} /> Cập nhật dự án trùng</label>
+        {importPreview.overwrite !== overwrite && <p className="project-import-notice">Tùy chọn đã thay đổi. Hãy cập nhật bản xem trước trước khi import.</p>}
+        <div className="form-actions"><Button disabled={task.busy} onClick={() => void chooseImport()}>Chọn file khác</Button>
+          {importPreview.overwrite !== overwrite && <Button disabled={task.busy} onClick={() => void refreshImportPreview()}>Cập nhật xem trước</Button>}
+          <Button variant="primary" disabled={task.busy || importPreview.overwrite !== overwrite} onClick={() => void applyImport()}>Import catalog</Button></div>
       </div>}
-
-      {mode === "export" && <div className="project-xml-tool"><p className="muted">Mật khẩu và chuỗi kết nối đã được loại khỏi XML.</p>
-        <textarea className="tool-text" aria-label="XML export" value={xml} readOnly /><Button onClick={() => void writeClipboard(xml)}>Sao chép XML</Button></div>}
       <p className="form-error" role="alert">{task.error}</p>
     </div>
   </Modal>;

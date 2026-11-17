@@ -12,10 +12,9 @@ public static class ProjectDatabase
         var connections = await ReadProjectConnectionsAsync(project);
         return await ResolveTargetsAsync(connections, async (target, candidates) =>
         {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
             var result = await ReadAsync(target,
                 "SELECT @a AS name WHERE DB_ID(@a) IS NOT NULL AND HAS_DBACCESS(@a)=1 UNION ALL SELECT @app WHERE DB_ID(@app) IS NOT NULL AND HAS_DBACCESS(@app)=1",
-                timeout.Token, new SqlParameter("@a", candidates[0]), new SqlParameter("@app", candidates[1]));
+                CancellationToken.None, new SqlParameter("@a", candidates[0]), new SqlParameter("@app", candidates[1]));
             return result.Rows.Cast<DataRow>().Select(r => (string)r[0]).ToList();
         });
     }
@@ -121,7 +120,7 @@ public static class ProjectDatabase
     {
         using var connection = new SqlConnection(target.ConnectionString);
         await connection.OpenAsync(token).ConfigureAwait(false);
-        using var command = new SqlCommand(sql, connection) { CommandTimeout = 30 };
+        using var command = new SqlCommand(sql, connection) { CommandTimeout = 0 };
         command.Parameters.AddRange(parameters);
         using var reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);
         var table = new DataTable();
@@ -187,7 +186,7 @@ public static class ProjectDatabase
             """;
         using var connection = new SqlConnection(target.ConnectionString);
         await connection.OpenAsync(token).ConfigureAwait(false);
-        using var command = new SqlCommand(sql, connection) { CommandTimeout = 30 };
+        using var command = new SqlCommand(sql, connection) { CommandTimeout = 0 };
         using var reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);
         var entries = new List<CommandEntry>();
         // Startup can return intermediate result sets. The final menu is the last set.

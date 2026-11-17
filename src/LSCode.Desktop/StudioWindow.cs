@@ -33,6 +33,7 @@ public sealed class StudioWindow : Window
     public StudioWindow(bool smoke)
     {
         this.smoke = smoke;
+        view.AllowExternalDrop = true;
         Title = "LS Code · WebView"; Width = 1440; Height = 920; MinWidth = 480; MinHeight = 480;
         Icon = BitmapFrame.Create(new Uri("pack://application:,,,/Assets/logo.ico"));
         WindowStyle = WindowStyle.None;
@@ -181,6 +182,21 @@ public sealed class StudioWindow : Window
         {
             var raw = e.WebMessageAsJson;
             if (raw.Length > Protocol.MaximumMessageLength) throw new ArgumentException("Yêu cầu vượt giới hạn kích thước.");
+            using (var message = JsonDocument.Parse(raw))
+            {
+                if (message.RootElement.TryGetProperty("type", out var type) && type.GetString() == "files.drop")
+                {
+                    var paths = e.AdditionalObjects.OfType<CoreWebView2File>()
+                        .Select(file => file.Path)
+                        .Where(File.Exists)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .Take(100)
+                        .ToArray();
+                    if (paths.Length > 0)
+                        view.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new { type = "files.dropped", paths }, Protocol.Json));
+                    return;
+                }
+            }
             request = JsonSerializer.Deserialize<Request>(raw, Protocol.Json) ?? throw new ArgumentException("Yêu cầu rỗng.");
             if (request.ProtocolVersion != Protocol.Version) throw new ArgumentException("Phiên bản giao thức không tương thích.");
             if(request.Method=="studio.bootstrap")bridgeReady=true;

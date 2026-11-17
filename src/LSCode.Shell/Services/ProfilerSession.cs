@@ -45,13 +45,13 @@ public sealed class ProfilerSession(SqlTarget target, ProfilerTemplate template)
     public async Task StartAsync(CancellationToken token)
     {
         using var connection = new SqlConnection(ConnectionString); await connection.OpenAsync(token);
-        using var command = new SqlCommand(CreateSql(Name, target.Database, template), connection) { CommandTimeout = 20 };
+        using var command = new SqlCommand(CreateSql(Name, target.Database, template), connection) { CommandTimeout = 0 };
         await command.ExecuteNonQueryAsync(token);
     }
     public async Task<ProfilerBatch> ReadAsync(CancellationToken token)
     {
         using var connection = new SqlConnection(ConnectionString); await connection.OpenAsync(token);
-        using var command = new SqlCommand("SELECT t.target_data FROM sys.dm_xe_sessions s JOIN sys.dm_xe_session_targets t ON t.event_session_address=s.address WHERE s.name=@name AND t.target_name=N'ring_buffer'", connection) { CommandTimeout = 10 };
+        using var command = new SqlCommand("SELECT t.target_data FROM sys.dm_xe_sessions s JOIN sys.dm_xe_session_targets t ON t.event_session_address=s.address WHERE s.name=@name AND t.target_name=N'ring_buffer'", connection) { CommandTimeout = 0 };
         command.Parameters.AddWithValue("@name", Name);
         var data = await command.ExecuteScalarAsync(token);
         if (data is not string xml) throw new InvalidOperationException("Phiên Profiler không còn chạy trên server.");
@@ -74,7 +74,7 @@ public sealed class ProfilerSession(SqlTarget target, ProfilerTemplate template)
     public async Task DropAsync()
     {
         using var connection = new SqlConnection(ConnectionString); await connection.OpenAsync();
-        using var command = new SqlCommand("IF EXISTS (SELECT 1 FROM sys.server_event_sessions WHERE name=@name) DROP EVENT SESSION " + ProjectDatabase.Quote(Name) + " ON SERVER;", connection) { CommandTimeout = 10 };
+        using var command = new SqlCommand("IF EXISTS (SELECT 1 FROM sys.server_event_sessions WHERE name=@name) DROP EVENT SESSION " + ProjectDatabase.Quote(Name) + " ON SERVER;", connection) { CommandTimeout = 0 };
         command.Parameters.AddWithValue("@name", Name); await command.ExecuteNonQueryAsync();
     }
 }

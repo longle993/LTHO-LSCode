@@ -63,7 +63,7 @@ public partial class MainWindow
         if (available.Count == 0) throw new InvalidOperationException("connectionStrings không có database cụ thể; hãy cập nhật web.config.");
         var target = available[0];
         var database = target.Database;
-        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20))) await ProjectDatabase.ReadAsync(target, "SELECT DB_NAME() AS database_name", timeout.Token);
+        await ProjectDatabase.ReadAsync(target, "SELECT DB_NAME() AS database_name", CancellationToken.None);
         if (project.Field("AppDatabase") != database)
         {
             var xml = XmlTools.Parse(project.RawXml).Root!; xml.SetElementValue("AppDatabase", database);

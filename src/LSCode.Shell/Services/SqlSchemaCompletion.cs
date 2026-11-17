@@ -43,16 +43,14 @@ public static class SqlSchemaCompletion
     }
     private static async Task<IReadOnlyList<ObjectInfo>> LoadObjectsAsync(SqlTarget target)
     {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         var data = await ProjectDatabase.ReadAllAsync(target,
-            "SELECT o.object_id,s.name,o.name,o.type_desc FROM sys.objects o JOIN sys.schemas s ON s.schema_id=o.schema_id WHERE o.type IN ('U','V','P','PC','FN','IF','TF','FS','FT') AND o.is_ms_shipped=0 ORDER BY s.name,o.name", timeout.Token);
+            "SELECT o.object_id,s.name,o.name,o.type_desc FROM sys.objects o JOIN sys.schemas s ON s.schema_id=o.schema_id WHERE o.type IN ('U','V','P','PC','FN','IF','TF','FS','FT') AND o.is_ms_shipped=0 ORDER BY s.name,o.name", CancellationToken.None);
         return data.Rows.Cast<DataRow>().Select(r => new ObjectInfo((int)r[0], new SqlSymbol((string)r[1], (string)r[2], null, (string)r[3]))).ToList();
     }
     private static async Task<IReadOnlyList<SqlSymbol>> LoadColumnsAsync(SqlTarget target, ObjectInfo obj)
     {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         var data = await ProjectDatabase.ReadAsync(target,
-            "SELECT c.name,t.name FROM sys.columns c JOIN sys.types t ON t.user_type_id=c.user_type_id WHERE c.object_id=@id ORDER BY c.column_id", timeout.Token, new SqlParameter("@id", obj.Id));
+            "SELECT c.name,t.name FROM sys.columns c JOIN sys.types t ON t.user_type_id=c.user_type_id WHERE c.object_id=@id ORDER BY c.column_id", CancellationToken.None, new SqlParameter("@id", obj.Id));
         return data.Rows.Cast<DataRow>().Select(r => new SqlSymbol(obj.Symbol.Schema, obj.Symbol.Table, (string)r[0], (string)r[1])).ToList();
     }
 }

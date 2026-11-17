@@ -1,8 +1,8 @@
-import { Component, useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
+import { Component, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
 import type { ChangeEvent, ErrorInfo, KeyboardEvent as ReactKeyboardEvent, ReactNode, SyntheticEvent } from "react";
 import { createPortal } from "react-dom";
 import { ChevronRight, KeyRound, Play, RefreshCw } from "lucide-react";
-import { Button, DataGrid, IconButton, Modal, Select } from "../ui";
+import { Button, IconButton, Modal, Select } from "../ui";
 import { operation, quoteSqlName, request, writeClipboard } from "../bridge";
 import type { Table, Target } from "../bridge";
 import { useTask } from "./useTask";
@@ -201,7 +201,7 @@ function TableToolbarPortal({ slotId, children }: { slotId?: string; children: R
   return host ? createPortal(children, host) : null;
 }
 
-export function TableTool({ scope, target, targets, initialTable, toolbarSlotId, visible, onTargetChange, onText, onConnect, onTableChange }: {
+export function TableTool({ scope, target, targets, initialTable, toolbarSlotId, visible, onTargetChange, onText, onConnect, onTableChange, onCaptureData }: {
   scope: string;
   target?: Target;
   targets: Target[];
@@ -212,24 +212,21 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
   onText: (text: string, name: string) => void;
   onConnect: () => void;
   onTableChange: (table: string) => void;
+  onCaptureData: (target: Target, table: string, where: string) => void;
 }) {
   const [input, setInput] = useState(initialTable ?? ""), [where, setWhere] = useState(""),
     [columns, setColumns] = useState("*"),
     [readonly, setReadonly] = useState(false), [selectedColumns, setSelectedColumns] = useState<string[]>([]),
     [columnSearch, setColumnSearch] = useState(""), [filterField, setFilterField] = useState(""),
     [filterOperator, setFilterOperator] = useState("LIKE"), [filterValue, setFilterValue] = useState(""),
-    [mode, setMode] = useState<"data" | "structure">("data"),
     [catalog, setCatalog] = useState<{ targetId: string; tables: TableName[] }>(),
     [catalogRevision, setCatalogRevision] = useState(0),
     [quickCatalog, setQuickCatalog] = useState<{ targetId: string; query: string; tables: TableName[] }>(),
     [catalogError, setCatalogError] = useState(""),
     [carets, setCarets] = useState<Record<Clause, number>>({ select: 0, where: 0 }),
-    [structure, setStructure] = useState<{ key: string; data: Table }>(),
     [metadata, setMetadata] = useState<{ key: string; columns: TableColumn[] }>(),
     [metadataRevision, setMetadataRevision] = useState(0),
     [preview, setPreview] = useState<{ key: string; result: Preview }>(),
-    [selectedRows, setSelectedRows] = useState<number[]>([]),
-    [menu, setMenu] = useState<ColumnMenu>(),
     [columnMenu, setColumnMenu] = useState<ColumnMenu>(),
     [drop, setDrop] = useState<string[]>(),
     [scriptPreview, setScriptPreview] = useState<ScriptPreview>(),
@@ -243,9 +240,9 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
   const reading = useRef<ReturnType<typeof operation<Preview>>>();
   const [showQueryCancel, setShowQueryCancel] = useState(false);
   const autoReadKey = useRef("");
-  const contextMenu = useRef<HTMLDivElement>(null);
   const columnContextMenu = useRef<HTMLDivElement>(null);
   const scriptControls = useRef<HTMLDivElement>(null);
+  const scriptPopup = useRef<HTMLDivElement>(null);
   const name = parseTable(input);
   const targetId = target?.id;
   const reportedTable = useRef(initialTable ?? "");
@@ -271,11 +268,9 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
     }
     return ranked.flat().slice(0, 40);
   }, [candidates, query]);
-  const currentStructure = structure?.key === key && isTable(structure.data) ? structure.data : undefined;
   const currentMetadata = metadata?.key === key && Array.isArray(metadata.columns) ? metadata.columns : undefined;
   const currentPreview = preview?.key === key ? preview.result : undefined;
-  const fieldNames = currentMetadata?.map((column) => column.name)
-    ?? currentStructure?.rows.flatMap((row) => row[0] ? [row[0]] : []) ?? [];
+  const fieldNames = currentMetadata?.map((column) => column.name) ?? [];
   const filteredMetadata = (currentMetadata ?? []).filter((column) =>
     column.name.toLowerCase().includes(columnSearch.trim().toLowerCase()));
   const payload = { targetId, schema, table };
@@ -336,7 +331,6 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
     };
   }, [targetId, tables, query, catalogRevision]);
   useEffect(() => {
-    setStructure(undefined);
     setMetadata(undefined);
     setPreview(undefined);
     setDataError("");
@@ -353,30 +347,12 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
     if (initialTable && initialTable !== input) setInput(initialTable);
   }, [initialTable]);
   useEffect(() => {
-    setSelectedRows([]);
-    setMenu(undefined);
     setColumnMenu(undefined);
     setColumnMenuGroup(undefined);
     setDrop(undefined);
     setScriptPreview(undefined);
     setStatus("");
     setDataError("");
-    if (!targetId || !schema || !table || !knownTable) return;
-    let current = true;
-    let pending: ReturnType<typeof operation<Table>> | undefined;
-    const timer = window.setTimeout(() => {
-      pending = operation<Table>("table.structure", { targetId, schema, table });
-      void pending.promise.then((data) => {
-        if (!current) return;
-        setStructure({ key, data: normalizeTable(data, "cấu trúc bảng") });
-        setDataError("");
-      }).catch((error) => { if (current) setDataError((error as Error).message); });
-    }, 80);
-    return () => {
-      current = false;
-      window.clearTimeout(timer);
-      void pending?.cancel().catch(() => {});
-    };
   }, [key, targetId, schema, table, knownTable]);
   useEffect(() => {
     if (!targetId || !schema || !table || !knownTable) return;
@@ -405,37 +381,57 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
       .then(() => request("table.releaseSnapshot", { scope })).catch(() => {});
   }, [scope]);
   useEffect(() => {
-    if (!menu && !columnMenu && !scriptMenu) return;
+    if (!columnMenu && !scriptMenu) return;
     function dismiss(event: PointerEvent) {
       const element = event.target as Node;
-      if (!contextMenu.current?.contains(element)) setMenu(undefined);
       if (!columnContextMenu.current?.contains(element)) { setColumnMenu(undefined); setColumnMenuGroup(undefined); }
-      if (!scriptControls.current?.contains(element)) setScriptMenu(false);
+      if (!scriptControls.current?.contains(element) && !scriptPopup.current?.contains(element)) setScriptMenu(false);
     }
     function escape(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") { setMenu(undefined); setColumnMenu(undefined); setColumnMenuGroup(undefined); setScriptMenu(false); }
+      if (event.key === "Escape") { setColumnMenu(undefined); setColumnMenuGroup(undefined); setScriptMenu(false); }
     }
     document.addEventListener("pointerdown", dismiss);
     document.addEventListener("keydown", escape);
-    if (menu) contextMenu.current?.querySelector("button")?.focus();
     return () => {
       document.removeEventListener("pointerdown", dismiss);
       document.removeEventListener("keydown", escape);
     };
-  }, [menu, columnMenu, scriptMenu]);
+  }, [columnMenu, scriptMenu]);
+  useLayoutEffect(() => {
+    const popup = scriptPopup.current;
+    const trigger = scriptControls.current?.querySelector<HTMLButtonElement>("button");
+    if (!scriptMenu || !popup || !trigger) return;
+    popup.setAttribute("popover", "manual");
+    if (typeof popup.showPopover === "function") popup.showPopover();
+    const place = () => {
+      const rect = trigger.getBoundingClientRect();
+      const width = Math.min(250, window.innerWidth - 16);
+      const below = window.innerHeight - rect.bottom - 8;
+      const above = rect.top - 8;
+      const upward = below < 150 && above > below;
+      Object.assign(popup.style, {
+        width: `${width}px`,
+        left: `${Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8))}px`,
+        top: upward ? "auto" : `${rect.bottom + 4}px`,
+        bottom: upward ? `${window.innerHeight - rect.top + 4}px` : "auto",
+        maxHeight: `${Math.max(80, Math.min(220, upward ? above : below))}px`,
+      });
+    };
+    place();
+    window.addEventListener("resize", place);
+    document.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      document.removeEventListener("scroll", place, true);
+      if (popup.matches(":popover-open")) popup.hidePopover();
+    };
+  }, [scriptMenu]);
 
   const reportTableChange = (chosen: TableName) => {
     const next = tableIdentity(chosen);
     if (!next || reportedTable.current === next) return;
     reportedTable.current = next;
     onTableChange(next);
-  };
-  const readStructure = async (chosen = name) => {
-    if (!chosen || !targetId) return;
-    const data = normalizeTable(await request<unknown>("table.structure", { targetId, ...chosen }), "cấu trúc bảng");
-    reportTableChange(chosen);
-    setStructure({ key: JSON.stringify([targetId, chosen.schema, chosen.table]), data });
-    setSelectedRows([]);
   };
   const generatedWhere = () => {
     if (!filterField || !filterOperator) return "";
@@ -481,18 +477,25 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
       setFilterValue("");
       setCarets({ select: 0, where: 0 });
     }
-    if (mode === "data") void readData(chosen, changing ? { where: "", select: "*" } : undefined);
-    else void task.run(() => readStructure(chosen));
+    void readData(chosen, changing ? { where: "", select: "*" } : undefined);
   }
-  function generateScript(kind: "create" | "insert") {
+  function captureSqlDataKey() {
+    setScriptMenu(false);
+    if (!target || !name || !knownTable) {
+      setStatus("Chọn một bảng hợp lệ trước khi thêm key vào SQL Data.");
+      return;
+    }
+    const tableName = name.schema === "dbo" ? name.table : `${name.schema}.${name.table}`;
+    onCaptureData(target, tableName, where.trim() || "1=1");
+    setStatus(`Đã gửi ${tableName}: ${where.trim() || "1=1"} vào SQL Data.`);
+  }
+  function generateScript(kind: "create" | "drop") {
     setScriptMenu(false);
     void task.run(async () => {
       if (!table || !schema || !targetId) return;
-      if (kind === "insert") {
-        if (currentPreview?.data.rows.length) {
-          const script = await request<string>("table.insertScript", { scope, snapshotId: currentPreview.snapshotId });
-          onText(script, table + "-insert.sql");
-        }
+      if (kind === "drop") {
+        const qualified = quoteSqlName(schema, table);
+        onText(`IF OBJECT_ID(N'${qualified.replaceAll("'", "''")}', N'U') IS NOT NULL\r\nDROP TABLE ${qualified}\r\nGO\r\n`, table + "-drop.sql");
         return;
       }
       const script = await request<string>("table.createScript", payload);
@@ -525,13 +528,14 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
       }
     });
   }
-  function commitRow(rowIndex: number, values: (string | null)[]) {
+  async function commitRows(drafts: [number, (string | null)[]][]) {
     if (readonly || !currentPreview || !currentMetadata || !name || !targetId) return;
-    void task.run(async () => {
+    return task.run<{ saved: true } | { saved: false; row: number }>(async () => {
       const visibleColumns = currentPreview.data.columns;
+      const writes = drafts.flatMap(([rowIndex, values]) => {
       if (rowIndex >= 0) {
         const original = currentPreview.data.rows[rowIndex];
-        if (!original) return;
+        if (!original) return [];
         const primary = currentMetadata.filter((column) => column.primaryKey);
         if (!primary.length || primary.some((column) => !visibleColumns.some((name) => name.toLowerCase() === column.name.toLowerCase())))
           throw new Error("Bảng không có đủ khóa chính trong kết quả để cập nhật dòng.");
@@ -541,33 +545,40 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
           old: original[index] ?? null,
         })).filter((entry) => entry.value !== entry.old && currentMetadata.some((meta) =>
           meta.name.toLowerCase() === entry.column.toLowerCase() && meta.writable));
-        if (!changes.length) return;
+        if (!changes.length) return [];
         const keyEntries = primary.map((column) => {
           const index = visibleColumns.findIndex((name) => name.toLowerCase() === column.name.toLowerCase());
           return { name: column.name, value: original[index] ?? null };
         });
-        await request("table.write", {
-          ...payload,
+        return [{
+          rowIndex,
           mode: "update",
           columns: changes.map((entry) => entry.column),
           values: changes.map((entry) => entry.value),
           keyColumns: keyEntries.map((entry) => entry.name),
           keyValues: keyEntries.map((entry) => entry.value),
-        });
-      } else {
-        if (values.every((value) => value == null || value === "")) return;
-        await request("table.write", { ...payload, mode: "insert", columns: visibleColumns, values });
+        }];
       }
-      setPreview(undefined);
-       await readDataRequest();
-      setStatus(rowIndex < 0 ? "Đã thêm dòng dữ liệu." : "Đã cập nhật dòng dữ liệu.");
+      return [{ rowIndex, mode: "insert", columns: visibleColumns, values, keyColumns: [], keyValues: [] }];
+      });
+      if (!writes.length) return { saved: true };
+      const result = await request<{ conflict?: number | null }>("table.writeBatch", { ...payload, rows: writes });
+      if (result.conflict != null) return { saved: false, row: writes[result.conflict].rowIndex };
+      setStatus("Đã lưu dữ liệu.");
+      try {
+        await readDataRequest();
+      } catch (error) {
+        setDataError((error as Error).message);
+        setPreview(undefined);
+      }
+      return { saved: true };
     });
   }
   function selectColumns(names: string[]) {
     setSelectedColumns(names);
     setColumns(names.length ? names.map((name) => "[" + name.replaceAll("]", "]]" ) + "]").join(", ") : "*");
   }
-  const view = mode === "structure" ? currentStructure : currentPreview?.data;
+  const view = currentPreview?.data;
   const filterOptions = [
     { value: "", label: "Chọn trường" },
     ...fieldNames.map((field) => ({ value: field, label: field })),
@@ -587,10 +598,10 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
     { output: "open", label: "Mở thành tab SQL" },
   ];
   const toolbarControls = <div className="table-toolbar-controls">
-    {targets.length > 0 && <Select label="Cơ sở dữ liệu" value={targetId ?? ""} disabled={task.busy || !!drop}
+    {targets.length > 0 && <Select floating label="Cơ sở dữ liệu" value={targetId ?? ""} disabled={task.busy || !!drop}
       options={targets.map((entry) => ({
         value: entry.id,
-        label: (/_S(?:ys)?$/i.test(entry.database) ? "SYS · " : /_A(?:pp)?$/i.test(entry.database) ? "Ứng dụng · " : "") + entry.database,
+        label: /_S(?:ys)?$/i.test(entry.database) ? "Sys" : "App",
       }))}
       onChange={(id) => {
         const next = targets.find((entry) => entry.id === id);
@@ -601,20 +612,33 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
       setQuickCatalog(undefined);
       setCatalogRevision((version) => version + 1);
     }}><RefreshCw size={15} /></IconButton>}
-    <Button aria-pressed={mode === "data"} variant={mode === "data" ? "secondary" : "ghost"} onClick={() => setMode("data")}>Dữ liệu</Button>
-    <Button aria-pressed={mode === "structure"} variant={mode === "structure" ? "secondary" : "ghost"} onClick={() => setMode("structure")}>Cấu trúc</Button>
     <div ref={scriptControls} className="relative">
-      <Button aria-expanded={scriptMenu} disabled={!canRead} onClick={() => setScriptMenu(!scriptMenu)}>Tập lệnh</Button>
-      {scriptMenu && <div className="table-action-menu absolute top-full right-0 z-10" aria-label="Loại lệnh SQL">
-        <Button variant="ghost" onClick={() => generateScript("create")}>Tạo lệnh tạo bảng</Button>
-        <Button variant="ghost" disabled={mode !== "data" || !currentPreview?.data.rows.length} onClick={() => generateScript("insert")}>Tạo lệnh thêm dữ liệu đang hiển thị</Button>
+      <Button aria-expanded={scriptMenu} aria-haspopup="menu" disabled={!canRead} onClick={() => setScriptMenu(!scriptMenu)}>Tập lệnh</Button>
+      {scriptMenu && <div ref={scriptPopup} className="table-action-menu table-script-menu" role="menu" aria-label="Loại lệnh SQL">
+        <Button role="menuitem" variant="ghost" onClick={captureSqlDataKey}>Thêm key vào SQL Data<kbd>Ctrl+D</kbd></Button>
+        <Button role="menuitem" variant="ghost" onClick={() => generateScript("create")}>Tạo lệnh tạo bảng</Button>
+        <Button role="menuitem" variant="ghost" onClick={() => generateScript("drop")}>Tạo lệnh xóa bảng</Button>
       </div>}
     </div>
     {target ? <span className="table-toolbar-row-count muted" title={target.server + " / " + target.database}>{view?.rows.length ?? 0} dòng</span>
       : <Button onClick={onConnect}>Kết nối SQL</Button>}
   </div>;
   return (
-    <div className="table-inspection flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-hidden p-3">
+    <div className="table-inspection flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-hidden p-3"
+      onKeyDown={event => {
+        if (visible && !event.defaultPrevented && (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "s") {
+          event.preventDefault();
+          event.currentTarget.querySelector<HTMLButtonElement>(".table-save-bar button")?.click();
+          return;
+        }
+        if (!visible || !(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey || event.key.toLowerCase() !== "d") return;
+        event.preventDefault();
+        if (!target || !name || !knownTable) {
+          setStatus("Chọn một bảng hợp lệ trước khi nhấn Ctrl+D.");
+          return;
+        }
+        captureSqlDataKey();
+      }}>
       <div className="table-query-panel">
         <div className="table-query-row">
           <SuggestedInput label="SELECT" placeholder="*" value={columns}
@@ -626,7 +650,7 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
             onChange={setInput} onChoose={chooseTable} disabled={task.busy} focus={visible} className="table-query-from"
             onSubmit={() => { if (canRead) void readData(); }} />
           <label className="table-readonly"><input type="checkbox" checked={readonly} onChange={(event) => setReadonly(event.target.checked)} /> Readonly</label>
-          <Button variant="primary" disabled={!canRead} onClick={() => void (mode === "data" ? readData() : task.run(readStructure))}>
+          <Button variant="primary" disabled={!canRead} onClick={() => void readData()}>
             <Play size={14} />Chạy
           </Button>
           <span className="table-query-cancel-slot">
@@ -681,25 +705,12 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
           </div>
         </aside>
         <section className="table-inspection-content">
-          {mode === "data" && currentPreview?.data && currentMetadata ? <TableDataGrid
-            table={currentPreview.data} metadata={currentMetadata} readonly={readonly} busy={task.busy || previewPending} onCommit={commitRow}
+          {currentPreview?.data && currentMetadata ? <TableDataGrid
+            table={currentPreview.data} metadata={currentMetadata} readonly={readonly} busy={task.busy || previewPending} onCommit={commitRows}
             emptyMessage={filterField && (filterOperator === "IS NULL" || filterOperator === "IS NOT NULL" || filterValue.trim())
               ? "Không tìm thấy dữ liệu phù hợp."
               : undefined} />
-            : view ? <DataGrid key={mode + key} table={view} rangeSelection
-              selectedRows={mode === "structure" ? selectedRows : undefined}
-              onSelectionChange={mode === "structure" ? setSelectedRows : undefined}
-              onRowContextMenu={mode === "structure" && !task.busy ? (row, event) => {
-                event.preventDefault();
-                const rows = selectedRows.includes(row) ? selectedRows : [row];
-                setSelectedRows(rows);
-                setMenu({
-                  x: Math.max(8, Math.min(event.clientX, innerWidth - 224)),
-                  y: Math.max(8, Math.min(event.clientY, innerHeight - 132)),
-                  columns: rows.flatMap((index) => view.rows[index]?.[0] ? [view.rows[index][0]!] : []),
-                });
-              } : undefined} />
-              : <div className="empty">{task.busy ? "Đang đọc bảng…" : "Chọn bảng để xem cấu trúc hoặc đọc tối đa 1.000 dòng dữ liệu."}</div>}
+            : <div className="empty">{task.busy ? "Đang đọc bảng…" : "Chọn bảng để đọc tối đa 1.000 dòng dữ liệu."}</div>}
         </section>
       </div>
       {currentMetadata && <div className="table-filter-row">
@@ -708,22 +719,6 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
         <input aria-label="Giá trị lọc" placeholder="Giá trị" value={filterValue} onChange={(event) => setFilterValue(event.target.value)} disabled={!filterField || filterOperator === "IS NULL" || filterOperator === "IS NOT NULL"} />
         <Button variant="secondary" disabled={!canRead || !filterField} onClick={() => void readData()}>Lọc</Button>
       </div>}
-      {menu && (
-        <div ref={contextMenu} className="table-action-menu fixed z-20" style={{ left: menu.x, top: menu.y }} aria-label="Thao tác cột">
-          {([["addScript", "THÊM CỘT"], ["alterScript", "SỬA CỘT"]] as const).map(([method, label]) =>
-            <Button key={method} variant="ghost" onClick={() => {
-              setMenu(undefined);
-              void task.run(async () => {
-                const script = await request<string>("table." + method, { ...payload, columns: menu.columns });
-                await writeClipboard(script);
-                setStatus("Đã sao chép lệnh " + label + ".");
-              });
-            }}>Tạo lệnh {label}</Button>)}
-          <Button variant="ghost" className="table-drop-action" onClick={() => {
-            setMenu(undefined); setDrop(menu.columns);
-          }}>Xóa cột</Button>
-        </div>
-      )}
       {columnMenu && <div ref={columnContextMenu} className="table-action-menu table-column-context-menu fixed z-20" style={{ left: columnMenu.x, top: columnMenu.y }} aria-label="Thao tác trường">
         {scriptGroups.map((group) => <div key={group.action} className="table-context-group">
           <Button variant="ghost" onClick={() => setColumnMenuGroup(columnMenuGroup === group.action ? undefined : group.action)}>
@@ -752,7 +747,7 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
           setColumnMenuGroup(undefined);
           setMetadata(undefined);
           setMetadataRevision((version) => version + 1);
-          void (mode === "data" ? readData() : task.run(readStructure));
+          void readData();
         }}>Tải lại</Button>
       </div>}
       {scriptPreview && <TableScriptDialog title={scriptPreview.title} script={scriptPreview.script}
@@ -787,7 +782,7 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
                 setDrop(undefined);
                 setMetadata(undefined);
                 setMetadataRevision((version) => version + 1);
-                await readStructure();
+                await readDataRequest();
                 setStatus("Đã xóa cột.");
               })}>Xóa cột</Button>
             </div>

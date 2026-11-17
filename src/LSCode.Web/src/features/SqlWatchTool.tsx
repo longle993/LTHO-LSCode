@@ -41,7 +41,7 @@ export function SqlWatchTool({ targets, initialTarget, onFromEditor, onBusyChang
     const query = watch.mode === "expression" ? `SELECT (${watch.text.trim()}) AS [Watch];` : watch.text;
     // No GO here: DECLARE and table variables in the final context batch stay in scope.
     const sql = context.trim() ? `${context}\n;\n${query}` : query;
-    const op = operation<QueryResult>("sql.execute", { targetId, sql }, 180_000);
+    const op = operation<QueryResult>("sql.execute", { targetId, sql });
     pending.current = op;
     try {
       const value = await op.promise;

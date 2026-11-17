@@ -173,6 +173,22 @@ try
     Assert(ProjectImporter.Merge(importedProjects, revisedProject, false).Projects[0].Field("CustomFlag") == "42", "Project merge keep existing");
     Assert(ProjectImporter.Merge(importedProjects, revisedProject, true).Projects[0].Field("CustomFlag") == "43", "Project merge explicit overwrite");
     Assert(!ProjectImporter.Export(importedProjects).Contains("fixture-only") && ProjectImporter.Export(importedProjects).Contains("Nested"), "Project export blanks credential fields, retains metadata");
+    var catalogInput = Path.Combine(root, "catalog-input.xml");
+    await File.WriteAllTextAsync(catalogInput, projectXml);
+    var filePreview = ProjectImporter.PreviewFile([], catalogInput, false);
+    Assert(filePreview is { Total: 1, Added: 1, Updated: 0, Skipped: 0 } &&
+        ProjectImporter.ReadFile(catalogInput).Single().Field("CustomFlag") == "42",
+        "Project file import streams XML and returns compact counts");
+    var catalogOutput = Path.Combine(root, "catalog-output.xml");
+    Assert(ProjectImporter.ExportFile(importedProjects, catalogOutput) == 1 &&
+        (await File.ReadAllTextAsync(catalogOutput)).Contains("Nested") &&
+        !(await File.ReadAllTextAsync(catalogOutput)).Contains("fixture-only") &&
+        !Directory.EnumerateFiles(root, ".catalog-output.xml.*.tmp").Any(),
+        "Project file export replaces atomically and redacts credentials");
+    var dtdCatalog = Path.Combine(root, "catalog-dtd.xml");
+    await File.WriteAllTextAsync(dtdCatalog, "<!DOCTYPE x [<!ENTITY e 'x'>]><NewDataSet/>");
+    await Throws<System.Xml.XmlException>(() => Task.Run(() => ProjectImporter.ReadFile(dtdCatalog)),
+        "Project file import prohibits DTD processing");
     var customerRoot = Path.Combine(root, "CustomerPro");
     var application = Path.Combine(customerRoot, "FBI", "DEMO", "FBISP24"); Directory.CreateDirectory(application);
     var configPath = Path.Combine(application, "web.config");
@@ -189,8 +205,17 @@ try
     await Throws<ArgumentException>(() => Task.FromResult(ProjectDiscovery.Find(customerRoot, "../escape", CancellationToken.None)), "Reject project traversal");
     var secondApplication = Path.Combine(customerRoot, "FBI", "DEMO", "FBISP25"); Directory.CreateDirectory(secondApplication); File.Copy(configPath, Path.Combine(secondApplication, "web.config"));
     Assert(ProjectDiscovery.Find(customerRoot, "DEMO", CancellationToken.None).Count == 2, "Preserve multiple application candidates");
-    var hierarchy = CommandHierarchy.Build([new("01", "", "Root", "", ""), new("01.01", "01", "Child", "", ""), new("orphan", "missing", "Orphan", "", ""), new("cycleA", "cycleB", "A", "", ""), new("cycleB", "cycleA", "B", "", "")]);
-    Assert(hierarchy.Count == 4 && hierarchy.Single(n => n.Entry.Id == "01").Children.Count == 1, "Command tree parent mapping, orphan preservation and cycle protection");
+    var hierarchy = CommandHierarchy.Build([
+        new("01", "", "Root", "", ""),
+        new("01.01", "01", "Child", "", ""),
+        new("01.01.01", "01.01", "Grandchild", "", ""),
+        new("01.01.01.01", "01.01.01", "Fourth level", "", ""),
+        new("orphan", "missing", "Orphan", "", ""),
+        new("cycleA", "cycleB", "A", "", ""),
+        new("cycleB", "cycleA", "B", "", "")]);
+    var hierarchyRoot = hierarchy.Single();
+    Assert(hierarchyRoot.Entry.Id == "01" && hierarchyRoot.Children.Single().Children.Single().Entry.Id == "01.01.01", "FSD menu tree maps root, child and grandchild");
+    Assert(hierarchyRoot.Children.Single().Children.Single().Children.Count == 0, "FSD menu tree excludes fourth level, orphans and cycles");
     var searchable = CommandHierarchy.Build([new("1", "", "Kế toán", "", "", "root"), new("2", "1", "Phiếu thu", "", "", "GLTran")]);
     Assert(CommandHierarchy.Filter(searchable, "gltran").Single().Children.Single().Entry.Id == "2", "Menu sysid search preserves ancestor path");
     Assert(CommandHierarchy.Filter(searchable, "phiếu").Count == 1 && CommandHierarchy.Filter(searchable, "missing").Count == 0, "Menu name search and no-result state");

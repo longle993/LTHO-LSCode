@@ -42,29 +42,7 @@ await page.addInitScript(()=>{
       case 'project.refreshConfig':result=projectRoot+'\\web.config';break;
       case 'project.structure.preview':result={path:projectRoot+'\\Controller\\Structure\\App',count:2};break;
       case 'project.structure.clear':result=2;break;
-      case 'project.commands':result=[{entry:{id:'menu1',caption:'Nhân viên',sysId:'HR',commandId:'Dir',link:'nhanvien.aspx'},children:[]},{entry:{id:'menu2',caption:'Bộ phận',sysId:'HR',commandId:'Dept',link:'bophan.aspx'},children:[]},{entry:{id:'menu3',caption:'Thông tin nhân viên',sysId:'HR',commandId:'Info',link:'hrEmployeeInformation.aspx'},children:[]},{entry:{id:'menu-parent',caption:'Tổng hợp',sysId:'HR',commandId:'Summary',link:'tonghop.aspx'},children:[{entry:{id:'menu-child',caption:'Chi tiết tổng hợp',sysId:'HR',commandId:'Detail',link:'chitiet.aspx'},children:[]}]},{entry:{id:'separator',caption:'-',sysId:'',commandId:'',link:''},children:[]}];break;
-      case 'project.menu.details':result={mode:'edit',fields:[
-        {name:'wmenu_id',type:'varchar',maxLength:32,nullable:false,readOnly:true},
-        {name:'wmenu_id0',type:'varchar',maxLength:32,nullable:true,readOnly:false},
-        {name:'bar',type:'nvarchar',maxLength:120,nullable:false,readOnly:false},
-        {name:'bar2',type:'nvarchar',maxLength:120,nullable:true,readOnly:false},
-        {name:'menu_id',type:'varchar',maxLength:32,nullable:true,readOnly:false},
-        {name:'link',type:'varchar',maxLength:240,nullable:true,readOnly:false},
-        {name:'sysid',type:'varchar',maxLength:64,nullable:true,readOnly:false},
-      ],values:{wmenu_id:'menu1',wmenu_id0:'',bar:'Nhân viên',bar2:'Employees',menu_id:'Dir',link:'nhanvien.aspx',sysid:'HR'},version:'fixture',canSave:true};break;
-      case 'project.menu.resources':{
-        const files=folder=>({path:`App_Data\\Controllers\\${folder}\\nhanvien.xml`,tables:['m29$000000']});
-        result={controllers:['nhanvien'],resources:[
-          {kind:'Dir',status:'found',paths:[files('Dir').path],files:[files('Dir')]},
-          {kind:'Filter',status:'found',paths:[files('Filter').path],files:[files('Filter')]},
-          {kind:'Grid',status:'found',paths:[files('Grid').path],files:[files('Grid')]},
-          {kind:'Report',status:'found',paths:[files('Report').path],files:[files('Report')]},
-          {kind:'Lookup',status:'missing',paths:[],files:[]},
-          {kind:'Upload',status:'found',paths:[files('Templates').path],files:[files('Templates')]},
-          {kind:'Main',status:'found',paths:['Main\\nhanvien.aspx'],files:[{path:'Main\\nhanvien.aspx',tables:[]}]},
-        ],tables:['m29$000000']};
-        break;
-      }
+      case 'project.commands':result=[{entry:{id:'menu1',caption:'Nhân viên',sysId:'HR',commandId:'Dir',link:'nhanvien.aspx'},children:[]},{entry:{id:'menu2',caption:'Bộ phận',sysId:'HR',commandId:'Dept',link:'bophan.aspx'},children:[]},{entry:{id:'menu3',caption:'Thông tin nhân viên',sysId:'HR',commandId:'Info',link:'hrEmployeeInformation.aspx'},children:[]},{entry:{id:'separator',caption:'-',sysId:'',commandId:'',link:''},children:[]}];break;
       case 'project.employeeTabs':result=[{sysId:'hrPIGeneralInformation',caption:'Thông tin chung'},{sysId:'hrPIPassportVisa',caption:'Hộ chiếu, thị thực'}];break;
       case 'project.controller':{
         const link=request.payload.link;
@@ -135,6 +113,7 @@ await page.addInitScript(()=>{
       case 'table.alterScript':result='ALTER TABLE [dbo].[DanhMuc] ALTER COLUMN [label] NVARCHAR(20) NULL;';break;
       case 'table.script':result=request.payload.action==='alter'?'ALTER TABLE [dbo].[DanhMuc] ALTER COLUMN [label] NVARCHAR(20) NULL;':request.payload.action==='drop'?'ALTER TABLE [dbo].[DanhMuc] DROP COLUMN [label];':request.payload.action==='create'?'CREATE TABLE [dbo].[DanhMuc] ([code] INT);':request.payload.action==='log'?'SELECT [label] FROM sys.columns;':request.payload.action==='addmanual'?'ALTER TABLE [dbo].[DanhMuc] ADD [new_column] NVARCHAR(16) NULL;':'ALTER TABLE [dbo].[DanhMuc] ADD [label] NVARCHAR(20) NULL;';break;
       case 'table.write':result=1;break;
+      case 'table.writeBatch':result={conflict:request.payload.rows.some(row=>row.values.includes('duplicate-fixture'))?0:null};break;
       case 'table.dropColumns':window.__columnDropped=true;result=true;break;
       case 'table.createScript':result='CREATE TABLE [dbo].[DanhMuc] ([code] INT);';break;
       case 'table.view':result={data:{columns:['code','label'],rows:request.payload.where?.includes("LIKE N'%ab%'")?[]:[['1','x'],['2','y']]},snapshotId:'fixture-preview'};break;
@@ -206,6 +185,22 @@ try{
     window.__nativeCalls.some(call=>call.method==='settings.save'&&call.payload.settings.accentColor==='#ad82ee')),
     'Accent color applies and persists in workspace settings');
   check(true,'Theme setting updates workbench and Monaco');await page.screenshot({path:out+'/desktop-code-dark.png'});
+  await page.getByRole('button',{name:'Cài đặt',exact:true}).click();
+  await page.getByRole('tab',{name:'Phím tắt',exact:true}).click();
+  check(await page.getByRole('heading',{name:'File & cửa sổ',exact:true}).isVisible() &&
+    await page.getByRole('heading',{name:'SQL & dữ liệu',exact:true}).isVisible(),
+    'Shortcut settings use a dedicated tab grouped by function');
+  await page.getByRole('searchbox',{name:'Tìm phím tắt',exact:true}).fill('Generate Update');
+  check(await page.getByText('Generate Update',{exact:true}).isVisible(),'Shortcut settings can filter commands');
+  await page.getByRole('button',{name:'Hủy',exact:true}).click();
+  await page.keyboard.press('Control+Shift+p');
+  check(await page.getByRole('textbox',{name:'Tìm lệnh hoặc file'}).evaluate(element=>element===document.activeElement),
+    'Ctrl+Shift+P focuses command search immediately');
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Control+Shift+4');
+  await page.getByRole('tabpanel',{name:'Generate Update'}).waitFor();
+  check(true,'Ctrl+Shift+4 opens Generate Update when Shift+4 reports a symbol');
+  await page.getByRole('button',{name:'Đóng Generate Update',exact:true}).click();
   await page.keyboard.press('Control+n');
   await page.getByRole('button',{name:'Kết nối SQL',exact:true}).click();await page.getByRole('textbox',{name:'Database',exact:true}).fill('Fixture_Sys');await page.getByRole('button',{name:'Kết nối',exact:true}).click();await page.locator('dialog').waitFor({state:'detached'});
   await page.getByRole('tab').first().click();check((await page.getByRole('button',{name:'Database của tab',exact:true}).textContent()).includes('Fixture_App'),'Old tab keeps App target after new connection');
@@ -355,31 +350,8 @@ try{
   check(await fileTree.getByRole('button',{name:'App_Data',exact:true}).getAttribute('aria-expanded')==='true' &&
     await fileTree.getByRole('button',{name:'Controllers',exact:true}).getAttribute('aria-expanded')==='true',
     'ERP function reveals actual App_Data and Controllers ancestors');
-  check(await page.evaluate(before=>window.__nativeCalls.filter(c=>c.method==='document.open').length===before+1,openedBefore),
-    'Opening a function keeps the focused source document active');
-  await page.getByRole('button',{name:'Chức năng',exact:true}).click();
-  await page.getByRole('button',{name:'Nhân viên',exact:true}).click();
-  await page.keyboard.press('F3');
-  const menuDialog=page.getByLabel('Thông tin menu ERP');
-  await menuDialog.waitFor();
-  check(await menuDialog.getByRole('tab').allTextContents().then(tabs=>tabs.join('|')==='Dir (1)|Filter (1)|Grid (1)|Report (1)|Lookup (0)|Upload (1)'),
-    'F3 opens menu details with all resource tabs');
-  await menuDialog.getByRole('tab',{name:/Dir/}).click();
-  const resourceRow=menuDialog.getByRole('button',{name:/App_Data\\Controllers\\Dir\\nhanvien\.xml/});
-  await resourceRow.click({button:'right'});
-  const resourceMenu=page.getByRole('menu',{name:'Thao tác file và thư mục'});
-  check(await resourceMenu.getByRole('menuitem').allTextContents().then(items=>
-    ['Sao chép tên','Sao chép đường dẫn','Đổi tên','Mở thư mục chứa file','Nhân bản file'].every(label=>items.some(item=>item.startsWith(label)))),
-    'F3 file rows expose the same context actions as the File tab');
-  await resourceMenu.getByRole('menuitem',{name:/^Sao chép tên/}).click();
-  await page.waitForFunction(()=>window.__nativeCalls.some(c=>c.method==='clipboard.write'&&c.payload.text==='nhanvien.xml'));
-  await resourceRow.click({button:'right'});
-  await page.getByRole('menu',{name:'Thao tác file và thư mục'}).getByRole('menuitem',{name:'Mở thư mục chứa file',exact:true}).click();
-  await page.waitForFunction(path=>window.__nativeCalls.some(c=>c.method==='workspace.reveal'&&c.payload.path===path),dirPath+'\\nhanvien.xml');
-  await resourceRow.click();
-  await page.getByRole('tab',{name:'nhanvien.xml — Dir',exact:true}).waitFor();
-  check(await page.getByRole('button',{name:'File',exact:true}).getAttribute('aria-selected')==='true',
-    'Clicking a related file switches to File and opens the source');
+  check(await page.evaluate(before=>window.__nativeCalls.filter(c=>c.method==='document.open').length===before,openedBefore),
+    'Opening a function expands folders without opening a document');
   check(await fileTree.getByTitle(dirPath+'\\bophan.xml',{exact:true}).count()===0,
     'The controller tree excludes files from other controllers in the same directory');
   check(await fileTree.locator('.category-heading').allTextContents().then(names=>
@@ -590,6 +562,14 @@ try{
   await page.keyboard.press('Control+c');
   await page.waitForFunction(()=>window.__nativeCalls.some(call=>call.method==='clipboard.write'&&call.payload.text==='1\tx\r\n2\ty'));
   check(await tablePanel.locator('.grid-copy-menu').count()===0,'Table grid copies a dragged cell range with Ctrl+C');
+  await tablePanel.locator('.table-data-grid td[title="1"]').click();
+  await page.keyboard.press('ArrowRight');
+  check(await tablePanel.locator('.table-data-grid td[title="x"]').evaluate(cell=>getComputedStyle(cell).outlineStyle==='solid'),
+    'A single click selects one cell and arrow keys move the active cell');
+  await tablePanel.locator('.table-data-grid thead th').filter({hasText:'label'}).click();
+  await page.keyboard.press('Control+c');
+  await page.waitForFunction(()=>window.__nativeCalls.some(call=>call.method==='clipboard.write'&&call.payload.text==='x\r\ny'));
+  check(true,'Table grid selects and copies an entire column like the SQL result grid');
   check(await page.evaluate(()=>window.__nativeCalls.filter(c=>c.method==='table.catalog').length===1 &&
     !window.__nativeCalls.some(c=>c.method==='table.structure'&&c.payload.table==='danh')),
     'Table search reuses one catalog and opens the selected table immediately');
@@ -626,32 +606,41 @@ try{
   await page.waitForFunction(()=>window.__nativeCalls.some(c=>c.method==='table.view' &&
     c.payload.select==='COUNT(*) AS total' && c.payload.where==='code IS NOT NULL' && !c.payload.orderBy));
   check(true,'SELECT and WHERE suggestions produce SQL expressions in the query');
-  await tablePanel.getByRole('button',{name:'Cấu trúc',exact:true}).click();
-  await tablePanel.getByText('PK · PK_DanhMuc',{exact:true}).waitFor();
-  await tablePanel.locator('.data-grid').getByText('label',{exact:true}).click({button:'right'});
-  await tablePanel.getByRole('button',{name:'Tạo lệnh THÊM CỘT',exact:true}).click();
-  await page.waitForFunction(()=>window.__nativeCalls.some(c=>c.method==='clipboard.write'&&c.payload.text.includes('ADD [label]')));
-  await tablePanel.locator('.data-grid').getByText('label',{exact:true}).click({button:'right'});
-  await tablePanel.getByRole('button',{name:'Tạo lệnh SỬA CỘT',exact:true}).click();
-  await page.waitForFunction(()=>window.__nativeCalls.some(c=>c.method==='clipboard.write'&&c.payload.text.includes('ALTER COLUMN [label]')));
-  check(true,'Separate ADD and ALTER actions copy the script for the selected column');
-  await tablePanel.locator('.data-grid').getByText('label',{exact:true}).click({button:'right'});
-  await tablePanel.getByRole('button',{name:'Xóa cột',exact:true}).click();
-  check(await page.evaluate(()=>!window.__nativeCalls.some(c=>c.method==='table.dropColumns')),'Drop column waits for explicit confirmation');
-  await page.getByRole('dialog',{name:'Xóa cột khỏi bảng'}).getByRole('button',{name:'Xóa cột',exact:true}).click();
-  await tablePanel.getByText('Đã xóa cột.',{exact:true}).waitFor();
-  check(await tablePanel.getByText('label',{exact:true}).count()===0,'Confirmed drop reloads the table structure');
-  await tablePanel.getByRole('button',{name:'Dữ liệu',exact:true}).click();
+  check(await tablePanel.getByRole('button',{name:'Dữ liệu',exact:true}).count()===0 &&
+    await tablePanel.getByRole('button',{name:'Cấu trúc',exact:true}).count()===0,
+    'Table inspection uses one editable data workspace');
+  await selectInput.fill('*');await whereInput.fill('');
   await tablePanel.getByRole('button',{name:'Chạy',exact:true}).click();
   await tablePanel.locator('.data-grid td[title="1"]').waitFor();
+  const editableCell=tablePanel.locator('.table-data-grid td[title="x"]');
+  await editableCell.dblclick();
+  const editableInput=tablePanel.getByRole('textbox',{name:'label dòng 1',exact:true});
+  await editableInput.fill('đã sửa');await editableInput.press('Enter');
+  check(await page.evaluate(()=>!window.__nativeCalls.some(call=>call.method==='table.writeBatch')), 'Enter stages the edit');
+  await page.keyboard.press('Control+s');
+  await page.waitForFunction(()=>window.__nativeCalls.some(call=>call.method==='table.writeBatch'&&call.payload.rows[0].mode==='update'));
+  await tablePanel.locator('.table-data-grid td[title="1"]').dblclick();
+  const keyEditor=tablePanel.locator('.table-data-grid input[data-edit-cell="0:0"]');
+  await keyEditor.fill('duplicate-fixture');
+  await keyEditor.press('Enter');
+  await tablePanel.getByRole('button',{name:'Lưu',exact:true}).click();
+  await tablePanel.locator('.table-data-grid td[aria-invalid="true"][title="1"]').waitFor();
+  check(true,'A duplicate key restores and marks the original cell');
+  check(true,'Editable data grid supports direct cell editing');
   await page.getByRole('button',{name:'Tập lệnh',exact:true}).click();
-  await page.getByRole('button',{name:'Tạo lệnh thêm dữ liệu đang hiển thị'}).click();
-  await page.getByRole('tab',{name:'DanhMuc-insert.sql'}).waitFor();
+  check(await page.locator('.table-script-menu:popover-open').evaluate(element=>getComputedStyle(element).position==='fixed'),
+    'Table action menu opens in the top layer without toolbar clipping');
+  await page.getByRole('menuitem',{name:'Thêm key vào SQL Data'}).click();
+  await page.getByRole('tab',{name:'Generate Update',exact:true}).waitFor();
   await firstTableTab.click();
   await page.getByRole('button',{name:'Tập lệnh',exact:true}).click();
-  await page.getByRole('button',{name:'Tạo lệnh tạo bảng',exact:true}).click();
+  await page.getByRole('menuitem',{name:'Tạo lệnh tạo bảng',exact:true}).click();
   await page.getByRole('tab',{name:'DanhMuc-create.sql'}).waitFor();
-  check(true,'Both table scripts open in editor tabs');
+  await firstTableTab.click();
+  await page.getByRole('button',{name:'Tập lệnh',exact:true}).click();
+  await page.getByRole('menuitem',{name:'Tạo lệnh xóa bảng',exact:true}).click();
+  await page.getByRole('tab',{name:'DanhMuc-drop.sql'}).waitFor();
+  check(true,'Table action menu captures SQL Data keys and opens create/drop scripts');
   await page.keyboard.press('Control+Shift+t');
   const secondTableTab=page.getByRole('tab',{name:/^Cấu trúc và dữ liệu 2/});
   const secondTablePanel=page.locator('#'+await secondTableTab.getAttribute('aria-controls'));
@@ -663,9 +652,6 @@ try{
   await firstTableTab.click();
   check(await tableInput.inputValue()==='DanhMuc' && secondTableName==='DanhMuc_Archive',
     'Independent inspection tabs retain their selected tables');
-  await page.getByRole('button',{name:'Tập lệnh',exact:true}).click();
-  await page.getByRole('button',{name:'Tạo lệnh thêm dữ liệu đang hiển thị'}).click();
-  await page.waitForFunction(()=>window.__nativeCalls.filter(call=>call.method==='table.insertScript').length===2);
   check(await page.evaluate(()=>new Set(window.__nativeCalls.filter(call=>call.method==='table.view').map(call=>call.payload.scope)).size===2),
     'Inspection data previews use independent native scopes');
   check(await page.evaluate(()=>window.__nativeCalls.filter(call=>call.method==='table.catalog').length===1),
@@ -673,14 +659,17 @@ try{
   await page.getByRole('button',{name:'SQL Profiler',exact:true}).click();
   await secondTableTab.click();
   const tableDatabase=page.getByRole('button',{name:'Cơ sở dữ liệu',exact:true});
-  const nextDb=(await tableDatabase.textContent()).includes('Fixture_App')?'Fixture_Sys':'Fixture_App';
+  const nextDb=(await tableDatabase.textContent()).includes('App')?'Sys':'App';
   await tableDatabase.click();
-  await secondTablePanel.getByRole('option',{name:new RegExp(nextDb)}).click();
+  check(await page.getByRole('option',{name:nextDb,exact:true}).isVisible(),'App/Sys database dropdown renders above the workspace');
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Control+Alt+d');
+  await page.waitForFunction(label=>document.querySelector('button[aria-label="Cơ sở dữ liệu"]')?.textContent?.includes(label),nextDb);
   check(await secondTablePanel.locator('.data-grid').count()===0 &&
     await secondTableInput.inputValue()==='DanhMuc_Archive','Switching App/Sys keeps the table name and clears the old preview');
   await secondTablePanel.getByRole('button',{name:'Chạy',exact:true}).click();
   await page.waitForFunction(db=>window.__nativeCalls.filter(c=>c.method==='table.view').at(-1)?.payload.targetId===db,
-    nextDb==='Fixture_Sys'?'project-sys':'project-app');
+    nextDb==='Sys'?'project-sys':'project-app');
   check(true,'Table inspection reads from the selected App or Sys connection');
   await page.screenshot({path:out+'/sql-workspace-tabs.png'});
   await page.setViewportSize({width:375,height:600});
