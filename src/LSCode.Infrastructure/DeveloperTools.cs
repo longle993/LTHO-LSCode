@@ -421,6 +421,7 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                     ORDER BY t.name, s.name
                     """, ct));
             case "table.structure": return await TableInspection.StructureAsync(Target(p), QualifiedTable(), ct);
+            case "table.metadata": return new { columns = await TableInspection.MetadataAsync(Target(p), QualifiedTable(), ct) };
             case "table.createScript": return await TableDefinition.ReadAsync(Target(p), QualifiedTable(), ct);
             case "table.insertScript":
                 if (!tableSnapshots.TryGetValue(S("scope"), out var snapshot) || snapshot.Id != S("snapshotId"))
@@ -448,6 +449,54 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                         tableSnapshots.TryRemove(entry);
                 }
                 return true;
+            case "table.script":
+                var scriptTarget = RegisteredTarget(p);
+                var scriptSchema = Identifier(S("schema", "dbo"));
+                var scriptTable = Identifier(S("table"));
+                var scriptAction = S("action").Trim().ToLowerInvariant();
+                return scriptAction switch
+                {
+                    "add" => await TableInspection.ColumnScriptAsync(scriptTarget.Connection, scriptSchema, scriptTable,
+                        RequiredColumns(ColumnNames()), false, !scriptTarget.IsProjectSys, ct),
+                    "alter" => await TableInspection.ColumnScriptAsync(scriptTarget.Connection, scriptSchema, scriptTable,
+                        RequiredColumns(ColumnNames()), true, !scriptTarget.IsProjectSys, ct),
+                    "drop" => TableInspection.DropScript(scriptSchema, scriptTable, RequiredColumns(ColumnNames())),
+                    "create" => await TableDefinition.ReadAsync(scriptTarget.Connection, ProjectDatabase.Quote(scriptSchema) + "." + ProjectDatabase.Quote(scriptTable), ct),
+                    "log" => TableInspection.LogColumnScript(scriptSchema, scriptTable),
+                    "addmanual" => TableInspection.ManualColumnScript(scriptSchema, scriptTable, Identifier(S("column")), S("dataType"), !p.TryGetProperty("nullable", out var addNull) || addNull.GetBoolean(), false),
+                    "altermanual" => TableInspection.ManualColumnScript(scriptSchema, scriptTable, Identifier(S("column")), S("dataType"), !p.TryGetProperty("nullable", out var alterNull) || alterNull.GetBoolean(), true),
+                    _ => throw new ArgumentException("Loại script không hợp lệ."),
+                };
+            case "table.write":
+                var writeTarget = Target(p);
+                var writeNames = ColumnNames();
+                var writeValues = p.TryGetProperty("values", out var valueElement)
+                    ? valueElement.Deserialize<string?[]>(Json) ?? [] : [];
+                var keyNames = p.TryGetProperty("keyColumns", out var keyElement)
+                    ? (keyElement.Deserialize<string[]>(Json) ?? []).Select(Identifier).ToArray() : [];
+                var keyValues = p.TryGetProperty("keyValues", out var keyValueElement)
+                    ? keyValueElement.Deserialize<string?[]>(Json) ?? [] : [];
+                int affected;
+                try
+                {
+                    affected = await TableInspection.WriteAsync(writeTarget, QualifiedTable(), S("mode"), writeNames,
+                        writeValues, keyNames, keyValues, ct);
+                }
+                catch (SqlException ex) when (ex.Number is 2601 or 2627)
+                {
+                    throw new InvalidOperationException("Dữ liệu bị trùng khóa chính hoặc khóa UNIQUE.", ex);
+                }
+                if (S("mode").Equals("update", StringComparison.OrdinalIgnoreCase) && affected == 0)
+                    throw new InvalidOperationException("Dòng không còn tồn tại hoặc đã thay đổi. Hãy đọc lại bảng.");
+                foreach (var entry in tableSnapshots)
+                {
+                    var saved = entry.Value;
+                    if (saved.Target.Server.Equals(writeTarget.Server, StringComparison.OrdinalIgnoreCase) &&
+                        saved.Target.Database.Equals(writeTarget.Database, StringComparison.OrdinalIgnoreCase) &&
+                        saved.Qualified.Equals(QualifiedTable(), StringComparison.Ordinal))
+                        tableSnapshots.TryRemove(entry);
+                }
+                return affected;
             case "schema.script":
                 return await DatabaseObjectScript.ReadAsync(Target(p), S("object"), ct);
             case "table.read":
