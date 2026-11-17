@@ -39,13 +39,12 @@ import {
   GitCompareArrows,
   Blocks,
   Languages,
-  ArrowRight,
   ArrowUpRight,
 } from "lucide-react";
 import { native, request, operation, subscribe, quoteSqlName, notifyWindowReady, writeClipboard } from "./bridge";
 import { PanelResizeHandle, WorkspaceResizeHandle } from "./PanelResizeHandle";
 import { ProfilerTool } from "./features/ProfilerTool";
-import { TableTool } from "./features/TableTool";
+import { TableTool, TableToolErrorBoundary } from "./features/TableTool";
 import { TemplateStudio } from "./features/TemplateStudio";
 import { SqlWatchTool } from "./features/SqlWatchTool";
 import { MenuEditor } from "./features/MenuEditor";
@@ -1157,6 +1156,7 @@ export default function App({
         return;
       }
       const c = commandList.find(([id, , shortcut]) =>
+        (id === "table" && key.toUpperCase() === "CTRL+SHIFT+T") ||
         (latest.current.settings.shortcuts[id] ?? [shortcut]).some(
           (v) => v.toUpperCase() === key.toUpperCase(),
         ),
@@ -1937,6 +1937,16 @@ export default function App({
                       <button
                         className="db-row"
                         key={i}
+                        onClick={() => {
+                          if (!tableTab || String(r[2] ?? "").toUpperCase().replaceAll("_", " ") !== "USER TABLE") return;
+                          const schema = typeof r[0] === "string" && r[0].trim() ? r[0].trim() : "dbo";
+                          const table = typeof r[1] === "string" ? r[1].trim() : "";
+                          if (!table) return;
+                          const selected = quoteSqlName(schema, table);
+                          setTableTabs((current) => current.map((entry) =>
+                            entry.id === tableTab.id ? { ...entry, table: selected } : entry));
+                          setSelectedTool(tableTab.id);
+                        }}
                         onDoubleClick={() =>
                           void guard(async () => {
                             const script = await request<string>("schema.script", {
@@ -2032,21 +2042,17 @@ export default function App({
                         }}
                       >
                         <strong>{n.entry.caption}</strong>
-                        <span>
-                          {n.entry.sysId || n.entry.commandId || n.entry.id}
-                        </span>
                       </button>
-                      {!n.children.length && (n.entry.link || n.entry.sysId) && <button
+                      {!n.children.length && (n.entry.link || n.entry.sysId) ? <button
                         type="button"
-                        className="function-source-button"
+                        className="function-menu-id"
                         title="Mở source tại File"
-                        aria-label={`Mở source ${n.entry.caption}`}
                         onClick={(event) => {
                           event.stopPropagation();
                           setSelectedCommand(n.entry.id);
                           void guard(() => openController(n.entry.link, false, n.entry.sysId, true));
                         }}
-                      ><ArrowRight size={15} /></button>}
+                      >{n.entry.id}</button> : <small className="function-menu-id">{n.entry.id}</small>}
                     </div>
                   ))}
                   {commands.length === 0 && (
@@ -2150,6 +2156,7 @@ export default function App({
               </div>
             )}
             <div className="toolbar-spacer" />
+            {tableTab && <div id="table-toolbar-slot" className="table-toolbar-slot" aria-label="Công cụ bảng" />}
             <Button onClick={() => { setWatchTab(current => current ?? { target }); setSelectedTool("sql-watch"); }}>SQL Debug / Watch</Button>
             {active && !selectedTool && (
               <>
@@ -2297,16 +2304,18 @@ export default function App({
           )}
           {tableTabs.map((tab) => (
             <section key={tab.id} id={tab.id + "-panel"} className="profiler-panel" role="tabpanel" aria-labelledby={tab.id + "-tab"} hidden={tab.id !== selectedTool}>
-              <TableTool scope={tab.id} target={tab.target} visible={tab.id === selectedTool}
-                targets={project ? targets.filter((entry) => projectTargetIds.current.includes(entry.id) || entry.id === tab.target?.id) : targets}
-                onTargetChange={(target) => setTableTabs((current) => current.map((entry) =>
-                  entry.id === tab.id ? { ...entry, target, table: undefined } : entry))}
-                onTableChange={(table) => {
-                  if (tab.table !== table)
-                    setTableTabs((current) => current.map((entry) => entry.id === tab.id ? { ...entry, table } : entry));
-                }}
-                onText={(text, name) => newDocument(text, name, tab.target)}
-                onConnect={() => setDialog("connection")} />
+              <TableToolErrorBoundary key={tab.id + ":" + (tab.table ?? "")}>
+                <TableTool scope={tab.id} target={tab.target} initialTable={tab.table} toolbarSlotId={tab.id === selectedTool ? "table-toolbar-slot" : undefined} visible={tab.id === selectedTool}
+                  targets={project ? targets.filter((entry) => projectTargetIds.current.includes(entry.id) || entry.id === tab.target?.id) : targets}
+                  onTargetChange={(target) => setTableTabs((current) => current.map((entry) =>
+                    entry.id === tab.id ? { ...entry, target, table: undefined } : entry))}
+                  onTableChange={(table) => {
+                    if (tab.table !== table)
+                      setTableTabs((current) => current.map((entry) => entry.id === tab.id ? { ...entry, table } : entry));
+                  }}
+                  onText={(text, name) => newDocument(text, name, tab.target)}
+                  onConnect={() => setDialog("connection")} />
+              </TableToolErrorBoundary>
             </section>
           ))}
           <div className="editor-content" hidden={!!selectedTool}>
@@ -2908,19 +2917,18 @@ function FunctionTree({
                 ) : (
                   <span className="tree-spacer" />
                 )}
-                <span className="min-w-0 truncate">{node.entry.caption}</span><small className="ml-auto shrink-0 text-[var(--muted)]" title="wmenu_id">{node.entry.id}</small>
+                <span className="min-w-0 truncate">{node.entry.caption}</span>
               </button>
-              {!node.children.length && (node.entry.link || node.entry.sysId) && <button
+              {!node.children.length && (node.entry.link || node.entry.sysId) ? <button
                 type="button"
-                className="function-source-button"
+                className="function-menu-id"
                 title="Mở source tại File"
-                aria-label={`Mở source ${node.entry.caption}`}
                 onClick={(event) => {
                   event.stopPropagation();
                   onSelect(node.entry.id);
                   onOpenSource(node);
                 }}
-              ><ArrowRight size={15} /></button>}
+              >{node.entry.id}</button> : <small className="function-menu-id">{node.entry.id}</small>}
             </div>
             {node.children.length > 0 && expanded.has(node.entry.id) && (
               <div className="tree-children">

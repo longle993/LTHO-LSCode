@@ -26,7 +26,7 @@ export const commands = [
   ["sync", "Đồng bộ dự án", ""],
   ["project.metadata", "Xem metadata dự án", ""],
   ["connection", "Kết nối SQL", ""],
-  ["table", "Cấu trúc và dữ liệu", "Ctrl+Shift+T"],
+  ["table", "Cấu trúc và dữ liệu", "Ctrl+T"],
   ["catalog", "Danh mục", ""],
   ["snippets", "Snippets", ""],
   ["compare", "So sánh văn bản / thư mục", ""],
