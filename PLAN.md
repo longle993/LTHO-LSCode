@@ -1,5 +1,18 @@
 # Kế hoạch và nghiệm thu
 
+## Lưu thay đổi trên lưới dữ liệu
+
+- [x] Cập nhật viền vùng chọn riêng để tránh dựng lại các hàng khi kéo.
+- [x] Lưu chỉnh sửa và dòng mới theo lô bằng Lưu hoặc Ctrl+S. Kiểm tra trùng khóa bằng ràng buộc SQL Server và khôi phục ô khóa dòng lỗi.
+
+## Đồng nhất lưới Cấu trúc và dữ liệu với kết quả SQL — 17/11/2026
+
+- [x] Đồng nhất hình thức ô, hàng, header, vùng chọn và thanh cuộn với lưới kết quả SQL.
+- [x] Cho chọn vùng bằng kéo chuột, chọn cả dòng/cột/toàn bảng và Ctrl+C sao chép TSV.
+- [x] Bấm một lần chỉ chọn ô; phím mũi tên/Tab di chuyển ô đang chọn; chỉ nhấp đúp hoặc F2 mới mở ô nhập liệu.
+- [x] Đưa menu Tập lệnh lên top-layer, tự lật lên khi thiếu chỗ và không bị toolbar cắt.
+- [ ] Nghiệm thu thao tác cập nhật trên database ERP sao lưu có đủ quyền ghi.
+
 ## Phím tắt, kéo thả file và tên Generate Update — 17/11/2026
 
 - [x] Chuẩn hóa phím số theo `KeyboardEvent.code` để Ctrl+Shift+4 không bị đọc thành Ctrl+Shift+$.

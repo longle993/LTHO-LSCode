@@ -18,7 +18,7 @@ internal static class TableInspection
             FROM sys.indexes i
             JOIN sys.index_columns ic ON ic.object_id=i.object_id AND ic.index_id=i.index_id
             JOIN sys.columns c ON c.object_id=ic.object_id AND c.column_id=ic.column_id
-            WHERE i.object_id=OBJECT_ID(@object) AND (i.is_primary_key=1 OR i.is_unique_constraint=1) AND ic.key_ordinal>0
+            WHERE i.object_id=OBJECT_ID(@object) AND i.is_unique=1 AND ic.key_ordinal>0
             UNION ALL
             SELECT c.name, 'FK', fk.name, CAST(0 AS bit)
             FROM sys.foreign_keys fk
@@ -73,12 +73,51 @@ internal static class TableInspection
         return $"SELECT c.column_id AS [Ordinal], c.name AS [Column]\nFROM sys.columns c\nWHERE c.object_id = OBJECT_ID(N'{literal}')\nORDER BY c.column_id;\n";
     }
 
+    internal sealed record GridWrite(string Mode, string[] Columns, string?[] Values, string[] KeyColumns, string?[] KeyValues);
+
+    public static async Task<int?> WriteBatchAsync(SqlTarget target, string qualified, GridWrite[] rows, CancellationToken ct)
+    {
+        var metadata = await TableDefinition.ColumnsAsync(target, qualified, ct).ConfigureAwait(false);
+        var primary = await ProjectDatabase.ReadAsync(target, """
+            SELECT c.name FROM sys.indexes i
+            JOIN sys.index_columns ic ON ic.object_id=i.object_id AND ic.index_id=i.index_id
+            JOIN sys.columns c ON c.object_id=ic.object_id AND c.column_id=ic.column_id
+            WHERE i.object_id=OBJECT_ID(@object) AND i.is_primary_key=1 AND ic.key_ordinal>0
+            """, ct, new SqlParameter("@object", qualified)).ConfigureAwait(false);
+        var primaryNames = primary.Rows.Cast<DataRow>().Select(row => (string)row[0]).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        await using var connection = new SqlConnection(target.ConnectionString);
+        await connection.OpenAsync(ct).ConfigureAwait(false);
+        await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
+        for (var index = 0; index < rows.Length; index++)
+        {
+            var row = rows[index];
+            if (row.Mode is not ("update" or "insert"))
+                throw new ArgumentException("Chế độ ghi không hợp lệ.");
+            if (row.Mode == "update" && (primaryNames.Count == 0 || !primaryNames.SetEquals(row.KeyColumns)))
+                throw new ArgumentException("Cần đủ các cột khóa chính để cập nhật dòng.");
+            try
+            {
+                var count = await WriteAsync(target, qualified, row.Mode, row.Columns, row.Values,
+                    row.KeyColumns, row.KeyValues, ct, transaction, metadata).ConfigureAwait(false);
+                if (row.Mode == "update" && count == 0)
+                    throw new InvalidOperationException("Dòng không còn tồn tại. Hãy đọc lại bảng.");
+            }
+            catch (SqlException ex) when (ex.Number is 2601 or 2627)
+            {
+                return index;
+            }
+        }
+        await transaction.CommitAsync(ct).ConfigureAwait(false);
+        return null;
+    }
+
     public static async Task<int> WriteAsync(SqlTarget target, string qualified, string mode,
-        string[] names, string?[] values, string[] keyNames, string?[] keyValues, CancellationToken ct)
+        string[] names, string?[] values, string[] keyNames, string?[] keyValues, CancellationToken ct,
+        SqlTransaction? transaction = null, DataTable? batchMetadata = null)
     {
         if (names.Length != values.Length) throw new ArgumentException("Số cột và giá trị không khớp.");
         if (keyNames.Length != keyValues.Length) throw new ArgumentException("Số cột khóa và giá trị khóa không khớp.");
-        var metadata = await TableDefinition.ColumnsAsync(target, qualified, ct).ConfigureAwait(false);
+        var metadata = batchMetadata ?? await TableDefinition.ColumnsAsync(target, qualified, ct).ConfigureAwait(false);
         var byName = metadata.Rows.Cast<DataRow>().ToDictionary(r => Convert.ToString(r["name"]) ?? "", StringComparer.OrdinalIgnoreCase);
         DataRow Column(string name) => byName.TryGetValue(name, out var row)
             ? row : throw new ArgumentException("Cột không tồn tại: " + name);
@@ -86,9 +125,9 @@ internal static class TableInspection
             (row.IsNull("generated") || Convert.ToInt32(row["generated"], CultureInfo.InvariantCulture) == 0) &&
             Convert.ToInt32(row["system_type_id"], CultureInfo.InvariantCulture) != 189;
 
-        await using var connection = new SqlConnection(target.ConnectionString);
-        await connection.OpenAsync(ct).ConfigureAwait(false);
-        await using var command = new SqlCommand { Connection = connection, CommandTimeout = 30 };
+        await using var connection = transaction is null ? new SqlConnection(target.ConnectionString) : null;
+        if (connection is not null) await connection.OpenAsync(ct).ConfigureAwait(false);
+        await using var command = new SqlCommand { Connection = transaction?.Connection ?? connection, Transaction = transaction, CommandTimeout = 30 };
         if (mode.Equals("insert", StringComparison.OrdinalIgnoreCase))
         {
             var insertColumns = new List<string>();
@@ -118,7 +157,7 @@ internal static class TableInspection
             for (var i = 0; i < names.Length; i++)
             {
                 var row = Column(names[i]);
-                if (!Writable(row) || keyNames.Contains(names[i], StringComparer.OrdinalIgnoreCase)) continue;
+                if (!Writable(row) || (transaction is null && keyNames.Contains(names[i], StringComparer.OrdinalIgnoreCase))) continue;
                 var parameterName = "@p" + assignments.Count;
                 assignments.Add(ProjectDatabase.Quote(Convert.ToString(row["name"])!) + " = " + parameterName);
                 command.Parameters.Add(CreateParameter(parameterName, row, values[i]));

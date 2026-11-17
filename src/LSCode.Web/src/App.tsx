@@ -1090,6 +1090,17 @@ export default function App({
         const scoped = targets.filter((t) =>
           projectTargetIds.current.includes(t.id),
         );
+        if (tableTab) {
+          if (scoped.length < 2) {
+            setStatus("Dự án cần kết nối App và Sys.");
+            return;
+          }
+          const currentId = tableTab.target?.id;
+          const next = scoped[(scoped.findIndex((entry) => entry.id === currentId) + 1) % scoped.length];
+          setTableTabs((current) => current.map((entry) => entry.id === tableTab.id ? { ...entry, target: next } : entry));
+          setStatus(`Đã chuyển Cấu trúc và dữ liệu sang ${/_S(?:ys)?$/i.test(next.database) ? "Sys" : "App"}.`);
+          return;
+        }
         if (
           !active ||
           scoped.length < 2 ||
@@ -1213,7 +1224,8 @@ export default function App({
       const key = keyboardGesture(e);
       if (e.target instanceof HTMLElement &&
         (key === "Ctrl+Space" && e.target.closest('.table-inspection [role="combobox"]') ||
-          key === "F2" && e.target.closest(".project-file-tree"))) return;
+          key === "F2" && e.target.closest(".project-file-tree, .table-data-grid") ||
+          key === "Ctrl+S" && e.target.closest(".table-inspection"))) return;
       if (key === "Ctrl+Shift+P") {
         e.preventDefault();
         setPalette("commands");

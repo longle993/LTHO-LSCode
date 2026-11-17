@@ -674,6 +674,17 @@ if (args.Contains("--sql"))
             """ }))!;
         Check(lengths.Tables[0].Rows[0].SequenceEqual(new string?[] { "32", "32", "32", null }),
             "Partition ALTER applies template type to log and in-range months only");
+        await Call("sql.execute", new { targetId = target.Id, sql = "CREATE TABLE dbo.grid_save_fixture(id int PRIMARY KEY); INSERT dbo.grid_save_fixture VALUES (1),(2);" });
+        var gridWrites = new[]
+        {
+            new { mode = "update", columns = new[] { "id" }, values = new[] { "3" }, keyColumns = new[] { "id" }, keyValues = new[] { "1" } },
+            new { mode = "insert", columns = new[] { "id" }, values = new[] { "2" }, keyColumns = Array.Empty<string>(), keyValues = Array.Empty<string>() },
+        };
+        var duplicateGridKey = JsonSerializer.SerializeToElement(await Call("table.writeBatch", new { targetId = target.Id, table = "grid_save_fixture", rows = gridWrites }), Protocol.Json);
+        Check(duplicateGridKey.GetProperty("conflict").GetInt32() == 1, "Grid save identifies the duplicate row");
+        var retry = JsonSerializer.SerializeToElement(await Call("table.writeBatch", new { targetId = target.Id, table = "grid_save_fixture", rows = gridWrites.Take(1).ToArray() }), Protocol.Json);
+        Check(!retry.TryGetProperty("conflict", out var retryConflict) || retryConflict.ValueKind == JsonValueKind.Null,
+            "Duplicate grid key rolls back the earlier update and its original key can be used to retry");
         await Call("sql.execute", new { targetId = target.Id, sql = "CREATE TABLE dbo.viewer_fixture (value int); INSERT dbo.viewer_fixture VALUES (1),(2),(3);" });
         var tableCatalog = (ResultSet)(await Call("table.catalog", new { targetId = target.Id }))!;
         Check(tableCatalog.Rows.Any(row => row.SequenceEqual(new[] { "dbo", "viewer_fixture" })), "Table catalog returns the new table and its schema");

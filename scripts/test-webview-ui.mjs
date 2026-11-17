@@ -113,6 +113,7 @@ await page.addInitScript(()=>{
       case 'table.alterScript':result='ALTER TABLE [dbo].[DanhMuc] ALTER COLUMN [label] NVARCHAR(20) NULL;';break;
       case 'table.script':result=request.payload.action==='alter'?'ALTER TABLE [dbo].[DanhMuc] ALTER COLUMN [label] NVARCHAR(20) NULL;':request.payload.action==='drop'?'ALTER TABLE [dbo].[DanhMuc] DROP COLUMN [label];':request.payload.action==='create'?'CREATE TABLE [dbo].[DanhMuc] ([code] INT);':request.payload.action==='log'?'SELECT [label] FROM sys.columns;':request.payload.action==='addmanual'?'ALTER TABLE [dbo].[DanhMuc] ADD [new_column] NVARCHAR(16) NULL;':'ALTER TABLE [dbo].[DanhMuc] ADD [label] NVARCHAR(20) NULL;';break;
       case 'table.write':result=1;break;
+      case 'table.writeBatch':result={conflict:request.payload.rows.some(row=>row.values.includes('duplicate-fixture'))?0:null};break;
       case 'table.dropColumns':window.__columnDropped=true;result=true;break;
       case 'table.createScript':result='CREATE TABLE [dbo].[DanhMuc] ([code] INT);';break;
       case 'table.view':result={data:{columns:['code','label'],rows:request.payload.where?.includes("LIKE N'%ab%'")?[]:[['1','x'],['2','y']]},snapshotId:'fixture-preview'};break;
@@ -561,6 +562,14 @@ try{
   await page.keyboard.press('Control+c');
   await page.waitForFunction(()=>window.__nativeCalls.some(call=>call.method==='clipboard.write'&&call.payload.text==='1\tx\r\n2\ty'));
   check(await tablePanel.locator('.grid-copy-menu').count()===0,'Table grid copies a dragged cell range with Ctrl+C');
+  await tablePanel.locator('.table-data-grid td[title="1"]').click();
+  await page.keyboard.press('ArrowRight');
+  check(await tablePanel.locator('.table-data-grid td[title="x"]').evaluate(cell=>getComputedStyle(cell).outlineStyle==='solid'),
+    'A single click selects one cell and arrow keys move the active cell');
+  await tablePanel.locator('.table-data-grid thead th').filter({hasText:'label'}).click();
+  await page.keyboard.press('Control+c');
+  await page.waitForFunction(()=>window.__nativeCalls.some(call=>call.method==='clipboard.write'&&call.payload.text==='x\r\ny'));
+  check(true,'Table grid selects and copies an entire column like the SQL result grid');
   check(await page.evaluate(()=>window.__nativeCalls.filter(c=>c.method==='table.catalog').length===1 &&
     !window.__nativeCalls.some(c=>c.method==='table.structure'&&c.payload.table==='danh')),
     'Table search reuses one catalog and opens the selected table immediately');
@@ -597,32 +606,41 @@ try{
   await page.waitForFunction(()=>window.__nativeCalls.some(c=>c.method==='table.view' &&
     c.payload.select==='COUNT(*) AS total' && c.payload.where==='code IS NOT NULL' && !c.payload.orderBy));
   check(true,'SELECT and WHERE suggestions produce SQL expressions in the query');
-  await tablePanel.getByRole('button',{name:'Cấu trúc',exact:true}).click();
-  await tablePanel.getByText('PK · PK_DanhMuc',{exact:true}).waitFor();
-  await tablePanel.locator('.data-grid').getByText('label',{exact:true}).click({button:'right'});
-  await tablePanel.getByRole('button',{name:'Tạo lệnh THÊM CỘT',exact:true}).click();
-  await page.waitForFunction(()=>window.__nativeCalls.some(c=>c.method==='clipboard.write'&&c.payload.text.includes('ADD [label]')));
-  await tablePanel.locator('.data-grid').getByText('label',{exact:true}).click({button:'right'});
-  await tablePanel.getByRole('button',{name:'Tạo lệnh SỬA CỘT',exact:true}).click();
-  await page.waitForFunction(()=>window.__nativeCalls.some(c=>c.method==='clipboard.write'&&c.payload.text.includes('ALTER COLUMN [label]')));
-  check(true,'Separate ADD and ALTER actions copy the script for the selected column');
-  await tablePanel.locator('.data-grid').getByText('label',{exact:true}).click({button:'right'});
-  await tablePanel.getByRole('button',{name:'Xóa cột',exact:true}).click();
-  check(await page.evaluate(()=>!window.__nativeCalls.some(c=>c.method==='table.dropColumns')),'Drop column waits for explicit confirmation');
-  await page.getByRole('dialog',{name:'Xóa cột khỏi bảng'}).getByRole('button',{name:'Xóa cột',exact:true}).click();
-  await tablePanel.getByText('Đã xóa cột.',{exact:true}).waitFor();
-  check(await tablePanel.getByText('label',{exact:true}).count()===0,'Confirmed drop reloads the table structure');
-  await tablePanel.getByRole('button',{name:'Dữ liệu',exact:true}).click();
+  check(await tablePanel.getByRole('button',{name:'Dữ liệu',exact:true}).count()===0 &&
+    await tablePanel.getByRole('button',{name:'Cấu trúc',exact:true}).count()===0,
+    'Table inspection uses one editable data workspace');
+  await selectInput.fill('*');await whereInput.fill('');
   await tablePanel.getByRole('button',{name:'Chạy',exact:true}).click();
   await tablePanel.locator('.data-grid td[title="1"]').waitFor();
+  const editableCell=tablePanel.locator('.table-data-grid td[title="x"]');
+  await editableCell.dblclick();
+  const editableInput=tablePanel.getByRole('textbox',{name:'label dòng 1',exact:true});
+  await editableInput.fill('đã sửa');await editableInput.press('Enter');
+  check(await page.evaluate(()=>!window.__nativeCalls.some(call=>call.method==='table.writeBatch')), 'Enter stages the edit');
+  await page.keyboard.press('Control+s');
+  await page.waitForFunction(()=>window.__nativeCalls.some(call=>call.method==='table.writeBatch'&&call.payload.rows[0].mode==='update'));
+  await tablePanel.locator('.table-data-grid td[title="1"]').dblclick();
+  const keyEditor=tablePanel.locator('.table-data-grid input[data-edit-cell="0:0"]');
+  await keyEditor.fill('duplicate-fixture');
+  await keyEditor.press('Enter');
+  await tablePanel.getByRole('button',{name:'Lưu',exact:true}).click();
+  await tablePanel.locator('.table-data-grid td[aria-invalid="true"][title="1"]').waitFor();
+  check(true,'A duplicate key restores and marks the original cell');
+  check(true,'Editable data grid supports direct cell editing');
   await page.getByRole('button',{name:'Tập lệnh',exact:true}).click();
-  await page.getByRole('button',{name:'Tạo lệnh thêm dữ liệu đang hiển thị'}).click();
-  await page.getByRole('tab',{name:'DanhMuc-insert.sql'}).waitFor();
+  check(await page.locator('.table-script-menu:popover-open').evaluate(element=>getComputedStyle(element).position==='fixed'),
+    'Table action menu opens in the top layer without toolbar clipping');
+  await page.getByRole('menuitem',{name:'Thêm key vào SQL Data'}).click();
+  await page.getByRole('tab',{name:'Generate Update',exact:true}).waitFor();
   await firstTableTab.click();
   await page.getByRole('button',{name:'Tập lệnh',exact:true}).click();
-  await page.getByRole('button',{name:'Tạo lệnh tạo bảng',exact:true}).click();
+  await page.getByRole('menuitem',{name:'Tạo lệnh tạo bảng',exact:true}).click();
   await page.getByRole('tab',{name:'DanhMuc-create.sql'}).waitFor();
-  check(true,'Both table scripts open in editor tabs');
+  await firstTableTab.click();
+  await page.getByRole('button',{name:'Tập lệnh',exact:true}).click();
+  await page.getByRole('menuitem',{name:'Tạo lệnh xóa bảng',exact:true}).click();
+  await page.getByRole('tab',{name:'DanhMuc-drop.sql'}).waitFor();
+  check(true,'Table action menu captures SQL Data keys and opens create/drop scripts');
   await page.keyboard.press('Control+Shift+t');
   const secondTableTab=page.getByRole('tab',{name:/^Cấu trúc và dữ liệu 2/});
   const secondTablePanel=page.locator('#'+await secondTableTab.getAttribute('aria-controls'));
@@ -634,9 +652,6 @@ try{
   await firstTableTab.click();
   check(await tableInput.inputValue()==='DanhMuc' && secondTableName==='DanhMuc_Archive',
     'Independent inspection tabs retain their selected tables');
-  await page.getByRole('button',{name:'Tập lệnh',exact:true}).click();
-  await page.getByRole('button',{name:'Tạo lệnh thêm dữ liệu đang hiển thị'}).click();
-  await page.waitForFunction(()=>window.__nativeCalls.filter(call=>call.method==='table.insertScript').length===2);
   check(await page.evaluate(()=>new Set(window.__nativeCalls.filter(call=>call.method==='table.view').map(call=>call.payload.scope)).size===2),
     'Inspection data previews use independent native scopes');
   check(await page.evaluate(()=>window.__nativeCalls.filter(call=>call.method==='table.catalog').length===1),
@@ -644,14 +659,17 @@ try{
   await page.getByRole('button',{name:'SQL Profiler',exact:true}).click();
   await secondTableTab.click();
   const tableDatabase=page.getByRole('button',{name:'Cơ sở dữ liệu',exact:true});
-  const nextDb=(await tableDatabase.textContent()).includes('Fixture_App')?'Fixture_Sys':'Fixture_App';
+  const nextDb=(await tableDatabase.textContent()).includes('App')?'Sys':'App';
   await tableDatabase.click();
-  await secondTablePanel.getByRole('option',{name:new RegExp(nextDb)}).click();
+  check(await page.getByRole('option',{name:nextDb,exact:true}).isVisible(),'App/Sys database dropdown renders above the workspace');
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Control+Alt+d');
+  await page.waitForFunction(label=>document.querySelector('button[aria-label="Cơ sở dữ liệu"]')?.textContent?.includes(label),nextDb);
   check(await secondTablePanel.locator('.data-grid').count()===0 &&
     await secondTableInput.inputValue()==='DanhMuc_Archive','Switching App/Sys keeps the table name and clears the old preview');
   await secondTablePanel.getByRole('button',{name:'Chạy',exact:true}).click();
   await page.waitForFunction(db=>window.__nativeCalls.filter(c=>c.method==='table.view').at(-1)?.payload.targetId===db,
-    nextDb==='Fixture_Sys'?'project-sys':'project-app');
+    nextDb==='Sys'?'project-sys':'project-app');
   check(true,'Table inspection reads from the selected App or Sys connection');
   await page.screenshot({path:out+'/sql-workspace-tabs.png'});
   await page.setViewportSize({width:375,height:600});

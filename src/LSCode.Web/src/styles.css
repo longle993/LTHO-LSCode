@@ -2694,6 +2694,18 @@ button.function-menu-id:focus-visible {
 .table-action-menu .button {
   @apply [justify-content:flex-start] text-left;
 }
+.table-script-menu {
+  position: fixed;
+  z-index: 100;
+  inset: auto;
+  margin: 0;
+  overflow: auto;
+}
+.table-script-menu kbd {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 10px;
+}
 .table-drop-action {
   @apply [color:var(--error-text)];
 }
@@ -2868,7 +2880,7 @@ button.function-menu-id:focus-visible {
   flex: 1 1 auto;
   min-width: 0;
 }
-.table-data-grid { position: relative; overflow: auto; }
+.table-data-grid { position: relative; overflow: auto; cursor: cell; }
 .table-data-grid[data-loading="true"] > table { opacity: .65; transition: opacity .12s ease; }
 .table-data-loading {
   position: absolute;
@@ -2883,14 +2895,36 @@ button.function-menu-id:focus-visible {
   pointer-events: none;
 }
 .table-data-grid table { min-width: 100%; }
-.table-data-grid td input {
+.table-data-grid td,
+.table-data-grid th { user-select: none; }
+.table-data-grid th { cursor: pointer; }
+.table-save-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px;
+  position: sticky;
+  left: 0;
+}
+.table-data-grid td[aria-invalid="true"] {
+  box-shadow: inset 0 0 0 2px var(--error-text);
+}
+.table-inspection .table-data-grid td input:not([type="checkbox"]) {
+  box-sizing: border-box;
   width: 100%;
   min-width: 72px;
-  height: 26px;
-  padding: 2px 5px;
-  border: 1px solid var(--border-strong);
-  background: var(--surface);
+  height: 31px;
+  margin: -6px -12px;
+  padding: 5px 11px;
+  border: 0;
+  border-radius: 0;
+  background: var(--secondary);
+  color: var(--foreground);
+  cursor: text;
+  outline: 0;
+  box-shadow: none;
 }
+.table-data-grid td:has(> input) { overflow: visible; }
 .table-data-grid .table-key-column { font-weight: 700; }
 .table-new-row { background: color-mix(in srgb, var(--accent, #3879c7) 5%, transparent); }
 .table-grid-warning {

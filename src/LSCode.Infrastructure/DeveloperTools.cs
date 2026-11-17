@@ -474,6 +474,18 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                     "altermanual" => TableInspection.ManualColumnScript(scriptSchema, scriptTable, Identifier(S("column")), S("dataType"), !p.TryGetProperty("nullable", out var alterNull) || alterNull.GetBoolean(), true),
                     _ => throw new ArgumentException("Loại script không hợp lệ."),
                 };
+            case "table.writeBatch":
+                var batchTarget = Target(p);
+                var batchTable = QualifiedTable();
+                var batch = p.GetProperty("rows").Deserialize<TableInspection.GridWrite[]>(Json) ?? [];
+                var conflict = await TableInspection.WriteBatchAsync(batchTarget, batchTable, batch, ct);
+                if (conflict is null)
+                    foreach (var entry in tableSnapshots)
+                        if (entry.Value.Target.Server.Equals(batchTarget.Server, StringComparison.OrdinalIgnoreCase) &&
+                            entry.Value.Target.Database.Equals(batchTarget.Database, StringComparison.OrdinalIgnoreCase) &&
+                            entry.Value.Qualified.Equals(batchTable, StringComparison.Ordinal))
+                            tableSnapshots.TryRemove(entry);
+                return new { conflict };
             case "table.write":
                 var writeTarget = Target(p);
                 var writeNames = ColumnNames();

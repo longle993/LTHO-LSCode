@@ -240,3 +240,12 @@ Generate Update và SQL Watch được mở từ thanh lối tắt hoặc bảng
 - **Ctrl+Shift+P** mở bảng lệnh và đặt con trỏ ngay trong ô tìm; có thể gõ tên lệnh mà không cần nhấp chuột.
 - Kéo một hoặc nhiều file từ Windows Explorer vào cửa sổ LSCode để mở. Thư mục và đường dẫn không còn tồn tại bị bỏ qua; tối đa 100 file mỗi lượt. File đã mở được đưa về tab hiện có thay vì tạo bản sao.
 - Trong **Cài đặt → Phím tắt**, các lệnh được chia theo File & cửa sổ, Editor & XML, SQL & dữ liệu, Dự án, Công cụ, Giao diện & hệ thống. Ô tìm lọc theo tên, ID lệnh hoặc phím mặc định; mỗi lệnh vẫn hỗ trợ hai tổ hợp.
+
+## Cấu trúc và dữ liệu (17/11/2026)
+
+- Các ô trong vùng quét đều có viền. Ô đang nhập có nền xám theo theme.
+- Nhập ở dòng `*` hoặc nhấp đúp để sửa ô, kể cả cột khóa cho phép ghi. **Lưu** hoặc **Ctrl+S** ghi các thay đổi cùng lúc. Khi trùng khóa, SQL Server hoàn tác lần lưu và LSCode đánh dấu dòng lỗi, khôi phục các ô khóa của dòng đó và giữ các chỉnh sửa còn lại để lưu lại.
+
+- Màn hình dùng lưới cùng kiểu với kết quả SQL. Bấm một lần để chọn ô và dùng phím mũi tên hoặc **Tab** để di chuyển. Kéo chuột để chọn vùng hoặc bấm số dòng, tên cột hay ô `#` để chọn cả dòng, cột hay toàn bảng. **Ctrl+C** sao chép TSV. Nhấp đúp hoặc nhấn **F2** để mở ô nhập liệu. **Enter** kết thúc nhập ô và **Escape** bỏ lần sửa ô đang mở.
+- Dropdown trên tab hiển thị **App** hoặc **Sys**. Nhấn **Ctrl+Alt+D** để chuyển database của tab Cấu trúc và dữ liệu đang mở.
+- Menu **Tập lệnh** mở nổi ngoài toolbar nên không bị cắt khi cửa sổ hẹp. Menu có **Thêm key vào SQL Data (Ctrl+D)**, **Tạo lệnh tạo bảng** và **Tạo lệnh xóa bảng**. Các mục tạo/xóa chỉ mở script SQL để xem và tự chạy khi người dùng chủ động bấm Chạy.
