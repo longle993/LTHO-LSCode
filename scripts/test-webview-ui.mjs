@@ -42,7 +42,10 @@ await page.addInitScript(()=>{
       case 'project.refreshConfig':result=projectRoot+'\\web.config';break;
       case 'project.structure.preview':result={path:projectRoot+'\\Controller\\Structure\\App',count:2};break;
       case 'project.structure.clear':result=2;break;
-      case 'project.commands':result=[{entry:{id:'menu1',caption:'Nhân viên',sysId:'HR',commandId:'Dir',link:'nhanvien.aspx'},children:[]},{entry:{id:'menu2',caption:'Bộ phận',sysId:'HR',commandId:'Dept',link:'bophan.aspx'},children:[]},{entry:{id:'menu3',caption:'Thông tin nhân viên',sysId:'HR',commandId:'Info',link:'hrEmployeeInformation.aspx'},children:[]},{entry:{id:'separator',caption:'-',sysId:'',commandId:'',link:''},children:[]}];break;
+      case 'project.commands':result=request.payload.kind==='mobile'
+        ? [{entry:{id:'mobile1',caption:'Mobile bán hàng',sysId:'MobileSales',commandId:'mobile1',link:''},children:[]}]
+        : [{entry:{id:'menu1',caption:'Nhân viên',sysId:'HR',commandId:'Dir',link:'nhanvien.aspx'},children:[]},{entry:{id:'menu2',caption:'Bộ phận',sysId:'HR',commandId:'Dept',link:'bophan.aspx'},children:[]},{entry:{id:'menu3',caption:'Thông tin nhân viên',sysId:'HR',commandId:'Info',link:'hrEmployeeInformation.aspx'},children:[]},{entry:{id:'separator',caption:'-',sysId:'',commandId:'',link:''},children:[]}];break;
+      case 'project.menu.insertScript':result="-- dbo.wcommand\r\nINSERT INTO dbo.wcommand ([wmenu_id]) VALUES ('menu1')\r\nGO\r\n\r\n-- dbo.command\r\nINSERT INTO dbo.command ([menu_id]) VALUES ('Dir')\r\nGO\r\n";break;
       case 'project.employeeTabs':result=[{sysId:'hrPIGeneralInformation',caption:'Thông tin chung'},{sysId:'hrPIPassportVisa',caption:'Hộ chiếu, thị thực'}];break;
       case 'project.controller':{
         const link=request.payload.link;
@@ -165,6 +168,8 @@ try{
   const completionCount=await page.evaluate(()=>window.__nativeCalls.filter(c=>c.method==='sql.complete').length);
   await page.getByRole('button',{name:'Chia editor',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('.code-editor').length===1);await page.locator('.monaco-editor').first().click({position:{x:160,y:35}});await page.keyboard.press('Control+Space');await page.waitForFunction(n=>window.__nativeCalls.filter(c=>c.method==='sql.complete').length>n,completionCount);check(await page.evaluate(()=>Boolean(window.__nativeCalls.filter(c=>c.method==='sql.complete').at(-1)?.payload.targetId)),'Closing split preserves completion target and active editor');await page.getByRole('button',{name:'Chia editor',exact:true}).click();
   await page.getByRole('button',{name:'Chạy F5',exact:true}).click();await page.locator('.data-grid tbody tr').first().waitFor();
+  check(await page.getByRole('status',{name:'Thời gian chạy query'}).textContent()==='Thời gian · 12 ms',
+    'Query result toolbar keeps the final execution time');
   const resultPicker=page.getByRole('group',{name:'Bảng kết quả'});
   await resultPicker.getByRole('button',{name:'Kết quả 2 · 1 dòng',exact:true}).click();
   check((await page.locator('.data-grid').textContent()).includes('Dòng bảng hai'),'Second SQL table opens with one click');
@@ -308,6 +313,13 @@ try{
   check(await page.evaluate(()=>!window.__nativeCalls.some(c=>c.method==='schema.objects'&&['D','Da'].includes(c.payload.query))),'Live DB search debounces intermediate text');
   const openedBefore=await page.evaluate(()=>window.__nativeCalls.filter(c=>c.method==='document.open').length);
   await page.getByRole('button',{name:'Chức năng',exact:true}).click();
+  check(await page.evaluate(()=>!window.__nativeCalls.some(c=>c.method==='project.commands'&&c.payload.kind==='mobile')),
+    'Mobile menu stays lazy until its tab is selected');
+  await page.locator('.menu-kind-tabs').getByRole('tab',{name:'Mobile',exact:true}).click();
+  await page.getByRole('button',{name:'Mobile bán hàng',exact:true}).waitFor();
+  check(await page.evaluate(()=>window.__nativeCalls.some(c=>c.method==='project.commands'&&c.payload.kind==='mobile')),
+    'Mobile tab requests the SYS dvcommand tree on demand');
+  await page.locator('.menu-kind-tabs').getByRole('tab',{name:'Web',exact:true}).click();
   check(await page.locator('.function-separator').count()===1,'Dash function renders as horizontal separator');
   const functionRow=page.getByRole('button',{name:'Nhân viên',exact:true});
   await functionRow.click();
@@ -322,10 +334,18 @@ try{
   const dirFile=fileTree.getByTitle(dirPath+'\\nhanvien.xml',{exact:true});
   const gridFile=fileTree.getByTitle(gridPath+'\\nhanvien.xml',{exact:true});
   await dirFile.waitFor();await gridFile.waitFor();
-  await page.getByRole('tab',{name:'nhanvien.aspx',exact:true}).waitFor();
-  check(await fileTree.getByTitle('C:\\Fixture\\Main\\nhanvien.aspx',{exact:true}).getAttribute('aria-current')==='page' &&
-    await page.evaluate(before=>window.__nativeCalls.filter(c=>c.method==='document.open').length===before+1,openedBefore),
-    'Menu ID opens the main file and focuses its folder');
+  check(await fileTree.getByTitle('C:\\Fixture\\Main\\nhanvien.aspx',{exact:true}).getAttribute('aria-current')!=='page' &&
+    await page.evaluate(before=>window.__nativeCalls.filter(c=>c.method==='document.open').length===before,openedBefore),
+    'Menu ID only reveals the controller tree without opening Main');
+  await page.getByRole('button',{name:'Chức năng',exact:true}).click();
+  const functionRowAgain=page.getByRole('button',{name:'Nhân viên',exact:true});
+  await functionRowAgain.focus();await functionRowAgain.press('F12');
+  await page.getByRole('tab',{name:'menu1-menu.sql',exact:true}).waitFor();
+  check(await page.evaluate(()=>window.__nativeCalls.some(c=>c.method==='project.menu.insertScript'&&c.payload.wmenuId==='menu1')),
+    'F12 generates INSERT scripts for wcommand and command');
+  await functionRowAgain.click({button:'right'});
+  check(await page.getByRole('button',{name:/Tạo script INSERT menu/}).isVisible(),'ERP menu context menu exposes the INSERT script action');
+  await page.keyboard.press('Escape');
   const workspaceResize=page.getByRole('separator',{name:'Đổi chiều rộng Không gian dự án'});
   const sidebar=page.locator('#project-sidebar');
   const initialWidth=(await sidebar.boundingBox()).width;

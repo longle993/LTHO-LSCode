@@ -216,6 +216,14 @@ try
     var hierarchyRoot = hierarchy.Single();
     Assert(hierarchyRoot.Entry.Id == "01" && hierarchyRoot.Children.Single().Children.Single().Entry.Id == "01.01.01", "FSD menu tree maps root, child and grandchild");
     Assert(hierarchyRoot.Children.Single().Children.Single().Children.Count == 0, "FSD menu tree excludes fourth level, orphans and cycles");
+    var mobileHierarchy = CommandHierarchy.BuildAll([
+        new("M", "", "Mobile", "", "M"),
+        new("M.1", "M", "Level 2", "", "M.1"),
+        new("M.1.1", "M.1", "Level 3", "", "M.1.1"),
+        new("M.1.1.1", "M.1.1", "Level 4", "", "M.1.1.1"),
+        new("M.CYCLE", "M.CYCLE", "Cycle", "", "M.CYCLE")]);
+    Assert(mobileHierarchy.Single().Children.Single().Children.Single().Children.Single().Entry.Id == "M.1.1.1",
+        "Mobile menu keeps arbitrary tree depth without following cycles");
     var searchable = CommandHierarchy.Build([new("1", "", "Kế toán", "", "", "root"), new("2", "1", "Phiếu thu", "", "", "GLTran")]);
     Assert(CommandHierarchy.Filter(searchable, "gltran").Single().Children.Single().Entry.Id == "2", "Menu sysid search preserves ancestor path");
     Assert(CommandHierarchy.Filter(searchable, "phiếu").Count == 1 && CommandHierarchy.Filter(searchable, "missing").Count == 0, "Menu name search and no-result state");

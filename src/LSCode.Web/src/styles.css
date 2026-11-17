@@ -12,6 +12,7 @@
   --muted: #707070;
   --border: #f0f0f2;
   --border-strong: #e0e0e5;
+  --window-border: #8c929d;
   --secondary: #eaeaec;
   --secondary-hover: #dedee2;
   --item-hover: #f4f4f6;
@@ -34,6 +35,7 @@
   --muted: #a3a5ac;
   --border: #292c33;
   --border-strong: #3d4049;
+  --window-border: #686e7a;
   --secondary: #343741;
   --secondary-hover: #414550;
   --item-hover: #292c33;
@@ -54,6 +56,7 @@
   --muted: #ddd;
   --border: #fff;
   --border-strong: #fff;
+  --window-border: #ffff00;
   --secondary: #303030;
   --secondary-hover: #444;
   --item-hover: #202020;
@@ -220,6 +223,8 @@ kbd {
   @apply flex;
   @apply flex-col;
   @apply min-w-0;
+  border: 1px solid var(--window-border);
+  background: var(--surface);
 }
 .topbar {
   @apply flex;
@@ -717,6 +722,34 @@ button.function-menu-id:focus-visible {
 .side-form input {
   @apply [font-size:12px];
 }
+.menu-kind-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3px;
+  margin: 0 12px 8px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--secondary);
+}
+.menu-kind-tabs button {
+  min-height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+.menu-kind-tabs button:hover {
+  background: var(--item-hover);
+  color: var(--foreground);
+}
+.menu-kind-tabs button[aria-selected="true"] {
+  background: var(--surface);
+  color: var(--foreground);
+  box-shadow: 0 1px 2px #00000018;
+}
 .inline-checks {
   @apply flex;
   @apply items-center;
@@ -1120,6 +1153,13 @@ button.function-menu-id:focus-visible {
   @apply [padding:3px_10px];
   @apply [min-height:40px];
   @apply [border-bottom:1px_solid_var(--border)];
+}
+.query-duration {
+  flex: none;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .result-table-picker {
   display: flex;
@@ -2293,6 +2333,11 @@ button.function-menu-id:focus-visible {
     @apply [grid-column:1];
     @apply [grid-row:1];
   }
+  .bottom-toolbar > .query-duration {
+    grid-column: 1 / span 2;
+    grid-row: 2;
+  }
+  .bottom-panel.collapsed .query-duration { display: none; }
 }
 
 /* Desktop chrome and controller workbench */

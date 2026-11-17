@@ -350,6 +350,12 @@ await using (var projectTools = new DeveloperTools())
     Check(modernFiles.GetProperty("files").EnumerateArray().Select(item => item.GetString())
         .SequenceEqual([Path.Combine(modernDir, "Item.f")]),
         "Controller explorer loads PageMetadata controller files without Main or ASPX");
+    Directory.CreateDirectory(Path.Combine(modernRoot, "Main"));
+    var mobileFiles = JsonSerializer.SerializeToElement(await CallProject("project.controller",
+        new { root = modernRoot, link = "", sysId = "Customer" }), Protocol.Json);
+    Check(mobileFiles.GetProperty("files").EnumerateArray().Select(item => item.GetString())
+        .SequenceEqual([Path.Combine(modernDir, "Customer.f")]),
+        "Mobile controller explorer falls back to dvcommand sysid when a legacy Main folder exists");
     Check(typeof(DeveloperTools).Assembly.GetManifestResourceNames()
         .Contains("LSCode.Infrastructure.StandardCatalogConnection"),
         "Standard catalog connection ships inside LSCode without an FSD Studio source checkout");
@@ -582,10 +588,30 @@ if (args.Contains("--sql"))
                 ('orphan', 'missing', N'Mồ côi', '', '', ''),
                 ('empty', '', N'Nhóm trống', '', '', ''),
                 ('separator', 'empty', N'-', '', '', '');
+            CREATE TABLE dbo.dvcommand (wmenu_id varchar(20), wmenu_id0 varchar(20), bar nvarchar(80), bar2 nvarchar(80), sysid varchar(80), hide_yn bit);
+            INSERT dbo.dvcommand VALUES
+                ('M', '', N'Mobile', N'', '', 0),
+                ('M.1', 'M', N'Bán hàng', N'', 'MobileSales', 0),
+                ('M.1.1', 'M.1', N'Phiếu bán', N'', 'MobileVoucher', 0),
+                ('M.1.1.1', 'M.1.1', N'Chi tiết', N'', 'MobileDetail', 0);
             """ });
         var menu = (List<CommandNode>)(await Call("project.commands", new { targetId = target.Id, appDatabase = menuAppDatabase }))!;
         Check(menu is [{ Entry.Id: "root", Children: [{ Entry.Id: "branch", Children: [{ Entry: { Id: "leaf", Caption: "Startup", Link: "leaf.aspx", CommandId: "leaf", SysId: "ControllerLeaf" } }] }] }],
             "Menu loads Sys wcommand without userinfo, uses App deny/Startup and retains the required ancestors");
+        var mobileMenu = (List<CommandNode>)(await Call("project.commands", new { targetId = target.Id, appDatabase = menuAppDatabase, kind = "mobile" }))!;
+        Check(mobileMenu.Single().Children.Single().Children.Single().Children.Single().Entry.SysId == "MobileDetail",
+            "Mobile menu loads dbo.dvcommand recursively and keeps sysid for source lookup");
+        await Call("sql.execute", new { targetId = target.Id, sql = "UPDATE dbo.dvcommand SET bar=N'Đã đổi' WHERE wmenu_id='M.1.1.1'" });
+        var cachedMobile = (List<CommandNode>)(await Call("project.commands", new { targetId = target.Id, appDatabase = menuAppDatabase, kind = "mobile" }))!;
+        var refreshedMobile = (List<CommandNode>)(await Call("project.commands", new { targetId = target.Id, appDatabase = menuAppDatabase, kind = "mobile", refresh = true }))!;
+        Check(cachedMobile.Single().Children.Single().Children.Single().Children.Single().Entry.Caption == "Chi tiết" &&
+            refreshedMobile.Single().Children.Single().Children.Single().Children.Single().Entry.Caption == "Đã đổi",
+            "Menu cache avoids repeated queries and explicit refresh reloads Mobile data");
+        await Call("sql.execute", new { targetId = target.Id, sql = "ALTER TABLE dbo.wcommand ADD menu_id varchar(20) NULL;\nGO\nUPDATE dbo.wcommand SET menu_id='AA.01.02' WHERE wmenu_id='leaf'; CREATE TABLE dbo.command(menu_id varchar(20), parameter nvarchar(80), enabled bit); INSERT dbo.command VALUES ('AA.01.02',N'Việt'' Nam',1);" });
+        var menuInsertScript = (string)(await Call("project.menu.insertScript", new { targetId = target.Id, wmenuId = "leaf" }))!;
+        Check(menuInsertScript.Contains("INSERT INTO dbo.wcommand") && menuInsertScript.Contains("INSERT INTO dbo.command")
+            && menuInsertScript.Contains("N'Việt'' Nam'") && menuInsertScript.Contains("GO"),
+            "Menu F12 script includes matching wcommand and command rows with Unicode literals");
         var menuDetails = JsonSerializer.SerializeToElement(await Call("project.menu.details", new { targetId = target.Id, wmenuId = "leaf" }), Protocol.Json);
         Check(menuDetails.GetProperty("values").GetProperty("bar").GetString() == "Menu" &&
             menuDetails.GetProperty("values").GetProperty("wmenu_id").GetString() == "leaf",

@@ -1,4 +1,5 @@
 using System.Data;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -43,6 +44,28 @@ internal static class MenuEditor
             values["menu_id"] = await GenerateCommandIdAsync(connection, token).ConfigureAwait(false);
         if (values.ContainsKey("status")) values["status"] = "1";
         return new { mode = "new", fields, values, version = "", canSave = true };
+    }
+
+    public static async Task<string> InsertScriptAsync(SqlTarget target, string wmenuId, CancellationToken token)
+    {
+        await using var connection = new SqlConnection(target.ConnectionString);
+        await connection.OpenAsync(token).ConfigureAwait(false);
+        var menu = await InsertRowScriptAsync(connection, "dbo.wcommand", "wmenu_id", wmenuId, token).ConfigureAwait(false);
+        if (menu.Script is null) throw new KeyNotFoundException("Không tìm thấy menu trong dbo.wcommand.");
+
+        var result = new StringBuilder();
+        result.AppendLine("-- dbo.wcommand").AppendLine(menu.Script).AppendLine("GO").AppendLine();
+        var commandId = menu.Values.TryGetValue("menu_id", out var value) ? Convert.ToString(value, CultureInfo.InvariantCulture)?.Trim() : null;
+        if (string.IsNullOrWhiteSpace(commandId))
+            result.AppendLine("-- Menu không khai báo menu_id nên không có bản ghi dbo.command.");
+        else
+        {
+            var command = await InsertRowScriptAsync(connection, "dbo.command", "menu_id", commandId, token).ConfigureAwait(false);
+            result.AppendLine("-- dbo.command");
+            result.AppendLine(command.Script ?? $"-- Không tìm thấy menu_id {QuoteLiteral(commandId)} trong dbo.command.");
+            if (command.Script is not null) result.AppendLine("GO");
+        }
+        return result.ToString();
     }
 
     public static async Task<object> SaveAsync(SqlTarget target, string mode, string originalId, string version,
@@ -151,6 +174,45 @@ internal static class MenuEditor
         ordered.AddRange(all.Where(field => !PreferredFields.Contains(field.Name, StringComparer.OrdinalIgnoreCase)));
         return ordered.ToArray();
     }
+
+    private static async Task<(string? Script, Dictionary<string, object?> Values)> InsertRowScriptAsync(
+        SqlConnection connection, string table, string keyColumn, string keyValue, CancellationToken token)
+    {
+        const string metadataSql = "SELECT c.name,t.name FROM sys.columns c JOIN sys.types t ON c.user_type_id=t.user_type_id WHERE c.object_id=OBJECT_ID(@table) AND c.is_identity=0 AND c.is_computed=0 AND t.name NOT IN ('timestamp','rowversion') ORDER BY c.column_id";
+        var columns = new List<(string Name, string Type)>();
+        await using (var metadata = new SqlCommand(metadataSql, connection) { CommandTimeout = 0 })
+        {
+            metadata.Parameters.AddWithValue("@table", table);
+            await using var reader = await metadata.ExecuteReaderAsync(token).ConfigureAwait(false);
+            while (await reader.ReadAsync(token).ConfigureAwait(false)) columns.Add((reader.GetString(0), reader.GetString(1)));
+        }
+        if (columns.Count == 0) return (null, new(StringComparer.OrdinalIgnoreCase));
+
+        var sql = $"SELECT {string.Join(',', columns.Select(column => Quote(column.Name)))} FROM {table} WHERE RTRIM({Quote(keyColumn)})=@id";
+        await using var command = new SqlCommand(sql, connection) { CommandTimeout = 0 };
+        command.Parameters.AddWithValue("@id", keyValue);
+        await using var row = await command.ExecuteReaderAsync(CommandBehavior.SingleRow, token).ConfigureAwait(false);
+        if (!await row.ReadAsync(token).ConfigureAwait(false)) return (null, new(StringComparer.OrdinalIgnoreCase));
+        var values = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        for (var index = 0; index < columns.Count; index++) values[columns[index].Name] = row.IsDBNull(index) ? null : row.GetValue(index);
+        var insert = $"INSERT INTO {table} ({string.Join(", ", columns.Select(column => Quote(column.Name)))})\r\nVALUES ({string.Join(", ", columns.Select(column => SqlLiteral(values[column.Name], column.Type)))})";
+        return (insert, values);
+    }
+
+    private static string SqlLiteral(object? value, string type)
+    {
+        if (value is null or DBNull) return "NULL";
+        if (value is byte[] bytes) return "0x" + Convert.ToHexString(bytes);
+        if (value is bool boolean) return boolean ? "1" : "0";
+        if (value is DateTime dateTime) return QuoteLiteral(dateTime.ToString("yyyy-MM-ddTHH:mm:ss.fffffff", CultureInfo.InvariantCulture));
+        if (value is DateTimeOffset offset) return QuoteLiteral(offset.ToString("O", CultureInfo.InvariantCulture));
+        if (value is byte or sbyte or short or ushort or int or uint or long or ulong or float or double or decimal)
+            return Convert.ToString(value, CultureInfo.InvariantCulture) ?? "NULL";
+        var prefix = type is "nvarchar" or "nchar" or "ntext" ? "N" : "";
+        return prefix + QuoteLiteral(Convert.ToString(value, CultureInfo.InvariantCulture) ?? "");
+    }
+
+    private static string QuoteLiteral(string value) => "'" + value.Replace("'", "''", StringComparison.Ordinal) + "'";
 
     private static async Task<Dictionary<string, string?>?> RowAsync(SqlConnection connection, SqlTransaction? transaction, Field[] fields,
         string id, CancellationToken token, bool lockRow = false)

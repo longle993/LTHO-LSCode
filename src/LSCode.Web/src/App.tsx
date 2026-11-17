@@ -94,6 +94,13 @@ type EditorSearchHit = {
   preview: string;
 };
 type FormatLanguage = "sql" | "json" | "xml";
+function formatQueryDuration(milliseconds: number) {
+  if (milliseconds < 1000) return `${Math.max(0, milliseconds).toFixed(0)} ms`;
+  if (milliseconds < 60_000) return `${(milliseconds / 1000).toFixed(milliseconds < 10_000 ? 1 : 0)} giây`;
+  const minutes = Math.floor(milliseconds / 60_000);
+  const seconds = ((milliseconds % 60_000) / 1000).toFixed(1).padStart(4, "0");
+  return `${minutes}:${seconds}`;
+}
 const initialSettings: Settings = {
   theme: "Light",
   workspace: null,
@@ -199,7 +206,9 @@ export default function App({
   const [result, setResult] = useState<QueryResult>(),
     [resultIndex, setResultIndex] = useState(0),
     [bottom, setBottom] = useState("results"),
-    [running, setRunning] = useState(false);
+    [running, setRunning] = useState(false),
+    [queryElapsedMs, setQueryElapsedMs] = useState<number | null>(null);
+  const queryTimer = useRef<number>();
   const [hits, setHits] = useState<Hit[]>([]),
     [search, setSearch] = useState(""),
     [regex, setRegex] = useState(false),
@@ -210,9 +219,18 @@ export default function App({
     [objectOffset, setObjectOffset] = useState(0),
     [contentSearch, setContentSearch] = useState(false),
     [dbBusy, setDbBusy] = useState(false);
-  const [commands, setCommands] = useState<CommandNode[]>([]),
-    [menuQuery, setMenuQuery] = useState(""),
-    [menuIndex, setMenuIndex] = useState(-1),
+  const [menuKind, setMenuKind] = useState<"web" | "mobile">("web");
+  const [commandsByKind, setCommandsByKind] = useState<Record<"web" | "mobile", CommandNode[]>>({ web: [], mobile: [] });
+  const commands = commandsByKind[menuKind];
+  const [menuQueries, setMenuQueries] = useState<Record<"web" | "mobile", string>>({ web: "", mobile: "" });
+  const menuQuery = menuQueries[menuKind];
+  const setMenuQuery = (value: string) => setMenuQueries((current) => ({ ...current, [menuKind]: value }));
+  const [menuLoaded, setMenuLoaded] = useState<Record<"web" | "mobile", boolean>>({ web: false, mobile: false });
+  const [menuLoadingByKind, setMenuLoadingByKind] = useState<Record<"web" | "mobile", boolean>>({ web: false, mobile: false });
+  const menuLoading = menuLoadingByKind[menuKind];
+  const [menuLoadErrors, setMenuLoadErrors] = useState<Record<"web" | "mobile", string>>({ web: "", mobile: "" });
+  const menuLoadError = menuLoadErrors[menuKind];
+  const [menuIndex, setMenuIndex] = useState(-1),
     [controllerRequests, setControllerRequests] = useState(0),
     [controllers, setControllers] = useState<ControllerGroup[]>([]),
     [expandedController, setExpandedController] = useState<string>();
@@ -255,6 +273,7 @@ export default function App({
     column: number;
   }>();
   const resultsByTab = useRef(new Map<string, QueryResult>());
+  const queryDurationByTab = useRef(new Map<string, number>());
   const [external, setExternal] = useState<Tab>();
   const primaryEditor = useRef<EditorHandle>();
   const scriptToFocus = useRef<string>();
@@ -329,8 +348,11 @@ export default function App({
     currentEditor.revealLineInCenter(hit.line);
     currentEditor.focus();
   }, [active?.id]);
-  const [selectedCommand, setSelectedCommand] = useState("");
+  const [selectedCommands, setSelectedCommands] = useState<Record<"web" | "mobile", string>>({ web: "", mobile: "" });
+  const selectedCommand = selectedCommands[menuKind];
+  const setSelectedCommand = (id: string) => setSelectedCommands((current) => ({ ...current, [menuKind]: id }));
   const [menuEditor, setMenuEditor] = useState<{ command: CommandNode; target: Target; root: string }>();
+  const [menuContext, setMenuContext] = useState<{ command: CommandNode; x: number; y: number }>();
   const menuDirty = useRef(false);
   const menuBusy = useRef(false);
   function closeMenuEditor() {
@@ -349,6 +371,27 @@ export default function App({
     setMenuEditor({ command, target: projectSysTarget.current, root: workspace });
     setSelectedTool("menu-editor");
   }
+  function openMenuInsertScript(command: CommandNode) {
+    const sysTarget = projectSysTarget.current;
+    if (!sysTarget) { setStatus("Dự án chưa có kết nối Sys."); return; }
+    setMenuContext(undefined);
+    void guard(async () => {
+      const script = await request<string>("project.menu.insertScript", { targetId: sysTarget.id, wmenuId: command.entry.id });
+      newDocument(script, command.entry.id.replaceAll(".", "-") + "-menu.sql", sysTarget);
+      setStatus("Đã tạo script INSERT cho wcommand và command.");
+    });
+  }
+  useEffect(() => {
+    if (!menuContext) return;
+    const close = () => setMenuContext(undefined);
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") close(); };
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [menuContext]);
   useEffect(() => {
     setObjects(undefined);
     dbLoadedQuery.current = "";
@@ -742,9 +785,12 @@ export default function App({
     }
   }, [settings.theme, settings.accentColor]);
   useEffect(() => {
-    setResult(resultsByTab.current.get(activeId));
+    const currentResult = resultsByTab.current.get(activeId);
+    setResult(currentResult);
+    setQueryElapsedMs(queryDurationByTab.current.get(activeId) ?? currentResult?.durationMs ?? null);
     setResultIndex(0);
   }, [activeId]);
+  useEffect(() => () => window.clearInterval(queryTimer.current), []);
   useEffect(() => {
     if (!native || !ready) return;
     const timer = setInterval(() => void guard(persistRecovery), 8000);
@@ -920,13 +966,18 @@ export default function App({
     const selected = selection
       ? editor.current?.getModel()?.getValueInRange(selection)
       : "";
+    const startedAt = performance.now();
     setRunning(true);
+    setQueryElapsedMs(0);
+    window.clearInterval(queryTimer.current);
+    queryTimer.current = window.setInterval(() => setQueryElapsedMs(performance.now() - startedAt), 100);
     setPanel(true);
     setBottom("results");
     setStatus("Đang chạy SQL…");
     setError("");
     markSqlErrors(active, []);
     const queryDocument = active;
+    queryDurationByTab.current.delete(queryDocument.id);
     const op = operation<QueryResult>("sql.execute", {
       targetId: active.target.id,
       sql: selected || textOf(active),
@@ -935,9 +986,11 @@ export default function App({
     try {
       const r = await op.promise;
       resultsByTab.current.set(queryDocument.id, r);
+      queryDurationByTab.current.set(queryDocument.id, r.durationMs);
       if (latest.current.activeId === queryDocument.id) {
         setResult(r);
         setResultIndex(0);
+        setQueryElapsedMs(r.durationMs);
       }
       setStatus(
         `${r.durationMs.toFixed(0)} ms · ${r.tables.reduce((sum, t) => sum + t.rows.length, 0)} dòng${r.truncated ? " · Đã giới hạn kết quả" : ""}`,
@@ -959,7 +1012,15 @@ export default function App({
             selected ? selection?.startColumn : 1,
           );
       }
+      const elapsed = performance.now() - startedAt;
+      queryDurationByTab.current.set(queryDocument.id, elapsed);
+      if (latest.current.activeId === queryDocument.id) setQueryElapsedMs(elapsed);
     } finally {
+      window.clearInterval(queryTimer.current);
+      queryTimer.current = undefined;
+      if (latest.current.activeId !== queryDocument.id)
+        setQueryElapsedMs(queryDurationByTab.current.get(latest.current.activeId)
+          ?? resultsByTab.current.get(latest.current.activeId)?.durationMs ?? null);
       setRunning(false);
       runRef.current = undefined;
     }
@@ -1326,7 +1387,7 @@ export default function App({
       }
     }
   }
-  async function loadCommands() {
+  async function loadCommands(kind: "web" | "mobile" = menuKind, refresh = false) {
     const context = projectTargetIds.current.join("|");
     const scoped = projectTargetIds.current.length
       ? targets.filter((t) => projectTargetIds.current.includes(t.id))
@@ -1340,14 +1401,38 @@ export default function App({
       scoped.find((t) => /_S(?:ys)?$/i.test(t.database)) ??
       (projectTargetIds.current.length > 1 ? scoped[1] : undefined);
     if (!sys) {
-      setError("Mở dự án có kết nối SYS để tải chức năng.");
+      setMenuLoadErrors((current) => ({ ...current, [kind]: "Mở dự án có kết nối SYS để tải chức năng." }));
       return;
     }
-    const loaded = await request<CommandNode[]>("project.commands", {
-      targetId: sys.id,
-      appDatabase: defaultTarget.current?.database ?? target?.database ?? "",
-    });
-    if (context === projectTargetIds.current.join("|")) setCommands(loaded);
+    setMenuLoadingByKind((current) => ({ ...current, [kind]: true }));
+    setMenuLoadErrors((current) => ({ ...current, [kind]: "" }));
+    try {
+      const loaded = await request<CommandNode[]>("project.commands", {
+        targetId: sys.id,
+        appDatabase: defaultTarget.current?.database ?? target?.database ?? "",
+        kind,
+        refresh,
+        context: project?.id ?? workspace,
+      });
+      if (context === projectTargetIds.current.join("|")) {
+        setCommandsByKind((current) => ({ ...current, [kind]: loaded }));
+        setMenuLoaded((current) => ({ ...current, [kind]: true }));
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (context === projectTargetIds.current.join("|"))
+        setMenuLoadErrors((current) => ({ ...current, [kind]: message }));
+      throw error;
+    } finally {
+      if (context === projectTargetIds.current.join("|"))
+        setMenuLoadingByKind((current) => ({ ...current, [kind]: false }));
+    }
+  }
+  function switchMenuKind(kind: "web" | "mobile") {
+    setMenuKind(kind);
+    setMenuIndex(-1);
+    setMenuContext(undefined);
+    if (!menuLoaded[kind]) void guard(() => loadCommands(kind));
   }
   const flatCommands = (nodes: CommandNode[]): CommandNode[] =>
     nodes.flatMap((n) => [n, ...flatCommands(n.children)]);
@@ -1453,6 +1538,7 @@ export default function App({
         closed.add(tab.id);
         disposeModel(tab);
         resultsByTab.current.delete(tab.id);
+        queryDurationByTab.current.delete(tab.id);
       }
       setStatus(closing.length ? "Đã đóng " + closing.length + " tab của " + (owner?.name ?? "tất cả dự án") : "Không có tab dự án đang mở.");
     } finally {
@@ -1519,20 +1605,40 @@ export default function App({
     }));
     setWorkspace(opened.project.sourcePath);
     setTargets((old) => [...old.filter((target) => !closingTargets.includes(target.id)), ...opened.targets]);
-    setCommands([]);
+    setCommandsByKind({ web: [], mobile: [] });
+    setMenuLoaded({ web: false, mobile: false });
+    setMenuKind("web");
+    setMenuQueries({ web: "", mobile: "" });
+    setSelectedCommands({ web: "", mobile: "" });
+    setMenuLoadErrors({ web: "", mobile: "" });
+    setMenuLoadingByKind({ web: false, mobile: false });
     const sys =
       opened.targets.find((t) => /_S(?:ys)?$/i.test(t.database)) ??
       opened.targets[1];
     projectSysTarget.current = sys;
-    if (sys)
+    if (sys) {
+      setMenuLoadingByKind((current) => ({ ...current, web: true }));
       void request<CommandNode[]>("project.commands", {
         targetId: sys.id,
         appDatabase: opened.targets[0]?.database ?? "",
+        kind: "web",
+        context: p.id,
       })
         .then((loaded) => {
-          if (projectTargetIds.current.includes(sys.id)) setCommands(loaded);
+          if (projectTargetIds.current.includes(sys.id)) {
+            setCommandsByKind((current) => ({ ...current, web: loaded }));
+            setMenuLoaded((current) => ({ ...current, web: true }));
+          }
         })
-        .catch((e) => setError(e.message));
+        .catch((e) => {
+          setMenuLoadErrors((current) => ({ ...current, web: e.message }));
+          setError(e.message);
+        })
+        .finally(() => {
+          if (projectTargetIds.current.includes(sys.id))
+            setMenuLoadingByKind((current) => ({ ...current, web: false }));
+        });
+    }
     setObjects(undefined);
     controllerRequest.current++;
     setControllers([]);
@@ -1798,7 +1904,7 @@ export default function App({
                   void guard(async () => {
                     controllerCache.current.clear();
                     if (nav === "files" && controller) await openController(controller.link, controller.employeeTab, controller.sysId);
-                    if (nav === "functions") await loadCommands();
+                    if (nav === "functions") await loadCommands(menuKind, true);
                     if (nav === "database") await loadObjects(0, true);
                   })
                 }
@@ -2092,10 +2198,16 @@ export default function App({
             )}
             {nav === "functions" && (
               <>
+                <div className="menu-kind-tabs" role="tablist" aria-label="Loại chức năng ERP">
+                  <button type="button" role="tab" aria-selected={menuKind === "web"}
+                    onClick={() => switchMenuKind("web")}>Web</button>
+                  <button type="button" role="tab" aria-selected={menuKind === "mobile"}
+                    onClick={() => switchMenuKind("mobile")}>Mobile</button>
+                </div>
                 <div className="side-form">
                   <input
                     aria-label="Tìm chức năng"
-                    placeholder="Tên / sysid / mã → Enter"
+                    placeholder={`Tìm ${menuKind === "web" ? "Web" : "Mobile"}: tên / sysid / mã`}
                     value={menuQuery}
                     onChange={(e) => setMenuQuery(e.target.value)}
                     onKeyDown={(e) => {
@@ -2104,16 +2216,20 @@ export default function App({
                   />
 
                 </div>
-                <div className="side-content side-wide loading-region" aria-busy={controllerRequests > 0}>
-                  <LoadingLine busy={controllerRequests > 0} label="Đang tải cây controller…" />
+                <div className="side-content side-wide loading-region" aria-busy={menuLoading}>
+                  <LoadingLine busy={menuLoading} label={`Đang tải chức năng ${menuKind === "web" ? "Web" : "Mobile"}…`} />
+                  {menuLoadError && <div className="tree-message error-text">{menuLoadError}</div>}
                   {!menuQuery && (
                     <FunctionTree
                       nodes={commands}
                       selected={selectedCommand}
                       onSelect={setSelectedCommand}
                       onOpen={openFunctionController}
-                      onOpenSource={(node) => void guard(() => openController(node.entry.link, false, node.entry.sysId, true))}
+                      onOpenSource={(node) => void guard(() => openController(node.entry.link, false, node.entry.sysId))}
                       onEdit={openMenuEditor}
+                      onScript={openMenuInsertScript}
+                      onContext={(node, x, y) => setMenuContext({ command: node, x, y })}
+                      allowMenuActions={menuKind === "web"}
                     />
                   )}
                   {(menuQuery ? matches : []).map((n, i) => (
@@ -2127,15 +2243,20 @@ export default function App({
                         onDoubleClick={() => openFunctionController(n)}
                         onFocus={() => setSelectedCommand(n.entry.id)}
                         onKeyDown={(event) => {
-                          if (event.key === "F3") {
+                          if (menuKind === "web" && event.key === "F3") {
                             event.preventDefault();
                             openMenuEditor(n);
+                          } else if (menuKind === "web" && event.key === "F12") {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            openMenuInsertScript(n);
                           }
                         }}
                         onContextMenu={(event) => {
+                          if (menuKind !== "web") return;
                           event.preventDefault();
                           setSelectedCommand(n.entry.id);
-                          openMenuEditor(n);
+                          setMenuContext({ command: n, x: event.clientX, y: event.clientY });
                         }}
                       >
                         <strong>{n.entry.caption}</strong>
@@ -2147,13 +2268,16 @@ export default function App({
                         onClick={(event) => {
                           event.stopPropagation();
                           setSelectedCommand(n.entry.id);
-                          void guard(() => openController(n.entry.link, false, n.entry.sysId, true));
+                          void guard(() => openController(n.entry.link, false, n.entry.sysId));
                         }}
                       >{n.entry.id}</button> : <small className="function-menu-id">{n.entry.id}</small>}
                     </div>
                   ))}
-                  {commands.length === 0 && (
-                    <div className="empty">Tải chức năng từ SYS của dự án.</div>
+                  {!menuLoading && !menuLoadError && menuLoaded[menuKind] && commands.length === 0 && (
+                    <div className="empty">Không có chức năng {menuKind === "web" ? "Web" : "Mobile"} trong SYS.</div>
+                  )}
+                  {!menuLoading && !menuLoadError && !menuLoaded[menuKind] && (
+                    <div className="empty">Chọn dự án có kết nối SYS để tải chức năng.</div>
                   )}
                 </div>
               </>
@@ -2166,6 +2290,16 @@ export default function App({
             }} />
           </aside>
         )}
+        {menuContext && <div className="table-action-menu explorer-action-menu" role="menu"
+          style={{ left: Math.max(8, Math.min(menuContext.x, window.innerWidth - 248)), top: Math.max(8, Math.min(menuContext.y, window.innerHeight - 104)) }}
+          onPointerDown={(event) => event.stopPropagation()}>
+          <Button variant="ghost" onClick={() => { const command = menuContext.command; setMenuContext(undefined); openMenuEditor(command); }}>
+            Sửa thông tin menu<kbd>F3</kbd>
+          </Button>
+          <Button variant="ghost" onClick={() => openMenuInsertScript(menuContext.command)}>
+            Tạo script INSERT menu<kbd>F12</kbd>
+          </Button>
+        </div>}
         <main className="editor-area">
           <div
             className="document-tabs"
@@ -2388,7 +2522,7 @@ export default function App({
               onOpenPath={path => void guard(() => open(path))}
               onSaved={async id => {
                 if (projectSysTarget.current?.id === menuEditor.target.id) {
-                  await loadCommands(); setSelectedCommand(id);
+                  await loadCommands("web", true); setSelectedCommands((current) => ({ ...current, web: id }));
                 }
                 setStatus("Đã lưu thông tin menu " + id);
               }} />
@@ -2573,6 +2707,11 @@ export default function App({
                 ))}
               </div>
               <div className="toolbar-spacer" />
+              {!editorSearchQuery && queryElapsedMs !== null && (
+                <span className="query-duration" role="status" aria-label="Thời gian chạy query">
+                  {running ? "Đang chạy" : "Thời gian"} · {formatQueryDuration(queryElapsedMs)}
+                </span>
+              )}
               {panel && !editorSearchQuery && result?.tables[resultIndex] && bottom === "results" && (
                 <Button variant="ghost" onClick={exportCsv}>
                   Xuất CSV
@@ -2965,6 +3104,9 @@ function FunctionTree({
   onOpen,
   onOpenSource,
   onEdit,
+  onScript,
+  onContext,
+  allowMenuActions,
 }: {
   nodes: CommandNode[];
   selected: string;
@@ -2972,6 +3114,9 @@ function FunctionTree({
   onOpen: (node: CommandNode) => void;
   onOpenSource: (node: CommandNode) => void;
   onEdit: (node: CommandNode) => void;
+  onScript: (node: CommandNode) => void;
+  onContext: (node: CommandNode, x: number, y: number) => void;
+  allowMenuActions: boolean;
 }) {
   const [expanded, setExpanded] = useState(new Set<string>());
   return (
@@ -3011,15 +3156,20 @@ function FunctionTree({
                     });
                 }}
                 onKeyDown={(event) => {
-                  if (event.key === "F3") {
+                  if (allowMenuActions && event.key === "F3") {
                     event.preventDefault();
                     onEdit(node);
+                  } else if (allowMenuActions && event.key === "F12") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onScript(node);
                   }
                 }}
                 onContextMenu={(event) => {
+                  if (!allowMenuActions) return;
                   event.preventDefault();
                   onSelect(node.entry.id);
-                  onEdit(node);
+                  onContext(node, event.clientX, event.clientY);
                 }}
                 onDoubleClick={() => {
                   if (node.entry.link || node.entry.sysId) onOpen(node);
@@ -3056,6 +3206,9 @@ function FunctionTree({
                   onOpen={onOpen}
                   onOpenSource={onOpenSource}
                   onEdit={onEdit}
+                  onScript={onScript}
+                  onContext={onContext}
+                  allowMenuActions={allowMenuActions}
                 />
               </div>
             )}

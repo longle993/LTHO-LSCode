@@ -13,6 +13,27 @@
 - [x] Đưa menu Tập lệnh lên top-layer, tự lật lên khi thiếu chỗ và không bị toolbar cắt.
 - [ ] Nghiệm thu thao tác cập nhật trên database ERP sao lưu có đủ quyền ghi.
 
+## Lưới dữ liệu và script menu ERP — 17/11/2026
+
+- [x] Gộp Cấu trúc và dữ liệu thành một màn dữ liệu; bỏ nút chuyển Dữ liệu/Cấu trúc.
+- [x] Cho lưới dữ liệu kéo chọn vùng, Ctrl+C, nhấp đúp/F2 để sửa ô và Enter để lưu.
+- [x] Sửa dropdown database thành popover nổi, hiển thị App/Sys và cho Ctrl+Alt+D đổi target của tab bảng.
+- [x] Đưa Ctrl+D vào menu Tập lệnh; giữ script tạo bảng và bổ sung script xóa bảng.
+- [x] Chọn menu ERP chỉ dựng cây controller; F12 và menu chuột phải sinh script INSERT `wcommand` + `command`.
+- [ ] Nghiệm thu thao tác ghi trên một database ERP sao lưu có đủ quyền; kiểm thử tự động chỉ dùng fixture cục bộ.
+
+## Thời gian chạy query — 17/11/2026
+
+- [x] Bắt đầu đếm từ lúc gửi `sql.execute`, cập nhật chỉ báo ở thanh Kết quả mỗi 100 ms.
+- [x] Khi thành công, dùng `durationMs` do SQL runner trả về; khi lỗi hoặc dừng, giữ thời gian đã trôi qua phía giao diện.
+- [x] Khôi phục thời gian theo result của từng tab khi đổi tab và không hiển thị sai thời gian của query chạy ở tab khác.
+- [x] Giữ chỉ báo gọn, dùng số tabular và không làm tràn thanh Kết quả ở màn hẹp.
+
+## Viền nhận diện cửa sổ — 17/11/2026
+
+- [x] Thêm viền 1 px quanh toàn bộ cửa sổ WebView không chrome, không thay đổi kích thước tổng thể nhờ `box-sizing: border-box`.
+- [x] Dùng token riêng cho Light, Dark và High Contrast để viền đủ rõ khi nhiều cửa sổ chồng lên nhau.
+
 ## Phím tắt, kéo thả file và tên Generate Update — 17/11/2026
 
 - [x] Chuẩn hóa phím số theo `KeyboardEvent.code` để Ctrl+Shift+4 không bị đọc thành Ctrl+Shift+$.
@@ -50,3 +71,17 @@ Các mục sau được ghi nhận trong [hướng dẫn WebView](docs/guides/WE
 - [ ] Chạy lại discovery LAN và menu/controller đặc thù bằng profile ERP thực tế.
 - [ ] Xác minh quyền đọc/ghi SQL, tương thích SSMS Trace, và một phiên breakpoint SSDT trên máy chủ phù hợp.
 - [ ] Nghiệm thu Crystal, dịch và bố cục Windows trên cấu hình DPI/nhiều màn hình thực tế.
+
+## Kế hoạch menu Web/Mobile — 17/11/2026
+
+Chi tiết và tiêu chí: [ERP-MENU-PERFORMANCE-MOBILE](docs/specifications/ERP-MENU-PERFORMANCE-MOBILE.vi.md).
+
+- [x] Khảo sát tĩnh luồng menu LSCode và lazy load/cache/source Mobile trong Fcode; ghi giới hạn bằng chứng.
+- [ ] Đo baseline từng lớp, số lượt SQL và độ trễ cold/warm.
+- [x] Gộp request, cache tối đa 8 ngữ cảnh/TTL 5 phút, invalidate/refresh và trạng thái tải riêng.
+- [x] Bỏ lượt metadata SQL riêng; giữ batch/quy tắc Web và kiểm chứng fixture không đổi.
+- [x] Giải chuỗi tải/schema Mobile từ Fcode và tạo fixture sạch.
+- [x] Tích hợp adapter `dvcommand` và lựa chọn Web/Mobile lazy-load.
+- [x] Nối cây source bằng `sysid` và Generate Update; giữ F3/F12 Web không áp nhầm Mobile.
+- [x] Build frontend/.NET, chạy Core/WebView checks và smoke bố cục preview.
+- [ ] Đo baseline cold/warm, chạy SQL fixture và smoke trên SYS ERP thật; máy hiện tại bị chặn bởi yêu cầu mã hóa của SQL Server cục bộ.

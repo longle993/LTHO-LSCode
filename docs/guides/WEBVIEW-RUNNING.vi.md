@@ -241,6 +241,14 @@ Generate Update và SQL Watch được mở từ thanh lối tắt hoặc bảng
 - Kéo một hoặc nhiều file từ Windows Explorer vào cửa sổ LSCode để mở. Thư mục và đường dẫn không còn tồn tại bị bỏ qua; tối đa 100 file mỗi lượt. File đã mở được đưa về tab hiện có thay vì tạo bản sao.
 - Trong **Cài đặt → Phím tắt**, các lệnh được chia theo File & cửa sổ, Editor & XML, SQL & dữ liệu, Dự án, Công cụ, Giao diện & hệ thống. Ô tìm lọc theo tên, ID lệnh hoặc phím mặc định; mỗi lệnh vẫn hỗ trợ hai tổ hợp.
 
+## Theo dõi thời gian query (17/11/2026)
+
+Khi nhấn **F5** hoặc **Chạy**, thanh công cụ của panel Kết quả hiển thị **Đang chạy · …** và cập nhật mỗi 100 ms. Khi query kết thúc, nhãn đổi thành **Thời gian · …**; kết quả thành công dùng thời gian do SQL runner trả về, còn query lỗi hoặc bị dừng giữ thời gian đã chạy ở phía giao diện. Thời gian dưới một giây hiển thị bằng mili giây, dưới một phút bằng giây và query dài hơn hiển thị theo `phút:giây`.
+
+## Viền cửa sổ (17/11/2026)
+
+LSCode dùng cửa sổ không có chrome mặc định của Windows, vì vậy toàn bộ ứng dụng có viền 1 px riêng theo Light, Dark và High Contrast. Viền nằm trong kích thước cửa sổ, giúp nhận ra mép cửa sổ khi mở nhiều dự án chồng nhau mà không làm thay đổi bố cục editor.
+
 ## Cấu trúc và dữ liệu (17/11/2026)
 
 - Nút **Lưu** nằm cạnh **Chạy**. Nhấn chuột phải vào ô **App/Sys** để sao chép tên database đang chọn.
@@ -253,3 +261,16 @@ Generate Update và SQL Watch được mở từ thanh lối tắt hoặc bảng
 - Màn hình dùng lưới cùng kiểu với kết quả SQL. Bấm một lần để chọn ô và dùng phím mũi tên hoặc **Tab** để di chuyển. Kéo chuột để chọn vùng hoặc bấm số dòng, tên cột hay ô `#` để chọn cả dòng, cột hay toàn bảng. **Ctrl+C** sao chép TSV. Nhấp đúp hoặc nhấn **F2** để mở ô nhập liệu. **Enter** kết thúc nhập ô và **Escape** bỏ lần sửa ô đang mở.
 - Dropdown trên tab hiển thị **App** hoặc **Sys**. Nhấn **Ctrl+Alt+D** để chuyển database của tab Cấu trúc và dữ liệu đang mở.
 - Menu **Tập lệnh** mở nổi ngoài toolbar nên không bị cắt khi cửa sổ hẹp. Menu có **Thêm key vào SQL Data (Ctrl+D)**, **Tạo lệnh tạo bảng** và **Tạo lệnh xóa bảng**. Các mục tạo/xóa chỉ mở script SQL để xem và tự chạy khi người dùng chủ động bấm Chạy.
+
+## Script INSERT menu ERP (17/11/2026)
+
+Chọn menu trong **Chức năng ERP** chỉ tải cây controller vào File. Ứng dụng không tự mở file Main. Khi focus ở menu, nhấn **F12** để mở tab SQL chứa INSERT của bản ghi `dbo.wcommand` và bản ghi `dbo.command` theo `menu_id`. Có thể dùng chuột phải rồi chọn **Tạo script INSERT menu**. Nếu menu không có `menu_id` hoặc không tìm thấy dòng `command`, tab SQL ghi chú rõ trường hợp đó.
+
+## Menu Web và Mobile (17/11/2026)
+
+- Mở **Chức năng ERP**, chọn **Web** hoặc **Mobile** phía trên ô tìm. Web được tải nền khi mở dự án; Mobile chỉ tải lần đầu khi chọn tab.
+- Web lấy `wcommand` theo quy tắc quyền/Startup hiện hữu. Mobile lấy `dbo.dvcommand`, hiển thị cây theo `wmenu_id0`, nhãn `bar` (fallback `bar2`) và dùng `sysid` để tìm controller.
+- Ô tìm lọc tên, sysid và mã trên dữ liệu đã tải. Chuyển Web/Mobile giữ từ khóa và cây riêng, không truy vấn SQL theo từng ký tự.
+- Nút **Tải lại** bỏ qua cache của tab đang chọn. Cache tối đa 8 ngữ cảnh và hết hạn sau 5 phút; lưu menu Web cũng xóa cache liên quan.
+- Nhấp đúp hoặc bấm mã của node để dựng cây source trong File; không tự mở Main. Khi Generate Update đang chọn yêu cầu, thao tác menu tiếp tục đưa cây source vào luồng chọn file.
+- F3, F12 và menu chuột phải sửa/xuất INSERT chỉ dành cho Web. Mobile chưa có trình sửa `dvcommand`; nếu dự án không có bảng này, lỗi chỉ hiện trong vùng Mobile và không ảnh hưởng cây Web.

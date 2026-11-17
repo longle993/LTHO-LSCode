@@ -537,13 +537,17 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                 var snapshotId = Guid.NewGuid().ToString("N");
                 tableSnapshots[S("scope")] = new(snapshotId, readTarget, qualified, data);
                 return new { data = preview, snapshotId };
-            case "project.commands": return await ProjectDatabase.CommandsAsync(Target(p), ct, S("appDatabase"));
+            case "project.commands": return await ProjectDatabase.CommandsAsync(Target(p), ct, S("appDatabase"), S("kind"), B("refresh"), S("context"));
             case "project.menu.details": return await MenuEditor.ReadAsync(Target(p), S("wmenuId"), ct);
             case "project.menu.new": return await MenuEditor.NewAsync(Target(p), S("selectedId"), ct);
+            case "project.menu.insertScript": return await MenuEditor.InsertScriptAsync(Target(p), S("wmenuId"), ct);
             case "project.menu.resources": return await MenuEditor.ResourcesAsync(S("root"), S("link"), S("sysId"), ct);
             case "project.menu.save":
                 var menuValues = p.GetProperty("values").Deserialize<Dictionary<string, string?>>(Json) ?? [];
-                return await MenuEditor.SaveAsync(Target(p), S("mode"), S("originalId"), S("version"), menuValues, ct);
+                var menuTarget = Target(p);
+                var savedMenu = await MenuEditor.SaveAsync(menuTarget, S("mode"), S("originalId"), S("version"), menuValues, ct);
+                ProjectDatabase.InvalidateCommands(menuTarget);
+                return savedMenu;
             case "project.employeeTabs": return await ProjectDatabase.EmployeeFunctionTabsAsync(Target(p), ct);
             case "project.controller":
                 return await Task.Run(async () =>
@@ -558,8 +562,8 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                     {
                         var metadataController = ProjectConventions.ControllerFromPageMetadata(root, S("sysId"), link);
                         if (!string.IsNullOrWhiteSpace(metadataController)) names = [metadataController];
-                        else if (names.Count == 0 && !string.IsNullOrWhiteSpace(S("sysId"))) names = [S("sysId")];
                     }
+                    if (names.Count == 0 && !string.IsNullOrWhiteSpace(S("sysId"))) names = [S("sysId")];
                     var controllerRoots = new[] { Path.Combine(root, "App_Data"), Path.Combine(root, "AppData") }
                         .Where(Directory.Exists).ToArray();
                     var files = (controllerRoots.Length == 0 ? [root] : controllerRoots)
