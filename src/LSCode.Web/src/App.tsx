@@ -1417,6 +1417,7 @@ export default function App({
       if (context === projectTargetIds.current.join("|")) {
         setCommandsByKind((current) => ({ ...current, [kind]: loaded }));
         setMenuLoaded((current) => ({ ...current, [kind]: true }));
+        if (kind === "mobile" && loaded.length === 0) setMenuKind("web");
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1617,6 +1618,19 @@ export default function App({
       opened.targets[1];
     projectSysTarget.current = sys;
     if (sys) {
+      void request<CommandNode[]>("project.commands", {
+        targetId: sys.id,
+        appDatabase: opened.targets[0]?.database ?? "",
+        kind: "mobile",
+        context: p.id,
+      }).then((loaded) => {
+        if (projectTargetIds.current.includes(sys.id)) {
+          setCommandsByKind((current) => ({ ...current, mobile: loaded }));
+          setMenuLoaded((current) => ({ ...current, mobile: true }));
+        }
+      }).catch(() => {
+        // Mobile is optional. Web loading reports its own connection errors.
+      });
       setMenuLoadingByKind((current) => ({ ...current, web: true }));
       void request<CommandNode[]>("project.commands", {
         targetId: sys.id,
@@ -1904,7 +1918,10 @@ export default function App({
                   void guard(async () => {
                     controllerCache.current.clear();
                     if (nav === "files" && controller) await openController(controller.link, controller.employeeTab, controller.sysId);
-                    if (nav === "functions") await loadCommands(menuKind, true);
+                    if (nav === "functions") {
+                      if (menuKind === "web") void loadCommands("mobile", true).catch(() => {});
+                      await loadCommands(menuKind, true);
+                    }
                     if (nav === "database") await loadObjects(0, true);
                   })
                 }
@@ -2198,12 +2215,14 @@ export default function App({
             )}
             {nav === "functions" && (
               <>
+                {(commandsByKind.mobile.length > 0 || menuKind === "mobile") && (
                 <div className="menu-kind-tabs" role="tablist" aria-label="Loại chức năng ERP">
                   <button type="button" role="tab" aria-selected={menuKind === "web"}
                     onClick={() => switchMenuKind("web")}>Web</button>
                   <button type="button" role="tab" aria-selected={menuKind === "mobile"}
                     onClick={() => switchMenuKind("mobile")}>Mobile</button>
                 </div>
+                )}
                 <div className="side-form">
                   <input
                     aria-label="Tìm chức năng"

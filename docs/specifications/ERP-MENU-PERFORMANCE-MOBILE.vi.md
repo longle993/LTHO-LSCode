@@ -59,6 +59,7 @@ Audit: React 18, Tailwind 4, Lucide, component nội bộ; token `--primary`, `-
 
 - Bridge `project.commands` giữ mặc định Web và nhận thêm `kind`, `refresh`, `context`; trình duyệt không truyền tên bảng SQL.
 - Adapter Mobile đọc `dbo.dvcommand`, ánh xạ `wmenu_id/wmenu_id0/bar/bar2/sysid`, dựng cây không giới hạn độ sâu bằng dictionary và HashSet chống chu trình. Web vẫn giới hạn ba cấp.
+- Batch kiểm tra bảng dùng `RAISERROR + RETURN` thay cho `THROW` để tương thích các SYS chạy SQL Server hoặc compatibility level cũ; trường hợp có bảng vẫn chỉ đọc `dvcommand` theo `wmenu_id`.
 - Tab **Web | Mobile** nằm trong panel Chức năng. Web tải nền khi mở dự án; Mobile lazy-load khi chọn lần đầu. Mỗi loại giữ cây và từ khóa riêng; lỗi/thiếu bảng hiện trong panel, không làm mất cây Web.
 - Node Mobile dùng `sysid` qua luồng `project.controller` hiện có. Fallback `sysid` hoạt động cả dự án có thư mục Main; chọn menu chỉ dựng cây source, không tự mở Main. Khi Generate Update đang chọn menu, luồng chọn source hiện có tiếp tục được dùng.
 - F3/F12/menu chuột phải chỉ bật cho Web. LSCode không phụ thuộc DLL/exe Fcode và không thêm tài khoản nhúng.

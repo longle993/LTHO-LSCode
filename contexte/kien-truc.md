@@ -27,4 +27,8 @@ Table Tool chỉ còn một bề mặt dữ liệu. `TableDataGrid` dùng chung 
 
 ## Tải menu ERP và Mobile
 
+Hiện tại LSCode kiểm tra cây Mobile ở nền khi mở dự án. Thanh chuyển Web / Mobile xuất hiện khi cây Mobile có mục. Nút tải lại ở Web kiểm tra lại Mobile song song.
+
 Triển khai ngày 17/11/2026: [tối ưu và tích hợp Mobile](../docs/specifications/ERP-MENU-PERFORMANCE-MOBILE.vi.md). WebView gọi `project.commands` với `kind/refresh/context` tới `ProjectDatabase.CommandsAsync` (source Shell được Compile Link vào Infrastructure). Web dùng một connection, đọc schema rồi chạy batch có Startup; `command_id/sysid` nằm trong result cuối. Cache tối đa 8 ngữ cảnh, TTL 5 phút, gộp request đồng thời và invalidate sau khi lưu menu. Cây Web vẫn ba cấp. Mobile đọc `dbo.dvcommand`, dựng không giới hạn độ sâu theo `wmenu_id0`, dùng `bar/bar2` và `sysid`; tab Mobile lazy-load và không bật F3/F12. Source Mobile đi qua fallback `sysid` của `project.controller`, kể cả dự án còn thư mục Main. Chưa có benchmark LAN hoặc smoke database ERP thật.
+
+Cập nhật 18/11/2026: batch Mobile không dùng `THROW` vì một số SYS FAST cũ không parse cú pháp SQL Server 2012 này. Kiểm tra thiếu `dbo.dvcommand` dùng `RAISERROR` rồi `RETURN`, giữ tương thích mà không thay đổi dữ liệu hay quy tắc dựng cây.

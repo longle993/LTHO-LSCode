@@ -248,7 +248,10 @@ public static class ProjectDatabase
     {
         const string sql = """
             IF OBJECT_ID('dbo.dvcommand') IS NULL
-                THROW 50001, N'Không tìm thấy bảng dbo.dvcommand trong SYS.', 1;
+            BEGIN
+                RAISERROR(N'Không tìm thấy bảng dbo.dvcommand trong SYS.', 16, 1);
+                RETURN;
+            END;
             SELECT * FROM dbo.dvcommand ORDER BY wmenu_id;
             """;
         using var connection = new SqlConnection(target.ConnectionString);

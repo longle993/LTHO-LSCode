@@ -85,3 +85,5 @@ Chi tiết và tiêu chí: [ERP-MENU-PERFORMANCE-MOBILE](docs/specifications/ERP
 - [x] Nối cây source bằng `sysid` và Generate Update; giữ F3/F12 Web không áp nhầm Mobile.
 - [x] Build frontend/.NET, chạy Core/WebView checks và smoke bố cục preview.
 - [ ] Đo baseline cold/warm, chạy SQL fixture và smoke trên SYS ERP thật; máy hiện tại bị chặn bởi yêu cầu mã hóa của SQL Server cục bộ.
+- [x] Sửa batch Mobile dùng `RAISERROR + RETURN` thay `THROW` để tương thích SYS SQL Server/compatibility level cũ như TAVNHRM.
+- [x] Kiểm tra cây Mobile song song với Web và ẩn thanh chuyển khi dự án không có mục Mobile.
