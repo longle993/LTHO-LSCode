@@ -475,11 +475,15 @@ await using (var projectTools = new DeveloperTools())
     await CallProject("project.history.record", new { id = syncedProject.Id, path = generated });
     Check(((string[])(await CallProject("project.history", new { id = syncedProject.Id }))!).SequenceEqual([generated]),
         "Project history persists and deduplicates file paths");
-    await CallProject("project.history.remove", new { id = syncedProject.Id, path = generated });
+    var secondHistoryFile = Path.Combine(nested, "second.xml");
+    await File.WriteAllTextAsync(secondHistoryFile, "<cache/>");
+    await CallProject("project.history.record", new { id = syncedProject.Id, path = secondHistoryFile });
+    await CallProject("project.history.removeMany", new { id = syncedProject.Id, paths = new[] { generated, secondHistoryFile } });
     var emptyHistory = JsonSerializer.SerializeToElement(await CallProject("project.history.list", new { }), Protocol.Json);
-    Check(emptyHistory.GetArrayLength() == 0 && File.Exists(generated) &&
+    Check(emptyHistory.GetArrayLength() == 0 && File.Exists(generated) && File.Exists(secondHistoryFile) &&
         !Directory.EnumerateFiles(Path.Combine(root, "file-history"), "*.json").Any(),
-        "Removing the last history entry removes the group and preserves the source file");
+        "Batch history removal writes once, removes the group, and preserves source files");
+    File.Delete(secondHistoryFile);
     await CallProject("project.history.record", new { id = syncedProject.Id, path = generated });
     await Reject<IOException>(() => CallProject("project.structure.clear", new { id = syncedProject.Id, path = nested }),
         "Clear Structure rejects a different path");
@@ -563,6 +567,30 @@ if (args.Contains("--sql"))
     try
     {
         var target = (TargetInfo)(await Call("sql.connect", new { server, database, integratedSecurity = true, trustCertificate = true }))!;
+        await Call("sql.execute", new { targetId = target.Id, sql = """
+            CREATE TABLE dbo.nbphyc (stt_rec varchar(20), ma_da varchar(20), ngay_ht datetime,
+                ma_lt1 varchar(20), trang_thai varchar(2), noi_dung nvarchar(200));
+            CREATE TABLE dbo.nbctdaumuc (stt_rec varchar(20), ma_lt varchar(20), so_luong decimal(18,2));
+            INSERT dbo.nbphyc VALUES
+                ('YC01','DA01','20261105 08:30','DEV01','HT',N'Hoàn thành'),
+                ('YC02','DA02','20261106 09:15','DEV01','UP',N'Cập nhật'),
+                ('YC03','DA03','20261107 10:00','DEV02','MO',N'Đang mở');
+            INSERT dbo.nbctdaumuc VALUES ('YC01','DEV01',2),('YC02','DEV01',3);
+            """ });
+        var requestRows = (ResultSet)(await Call("requestTracking.list", new
+        {
+            targetId = target.Id, legacy = false, user = "DEV01", from = "2026-11-01", to = "2026-11-30"
+        }))!;
+        Check(requestRows.Rows.Length == 2 && requestRows.Rows.All(row => row[3] == "DEV01"),
+            "QLYC filters requests by user and date through the selected LSCode connection");
+        var requestStatistics = (ResultSet)(await Call("requestTracking.statistics", new
+        {
+            targetId = target.Id, legacy = false, year = 2026
+        }))!;
+        var devStatistics = requestStatistics.Rows.Single(row => row[1] == "DEV01");
+        Check(decimal.Parse(devStatistics[14]!, System.Globalization.CultureInfo.InvariantCulture) == 2m &&
+            decimal.Parse(devStatistics[28]!, System.Globalization.CultureInfo.InvariantCulture) == 5m,
+            "QLYC View All returns request and quantity totals without hard-coded employee groups");
         await Call("sql.execute", new { targetId = admin.Id, sql = $"CREATE DATABASE [{menuAppDatabase}]" });
         menuAppCreated = true;
         var menuAppTarget = (TargetInfo)(await Call("sql.connect", new { server, database = menuAppDatabase, integratedSecurity = true, trustCertificate = true }))!;
@@ -711,6 +739,15 @@ if (args.Contains("--sql"))
         var retry = JsonSerializer.SerializeToElement(await Call("table.writeBatch", new { targetId = target.Id, table = "grid_save_fixture", rows = gridWrites.Take(1).ToArray() }), Protocol.Json);
         Check(!retry.TryGetProperty("conflict", out var retryConflict) || retryConflict.ValueKind == JsonValueKind.Null,
             "Duplicate grid key rolls back the earlier update and its original key can be used to retry");
+        var deleteRows = new[]
+        {
+            new { mode = "delete", columns = Array.Empty<string>(), values = Array.Empty<string>(), keyColumns = new[] { "id" }, keyValues = new[] { "2" } },
+        };
+        var deleted = JsonSerializer.SerializeToElement(await Call("table.writeBatch", new { targetId = target.Id, table = "grid_save_fixture", rows = deleteRows }), Protocol.Json);
+        Check(!deleted.TryGetProperty("conflict", out var deleteConflict) || deleteConflict.ValueKind == JsonValueKind.Null,
+            "Grid F8 delete removes rows transactionally by primary key");
+        var afterDelete = (ResultSet)(await Call("table.read", new { targetId = target.Id, schema = "dbo", table = "grid_save_fixture" }))!;
+        Check(afterDelete.Rows.Length == 1 && afterDelete.Rows[0][0] == "3", "Grid delete refresh source contains only the retained row");
         await Call("sql.execute", new { targetId = target.Id, sql = "CREATE TABLE dbo.viewer_fixture (value int); INSERT dbo.viewer_fixture VALUES (1),(2),(3);" });
         var tableCatalog = (ResultSet)(await Call("table.catalog", new { targetId = target.Id }))!;
         Check(tableCatalog.Rows.Any(row => row.SequenceEqual(new[] { "dbo", "viewer_fixture" })), "Table catalog returns the new table and its schema");
@@ -783,6 +820,14 @@ if (args.Contains("--sql"))
         await File.WriteAllTextAsync(Path.Combine(root,"App_Data","detail.f"),"<controller/>");
         var related=JsonSerializer.SerializeToElement(await Call("project.controller",new{root,link="menu.aspx"}),Protocol.Json);
         Check(related.GetProperty("files").GetArrayLength()==3,"Controller explorer includes ASPX and child grid files");
+        Directory.CreateDirectory(Path.Combine(root, "Main"));
+        var mainFixture = Path.Combine(root, "Main", "virtual-menu.aspx");
+        await File.WriteAllTextAsync(mainFixture, "<FastBusiness:QueryExtender Controller='employee' />");
+        var relatedFromMain = JsonSerializer.SerializeToElement(
+            await Call("project.controller", new { root, link = "~/virtual/routes/virtual-menu.aspx" }), Protocol.Json);
+        Check(relatedFromMain.GetProperty("files").EnumerateArray().Any(item =>
+                string.Equals(item.GetString(), mainFixture, StringComparison.OrdinalIgnoreCase)),
+            "Controller explorer keeps the resolved Main file when menu links contain virtual folders");
         var fOnly = Path.Combine(root, "App_Data", "legacy.f");
         await File.WriteAllTextAsync(fOnly, "<controller><items style='Grid' controller='legacyGrid'/></controller>");
         var fGrid = Path.Combine(root, "App_Data", "legacyGrid.f");

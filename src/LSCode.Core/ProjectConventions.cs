@@ -26,12 +26,33 @@ public static class ProjectConventions
     public static string? ResolveMenuFile(string root, string link)
     {
         root = Path.GetFullPath(root);
-        var relative = Uri.UnescapeDataString(link.Split('?', '#')[0]).Replace('/', Path.DirectorySeparatorChar).TrimStart('~', Path.DirectorySeparatorChar);
-        if (string.IsNullOrWhiteSpace(relative) || Path.IsPathRooted(relative)) return null;
+        var raw = link.Split('?', '#')[0];
+        if (Uri.TryCreate(raw, UriKind.Absolute, out var uri) && uri.IsFile is false) raw = uri.AbsolutePath;
+        var relative = Uri.UnescapeDataString(raw).Replace('/', Path.DirectorySeparatorChar)
+            .TrimStart('~', Path.DirectorySeparatorChar);
+        if (string.IsNullOrWhiteSpace(relative) || Path.IsPathRooted(relative) ||
+            relative.Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries).Any(part => part == "..")) return null;
         foreach (var candidate in new[] { Path.Combine(root, relative), Path.Combine(root, "Main", relative) })
         {
             var path = Path.GetFullPath(candidate);
             if (path.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) && File.Exists(path)) return path;
+        }
+        // Một số phiên bản ERP lưu link kèm thư mục ảo, trong khi file ASPX thật nằm dưới Main.
+        // Chỉ fallback theo đúng tên file và vẫn giới hạn kết quả trong Main.
+        var main = Path.Combine(root, "Main");
+        var fileName = Path.GetFileName(relative);
+        if (Directory.Exists(main) && !string.IsNullOrWhiteSpace(fileName))
+        {
+            var matches = Directory.EnumerateFiles(main, fileName, new EnumerationOptions
+            {
+                RecurseSubdirectories = true,
+                IgnoreInaccessible = true,
+                MatchCasing = MatchCasing.CaseInsensitive
+            }).Take(1001).ToArray();
+            if (matches.Length > 1000) throw new IOException("Thư mục Main có quá nhiều file trùng tên; cần thu hẹp đường dẫn menu.");
+            var suffix = Path.DirectorySeparatorChar + relative;
+            return matches.FirstOrDefault(path => path.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+                ?? matches.OrderBy(path => path.Length).FirstOrDefault();
         }
         return null;
     }

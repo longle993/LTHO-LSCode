@@ -32,7 +32,8 @@ public static class CompletionSnippets
     public static IEnumerable<SqlSuggestion> Get(IEnumerable<CompletionSnippet> snippets, string beforeCaret)
     {
         var qualifier = Regex.Match(beforeCaret, @"(?<object>[\w$]+(?:\.[\w$]+)*)\.[\w$]*$", RegexOptions.None, TimeSpan.FromMilliseconds(100)).Groups["object"].Value;
-        return snippets.Where(s => s.Object.Length == 0 ? qualifier.Length == 0 :
+        return snippets.Where(s => !s.Key.StartsWith("ss", StringComparison.OrdinalIgnoreCase))
+            .Where(s => s.Object.Length == 0 ? qualifier.Length == 0 :
             string.Equals(s.Object, qualifier, s.Exact ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase))
             .Select(s => new SqlSuggestion(s.Key, s.Body, s.Description.Length > 0 ? s.Description : "Snippet " + s.Object, true));
     }

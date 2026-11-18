@@ -16,6 +16,7 @@ export const commands = [
   ["editor.split", "Chia editor", "Ctrl+\\"],
   ["editor.find", "Tìm trong file", "Ctrl+F"],
   ["editor.sections", "Đi đến phần trong file", "Ctrl+G"],
+  ["request.command", "Mở ô lệnh QLYC", "Ctrl+Alt+C"],
   ["editor.replace", "Thay thế trong file", "Ctrl+H"],
   ["editor.format", "Định dạng SQL / XML / JSON", ""],
   ["workspace.files", "File dự án", ""],
@@ -47,7 +48,7 @@ export const shortcutGroups = [
   { id: "editor", label: "Editor & XML", prefixes: ["editor.", "xml"] },
   { id: "sql", label: "SQL & dữ liệu", prefixes: ["sql.", "db.", "table", "connection", "catalog", "profiler"] },
   { id: "workspace", label: "Dự án & không gian làm việc", prefixes: ["workspace.", "project."] },
-  { id: "tools", label: "Công cụ", prefixes: ["advance-note", "snippets", "compare", "beautify", "template-studio", "translation", "external."] },
+  { id: "tools", label: "Công cụ", prefixes: ["request.", "advance-note", "snippets", "compare", "beautify", "template-studio", "translation", "external."] },
   { id: "system", label: "Giao diện & hệ thống", prefixes: ["theme.", "settings"] },
 ] as const;
 

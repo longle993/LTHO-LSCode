@@ -2,6 +2,8 @@ import ControllerExplorer, { FileIcon } from "./ControllerExplorer";
 import { SourceCollectionDialog } from "./features/SourceCollectionDialog";
 import { pathIsWithin, rebasePath, tabFolderLabel } from "./fileLabels";
 import { FileSections } from "./features/FileSections";
+import { CommandBox } from "./features/CommandBox";
+import { RequestTracking } from "./features/RequestTracking";
 import { ControllerPreview } from "./features/ControllerPreview";
 import { ProjectHistory } from "./features/ProjectHistory";
 import { EmployeeFunctionTabs } from "./features/EmployeeFunctionTabs";
@@ -41,6 +43,7 @@ import {
   Languages,
   ArrowUpRight,
   NotebookPen,
+  Copy,
 } from "lucide-react";
 import { native, request, operation, subscribe, quoteSqlName, notifyWindowReady, writeClipboard } from "./bridge";
 import { PanelResizeHandle, WorkspaceResizeHandle } from "./PanelResizeHandle";
@@ -68,6 +71,7 @@ import {
   disposeModel,
   language,
   markSqlErrors,
+  setEditorSnippets,
 } from "./editor";
 import type { EditorDiagnostic, EditorHandle } from "./editor";
 import { Button, IconButton, Select, Modal, DataGrid } from "./ui";
@@ -125,6 +129,7 @@ export default function App({
   const [paneIds, setPaneIds] = useState(["", ""]),
     [focusedPane, setFocusedPane] = useState(0);
   const paneRef = useRef(0);
+  useEffect(() => setEditorSnippets(snippets), [snippets]);
   paneRef.current = focusedPane;
   const [tabs, setTabs] = useState<Tab[]>([]),
     [activeId, setActiveIdRaw] = useState(""),
@@ -239,6 +244,8 @@ export default function App({
   const controllerSelection = useRef(0);
   const [historyRevision, setHistoryRevision] = useState(0);
   const [history, setHistory] = useState<{ projectId: string; files: string[] }[]>();
+  const historyRemovalQueue = useRef(new Map<string, Set<string>>());
+  const historyRemovalTimers = useRef(new Map<string, number>());
   const [sourceCollection, setSourceCollection] = useState<{ samples: string[]; destination: string }>();
   const [historySearch, setHistorySearch] = useState("");
   const historyResults = useMemo(() => {
@@ -458,6 +465,32 @@ export default function App({
     },
     [],
   );
+  const queueHistoryRemoval = useCallback((projectId: string, path: string) => {
+    setHistory((current) => current?.flatMap((entry) => {
+      if (entry.projectId !== projectId) return [entry];
+      const files = entry.files.filter((file) => file.toLowerCase() !== path.toLowerCase());
+      return files.length ? [{ ...entry, files }] : [];
+    }));
+    const queued = historyRemovalQueue.current.get(projectId) ?? new Set<string>();
+    queued.add(path);
+    historyRemovalQueue.current.set(projectId, queued);
+    const oldTimer = historyRemovalTimers.current.get(projectId);
+    if (oldTimer !== undefined) window.clearTimeout(oldTimer);
+    historyRemovalTimers.current.set(projectId, window.setTimeout(() => {
+      historyRemovalTimers.current.delete(projectId);
+      const paths = [...(historyRemovalQueue.current.get(projectId) ?? [])];
+      historyRemovalQueue.current.delete(projectId);
+      if (!paths.length) return;
+      void guard(async () => {
+        try {
+          await request("project.history.removeMany", { id: projectId, paths });
+        } catch (error) {
+          setHistoryRevision((version) => version + 1);
+          throw error;
+        }
+      });
+    }, 140));
+  }, [guard]);
   useEffect(() => {
     if (!native || !active?.path || selectedTool) return;
     const path = active.path;
@@ -1065,7 +1098,7 @@ export default function App({
     }
   }
   const execute = async (id: string) => {
-    if (selectedTool && /^(editor\.|sql\.|file\.save|xml\.include)/.test(id)) return;
+    if (selectedTool && /^(editor\.|sql\.|file\.save|xml\.include)/.test(id) && !(id === "sql.run" && tableTab)) return;
     switch (id) {
       case "file.new":
         newDocument();
@@ -1113,6 +1146,9 @@ export default function App({
         break;
       case "editor.sections":
         if (active) setDialog("editor.sections");
+        break;
+      case "request.command":
+        setDialog("request.command");
         break;
       case "editor.replace":
         editor.current?.trigger(
@@ -1242,7 +1278,9 @@ export default function App({
         await save(undefined, true);
         break;
       case "sql.run":
-        await runSql();
+        if (tableTab) document.getElementById(tableTab.id + "-panel")
+          ?.querySelector<HTMLButtonElement>(".table-run-button")?.click();
+        else await runSql();
         break;
       case "sql.cancel":
         await runRef.current?.cancel();
@@ -1286,7 +1324,15 @@ export default function App({
       if (e.target instanceof HTMLElement &&
         (key === "Ctrl+Space" && e.target.closest('.table-inspection [role="combobox"]') ||
           key === "F2" && e.target.closest(".project-file-tree, .table-data-grid") ||
+          key === "F8" && e.target.closest(".table-data-grid") ||
+          key === "Ctrl+G" && e.target.closest(".table-inspection") ||
           key === "Ctrl+S" && e.target.closest(".table-inspection"))) return;
+      if (key === "Ctrl+G" && tableTab) {
+        e.preventDefault();
+        document.getElementById(tableTab.id + "-panel")?.querySelector<HTMLElement>(".table-inspection")
+          ?.dispatchEvent(new KeyboardEvent("keydown", { key: "g", ctrlKey: true, bubbles: true }));
+        return;
+      }
       if (key === "Ctrl+Shift+P") {
         e.preventDefault();
         setPalette("commands");
@@ -1311,7 +1357,7 @@ export default function App({
     };
     window.addEventListener("keydown", keys, true);
     return () => window.removeEventListener("keydown", keys, true);
-  }, [guard]);
+  }, [guard, tableTab?.id]);
   async function find() {
     if (!workspace) return;
     await searchRef.current?.cancel();
@@ -1964,10 +2010,7 @@ export default function App({
                     onCloseProject={() => void guard(() => closeProjectFiles(owner))}
                     onCloseAllProjects={() => void guard(() => closeProjectFiles())}
                     onOpen={(path) => void guard(() => openHistoryFile(owner, path))}
-                    onRemove={(path) => void guard(async () => {
-                      await request("project.history.remove", { id: projectId, path });
-                      setHistoryRevision((version) => version + 1);
-                    })} />;
+                    onRemove={(path) => queueHistoryRemoval(projectId, path)} />;
                 }) : <div className="explorer-message">{!history ? "Đang tải lịch sử…" : history.length && historySearch.trim()
                   ? "Không tìm thấy file hoặc thư mục." : "Chưa có file trong lịch sử."}</div>}
               </div>
@@ -2464,6 +2507,15 @@ export default function App({
                 >
                   <SlidersHorizontal size={15} />
                 </IconButton>
+                <IconButton
+                  label={target ? `Sao chép tên database ${target.database}` : "Chưa chọn database"}
+                  disabled={!target}
+                  onClick={() => target && void writeClipboard(target.database)
+                    .then(() => setStatus(`Đã sao chép ${target.database}.`))
+                    .catch((error: Error) => setStatus(error.message))}
+                >
+                  <Copy size={15} />
+                </IconButton>
                 <Button
                   variant="primary"
                   className="sql-run-button"
@@ -2948,7 +3000,11 @@ export default function App({
             });
           }} />
       )}
-      {dialog && !["connection", "projects", "settings", "editor.sections", "editor.controllerPreview"].includes(dialog) && (
+      {dialog === "request.command" && <CommandBox onClose={() => setDialog("")}
+        onOpenRequestTracking={() => setDialog("request.tracking")} />}
+      {dialog === "request.tracking" && <RequestTracking targets={targets} defaultTargetId={target?.id}
+        onClose={() => setDialog("")} />}
+      {dialog && !["connection", "projects", "settings", "editor.sections", "editor.controllerPreview", "request.command", "request.tracking"].includes(dialog) && (
         <ToolDialog
           onDirtyChange={(dirty) => {
             toolDirty.current = dirty;

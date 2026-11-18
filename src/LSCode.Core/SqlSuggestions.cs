@@ -12,6 +12,12 @@ public static class SqlSuggestions
         string Unquote(string value) => value.StartsWith('[') && value.EndsWith(']') ? value[1..^1].Replace("]]", "]") : value;
         var qualifier = Unquote(Regex.Match(beforeCaret, "(?<q>" + identifier + @")\.\w*$", RegexOptions.None, TimeSpan.FromMilliseconds(100)).Groups["q"].Value);
         var list = symbols.ToList();
+        var documentSql = fullSql ?? beforeCaret;
+        var locals = LocalSymbols(documentSql);
+        var prefix = Regex.Match(beforeCaret, @"(?<![\w@$#])(?:@{1,2}|#{1,2})[\w$]*\z",
+            RegexOptions.None, TimeSpan.FromMilliseconds(100)).Value;
+        if (prefix.Length > 0)
+            return locals.Where(s => s.Text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToArray();
         if (qualifier.Length > 0)
         {
             var aliases = Regex.Matches(fullSql ?? beforeCaret, @"\b(?:FROM|JOIN)\s+(?:(?<schema>" + identifier + @")\.)?(?<table>" + identifier + @")\s+(?:AS\s+)?(?<alias>" + identifier + ")", RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(100));
@@ -24,11 +30,35 @@ public static class SqlSuggestions
         var tableContext = Regex.IsMatch(beforeCaret, @"\b(?:FROM|JOIN|UPDATE|INTO|TABLE)\s+(?:\[[^\]]+\]|\w|\.)*$", RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(100));
         var tableSuggestions = list.Where(s => s.Column == null)
             .Select(s => new SqlSuggestion(s.Table, Quote(s.Schema) + "." + Quote(s.Table), s.Kind + " — " + s.Schema));
-        if (tableContext) return tableSuggestions.DistinctBy(s => s.InsertText).ToList();
+        if (tableContext) return locals.Where(s => s.Text.StartsWith('#') || s.Description.Contains("bảng", StringComparison.OrdinalIgnoreCase))
+            .Concat(tableSuggestions).DistinctBy(s => s.InsertText, StringComparer.OrdinalIgnoreCase).ToList();
         return Keywords.Select(k => new SqlSuggestion(k, k, "T-SQL syntax / function"))
+            .Concat(locals)
             .Concat(list.Where(s => s.Column != null).Select(s => new SqlSuggestion(s.Column!, Quote(s.Column!), s.Schema + "." + s.Table + " — " + s.Kind)))
             .Concat(tableSuggestions)
             .DistinctBy(s => s.InsertText).ToList();
+    }
+    private static IReadOnlyList<SqlSuggestion> LocalSymbols(string sql)
+    {
+        const RegexOptions options = RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
+        var timeout = TimeSpan.FromMilliseconds(100);
+        sql = Regex.Replace(sql, @"\[(?:[^\]]|\]\])*\]|""(?:[^""]|"""")*""|'(?:[^']|'')*'|--[^\r\n]*|/\*[\s\S]*?(?:\*/|\z)",
+            match => match.Value[0] is '[' or '"' ? match.Value : " ", options, timeout);
+        var parameters = Regex.Matches(sql,
+                @"\b(?:CREATE(?:\s+OR\s+ALTER)?|ALTER)\s+PROC(?:EDURE)?\s+(?:\[[^\]]+\]|[\w$]+)(?:\s*\.\s*(?:\[[^\]]+\]|[\w$]+))?(?<header>[\s\S]*?)(?=\bAS\b|\bBEGIN\b|\z)",
+                options, timeout).Cast<Match>()
+            .SelectMany(procedure => Regex.Matches(procedure.Groups["header"].Value,
+                @"(?:^|,)\s*(?<name>@[\p{L}_][\w@$#]*)\s+", options, timeout).Cast<Match>())
+            .Select(match => new SqlSuggestion(match.Groups["name"].Value, match.Groups["name"].Value, "Tham số stored procedure"));
+        var variables = Regex.Matches(sql, @"\bDECLARE\s+(?<body>[^;\r\n]+)", options, timeout).Cast<Match>()
+            .SelectMany(declaration => Regex.Matches(declaration.Groups["body"].Value, @"@[A-Za-z_][\w@$#]*", RegexOptions.None, timeout).Cast<Match>())
+            .Select(match => new SqlSuggestion(match.Value, match.Value, "Biến trong tài liệu hiện tại"));
+        var tableVariables = Regex.Matches(sql, @"\bDECLARE\s+(?<name>@[A-Za-z_][\w@$#]*)\s+TABLE\b", options, timeout)
+            .Cast<Match>().Select(match => new SqlSuggestion(match.Groups["name"].Value, match.Groups["name"].Value, "Biến bảng trong tài liệu hiện tại"));
+        var tempTables = Regex.Matches(sql, @"(?:\bCREATE\s+TABLE|\bINTO)\s+(?<name>#{1,2}[A-Za-z_][\w@$#]*)", options, timeout)
+            .Cast<Match>().Select(match => new SqlSuggestion(match.Groups["name"].Value, match.Groups["name"].Value, "Bảng tạm trong tài liệu hiện tại"));
+        return parameters.Concat(tableVariables).Concat(variables).Concat(tempTables)
+            .DistinctBy(item => item.Text, StringComparer.OrdinalIgnoreCase).ToList();
     }
     private static string Quote(string text) => "[" + text.Replace("]", "]]") + "]";
 }

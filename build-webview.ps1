@@ -48,7 +48,7 @@ if($Smoke){
     } finally {$env:LSCODE_DATA_HOME=$previousData}
 }
 if($Publish){
-    dotnet publish src/LSCode.Desktop/LSCode.Desktop.csproj -c Release --no-restore -m:1 -o $PublishDirectory
+    dotnet publish src/LSCode.Desktop/LSCode.Desktop.csproj -c Release -r win-x64 --self-contained true -m:1 -o $PublishDirectory
     if($LASTEXITCODE -ne 0){throw 'WebView publish failed.'}
     Write-Output "Ready: $PublishDirectory/LSCode.WebView.exe"
 }

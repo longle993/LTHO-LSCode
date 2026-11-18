@@ -28,7 +28,10 @@ public static class ProjectDatabase
 
     private static async Task<IReadOnlyList<ProjectDiscovery.ConfiguredConnection>> ReadProjectConnectionsAsync(LegacyProject project)
     {
-        var path = project.Field("WebConfigPath");
+        var source = project.SourcePath.Trim();
+        var path = string.IsNullOrWhiteSpace(source)
+            ? project.Field("WebConfigPath")
+            : Path.Combine(source, "web.config");
         var app = project.Field("AppConnectionString");
         var sys = project.Field("SysConnectionString");
         if (!string.IsNullOrWhiteSpace(path))

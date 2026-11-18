@@ -1,5 +1,15 @@
 # Kế hoạch và nghiệm thu
 
+- [x] Sửa gợi ý SQL cho tham số procedure và bảng tạm. Kiểm tra bằng fixture `ALTER PROC` trong bộ Core và build frontend.
+
+## Toast, snippet nhanh và lịch sử — 18/11/2026
+
+- [x] Thay thông báo trạng thái/lỗi và xác nhận xóa dòng trong Cấu trúc và dữ liệu bằng component LSCode; toast nổi không đẩy lưới hoặc toolbar.
+- [x] Đặt WHERE và ORDER BY cùng hàng theo tỷ lệ 70/30, tự chuyển thành một cột khi chiều rộng dưới 900 px.
+- [x] Đăng ký snippet người dùng có khóa `/...` với Monaco SQL; gõ khóa sẽ mở gợi ý, Enter/Tab chèn nội dung và giữ vị trí caret.
+- [x] Xóa lịch sử theo kiểu optimistic, gom các thao tác trong 140 ms và gửi `project.history.removeMany` để mỗi nhóm chỉ đọc/ghi file lịch sử một lần.
+- [x] Kiểm tra frontend production build và build WebView Tests; còn nghiệm thu trực quan toast/theme và độ trễ trên lịch sử dự án lớn thực tế.
+
 ## Lưu thay đổi trên lưới dữ liệu
 
 - [x] Cập nhật viền vùng chọn riêng để tránh dựng lại các hàng khi kéo.
@@ -87,3 +97,24 @@ Chi tiết và tiêu chí: [ERP-MENU-PERFORMANCE-MOBILE](docs/specifications/ERP
 - [ ] Đo baseline cold/warm, chạy SQL fixture và smoke trên SYS ERP thật; máy hiện tại bị chặn bởi yêu cầu mã hóa của SQL Server cục bộ.
 - [x] Sửa batch Mobile dùng `RAISERROR + RETURN` thay `THROW` để tương thích SYS SQL Server/compatibility level cũ như TAVNHRM.
 - [x] Kiểm tra cây Mobile song song với Web và ẩn thanh chuyển khi dự án không có mục Mobile.
+# Điều hướng và gợi ý trong editor XML
+
+- [x] Điều chỉnh Ctrl+G theo ảnh FCodeViewer, tô màu từng TAG, tách fields/views, bỏ items/text và liệt kê sự kiện, hàm JavaScript, mốc CSS trong DETAIL.
+
+- [x] Mở rộng FileSections theo mẫu hai danh sách của Fcode: nhóm thẻ và mục con có tên/id/controller. Lấy vị trí từ nội dung đang sửa, hỗ trợ tìm nhanh, phím mũi tên, Enter, Esc và trả focus về editor.
+- [x] Đăng ký Ctrl+Alt+C để mở ô lệnh riêng. Nhập `@@` rồi Enter mở QLYC. Từ QLYC, **View All** mở **Request Processing Statistics** dưới dạng bảng chỉ đọc. Hỗ trợ cấu hình `Qlcv` cũ của FCode và kết nối SQL đang mở trong LSCode; không ghi tài khoản hay danh sách nhân viên cá nhân vào mã nguồn.
+- [x] Rà provider Monaco theo vùng XML, SQL và JavaScript. Xác nhận gợi ý biến FAST trong SQL nhúng và tên field trong chuỗi của f./g. đã chạy qua provider tách vùng, giới hạn phân tích XML 1 MB và bỏ kết quả completion khi Monaco hủy yêu cầu.
+- [x] Build/publish frontend và Desktop; 155 WebView checks với SQL fixture, 146 Core checks và 12 smoke WebView2 đạt. Còn smoke trực tiếp Ctrl+Alt+C với cơ sở dữ liệu QLYC thật vì máy kiểm thử hiện không có cấu hình `HKCU\\Software\\FCoder\\Qlcv`.
+- [x] Chuyển publish mặc định sang `win-x64 --self-contained true`; chạy chính EXE self-contained qua 12 smoke WebView2 để xác nhận không phụ thuộc .NET Desktop Runtime cài trên máy.
+- [x] Thêm ORDER BY có gợi ý cột/ASC/DESC vào Cấu trúc và dữ liệu; F8 xóa theo khóa chính trong transaction và đọc lại lưới.
+- [x] Bổ sung completion cho biến, biến bảng và bảng tạm được khai báo trong tài liệu SQL đang mở; thêm kiểm thử Core và WebView SQL fixture.
+
+## Workspace Main, Snippet và điều hướng Table Tool — 18/11/2026
+
+- [x] Dò fallback file ASPX trong `Main` theo tên khi link menu có thư mục ảo; giữ kiểm tra không thoát khỏi root và fixture controller.
+- [x] Chuyển nhóm mẫu `ss...` sang danh sách Snippet; đưa biến session `@@...` vào nguồn snippet dùng chung cho SQL thường và SQL nhúng XML.
+- [x] Thêm nút sao chép database cạnh bộ chọn kết nối của editor và Cấu trúc và dữ liệu.
+- [x] Gán F5 cho tab bảng, Home/End cho dòng hiện hành và Ctrl+G Go To theo tên trường.
+- [x] Sửa Go To để focus ô Tên trường khi mở và hiển thị danh sách nổi qua mép hộp thoại. Kiểm tra bằng Chrome với dữ liệu mẫu ở 1440×900 và 375×320.
+- [x] Kiểm chứng production build, 153 Core checks, 158 WebView checks có SQL fixture và publish Windows x64 self-contained.
+- [ ] Smoke thủ công với menu ERP thật có link chứa virtual directory và bảng có nhiều cột trên màn hình người dùng.

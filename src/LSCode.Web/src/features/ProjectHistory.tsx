@@ -1,6 +1,6 @@
 import { Folder, FolderOpen, X } from "lucide-react";
 import { FileIcon } from "../ControllerExplorer";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "../ui";
 
@@ -27,16 +27,19 @@ export function ProjectHistory({ root, name, files, activePath, onOpen, onRemove
     document.addEventListener("pointerdown", outside);
     return () => document.removeEventListener("pointerdown", outside);
   }, [menu]);
-  const folders = new Map<string, string[]>();
-  const projectRoot = root.replaceAll("\\", "/").replace(/\/$/, "").toLowerCase();
-  for (const path of files) {
-    const normalized = path.replaceAll("\\", "/");
-    const folder = normalized.slice(0, normalized.lastIndexOf("/"));
-    const group = folder.toLowerCase() === projectRoot ? "" : folder;
-    const siblings = folders.get(group);
-    if (siblings) siblings.push(path);
-    else folders.set(group, [path]);
-  }
+  const folders = useMemo(() => {
+    const groups = new Map<string, string[]>();
+    const projectRoot = root.replaceAll("\\", "/").replace(/\/$/, "").toLowerCase();
+    for (const path of files) {
+      const normalized = path.replaceAll("\\", "/");
+      const folder = normalized.slice(0, normalized.lastIndexOf("/"));
+      const group = folder.toLowerCase() === projectRoot ? "" : folder;
+      const siblings = groups.get(group);
+      if (siblings) siblings.push(path);
+      else groups.set(group, [path]);
+    }
+    return groups;
+  }, [files, root]);
   const nameOf = (path: string) => path.split(/[\\/]/).at(-1) ?? path;
   const rows = (paths: string[]) => paths.map((path) => (
     <div className="history-file" key={path}>

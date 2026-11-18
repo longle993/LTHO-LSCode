@@ -241,6 +241,7 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
             case "project.history":
             case "project.history.record":
             case "project.history.remove":
+            case "project.history.removeMany":
             case "project.refreshConfig":
             case "project.structure.preview":
             case "project.structure.clear":
@@ -249,9 +250,11 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                 try
                 {
                     if (method == "project.history") return ProjectFileActions.ReadHistory(actionProject);
-                    if (method == "project.history.remove")
+                    if (method is "project.history.remove" or "project.history.removeMany")
                     {
-                        ProjectFileActions.RemoveHistory(actionProject, S("path"));
+                        if (method == "project.history.remove") ProjectFileActions.RemoveHistory(actionProject, S("path"));
+                        else ProjectFileActions.RemoveHistory(actionProject,
+                            p.GetProperty("paths").Deserialize<string[]>(Json) ?? []);
                         return true;
                     }
                     if (method == "project.history.record")
@@ -391,6 +394,26 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                 if (fields.Count > 0) return fields;
                 var jsSnippets = CompletionSnippets.Read(await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "Assets", "jssnippet.xml"), ct));
                 return CompletionSnippets.Get(jsSnippets, S("beforeCaret")).ToArray();
+            case "requestTracking.info":
+                return new { legacyAvailable = RequestTracking.LegacyConnectionAvailable };
+            case "requestTracking.list":
+            {
+                var useLegacy = B("legacy");
+                var selected = S("targetId").Length > 0 ? Target(p) : null;
+                var requestTarget = RequestTracking.Resolve(selected, useLegacy);
+                if (!DateTime.TryParse(S("from"), out var from) || !DateTime.TryParse(S("to"), out var to))
+                    throw new ArgumentException("Khoảng ngày QLYC không hợp lệ.");
+                return Table(await RequestTracking.ReadAsync(requestTarget, S("user"), from, to, ct));
+            }
+            case "requestTracking.statistics":
+            {
+                var useLegacy = B("legacy");
+                var selected = S("targetId").Length > 0 ? Target(p) : null;
+                var requestTarget = RequestTracking.Resolve(selected, useLegacy);
+                var year = I("year", DateTime.Today.Year);
+                if (year is < 2000 or > 9999) throw new ArgumentException("Năm thống kê không hợp lệ.");
+                return Table(await RequestTracking.StatisticsAsync(requestTarget, year, ct));
+            }
             case "sql.refresh": SqlSchemaCompletion.Clear(); return true;
             case "schema.objects":
                 var search = S("query").Trim();
@@ -675,7 +698,18 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
         var file = Path.Combine(SettingsStore.Root, "webview-snippets.xml");
         if (!File.Exists(file)) file = Path.Combine(SettingsStore.Root, "snippets.xml");
         if (!File.Exists(file)) file = Path.Combine(AppContext.BaseDirectory, "Assets", "snippets.xml");
-        return File.Exists(file) ? SnippetImporter.Read(File.ReadAllText(file)) : [];
+        var values = File.Exists(file) ? SnippetImporter.Read(File.ReadAllText(file)) : [];
+        var sqlFile = Path.Combine(AppContext.BaseDirectory, "Assets", "sqlsnippet.xml");
+        if (!File.Exists(sqlFile)) return values;
+        foreach (var item in CompletionSnippets.Read(File.ReadAllText(sqlFile))
+            .Where(item => item.Key.StartsWith("ss", StringComparison.OrdinalIgnoreCase)))
+        {
+            if (values.Any(value => value.Key.Equals(item.Key, StringComparison.OrdinalIgnoreCase))) continue;
+            var expanded = CompletionSnippets.Expand(item.Body);
+            values.Add(new Snippet(item.Key, "SQL dựng sẵn", expanded.Text,
+                item.Description.Length > 0 ? item.Description : "Mẫu SQL chuyển từ gợi ý ss", expanded.Offset));
+        }
+        return values;
     }
     private async Task SaveProjectAsync(LegacyProject project, CancellationToken ct, bool preserveProgramPath = false)
     {

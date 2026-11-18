@@ -91,15 +91,15 @@ internal static class TableInspection
         for (var index = 0; index < rows.Length; index++)
         {
             var row = rows[index];
-            if (row.Mode is not ("update" or "insert"))
+            if (row.Mode is not ("update" or "insert" or "delete"))
                 throw new ArgumentException("Chế độ ghi không hợp lệ.");
-            if (row.Mode == "update" && (primaryNames.Count == 0 || !primaryNames.SetEquals(row.KeyColumns)))
-                throw new ArgumentException("Cần đủ các cột khóa chính để cập nhật dòng.");
+            if ((row.Mode is "update" or "delete") && (primaryNames.Count == 0 || !primaryNames.SetEquals(row.KeyColumns)))
+                throw new ArgumentException("Cần đủ các cột khóa chính để cập nhật hoặc xóa dòng.");
             try
             {
                 var count = await WriteAsync(target, qualified, row.Mode, row.Columns, row.Values,
                     row.KeyColumns, row.KeyValues, ct, transaction, metadata).ConfigureAwait(false);
-                if (row.Mode == "update" && count == 0)
+                if ((row.Mode is "update" or "delete") && count == 0)
                     throw new InvalidOperationException("Dòng không còn tồn tại. Hãy đọc lại bảng.");
             }
             catch (SqlException ex) when (ex.Number is 2601 or 2627)
@@ -173,6 +173,19 @@ internal static class TableInspection
             }
             command.CommandText = "UPDATE " + qualified + " SET " + string.Join(", ", assignments)
                 + " WHERE " + string.Join(" AND ", predicates);
+        }
+        else if (mode.Equals("delete", StringComparison.OrdinalIgnoreCase))
+        {
+            if (keyNames.Length == 0) throw new InvalidOperationException("Bảng không có khóa chính để xóa dòng.");
+            var predicates = new List<string>();
+            for (var i = 0; i < keyNames.Length; i++)
+            {
+                var row = Column(keyNames[i]);
+                var parameterName = "@k" + i;
+                predicates.Add(ProjectDatabase.Quote(Convert.ToString(row["name"])!) + " = " + parameterName);
+                command.Parameters.Add(CreateParameter(parameterName, row, keyValues[i]));
+            }
+            command.CommandText = "DELETE FROM " + qualified + " WHERE " + string.Join(" AND ", predicates);
         }
         else throw new ArgumentException("Chế độ ghi không hợp lệ.");
         return await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);

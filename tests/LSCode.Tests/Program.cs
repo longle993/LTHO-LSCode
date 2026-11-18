@@ -30,6 +30,10 @@ try
     Assert(hints.Count == 2 && CompletionSnippets.Get(hints, "$func.ge").Single().Text == "get", "Legacy object hint parsing and dollar qualifier");
     Assert(!CompletionSnippets.Get(hints, "$FUNC.ge").Any(), "Exact JS object matching");
     Assert(CompletionSnippets.Get(hints, "sel").Single().Text == "select", "Global snippets exclude member hints");
+    var legacySql = CompletionSnippets.Read("<config><Snippet><Item keyword='ssproc#'>create proc</Item><Item keyword='@@id' description='Session'>@@id</Item></Snippet></config>");
+    Assert(CompletionSnippets.Get(legacySql, "ss").All(item => !item.Text.StartsWith("ss", StringComparison.OrdinalIgnoreCase)) &&
+        CompletionSnippets.Get(legacySql, "@@").Any(item => item.Text == "@@id"),
+        "Legacy ss templates live in Snippet tool while session variables remain SQL completions");
     var expansion = CompletionSnippets.Expand("get({{0-name}}, {{1}}){{|}}");
     Assert(expansion == ("get(name, )", 4, 4), "Snippet expansion selects first argument and removes markers");
     Assert(CompletionSnippets.Expand("select {{-}}") == ("select ", 7, 0), "Snippet cursor marker");
@@ -234,12 +238,35 @@ try
     Assert(SqlSuggestions.Get("SELECT order_", symbols).Any(s => s.InsertText == "[order_id]"), "SQL unqualified column suggestions preserve underscore");
     Assert(ProjectConventions.Controllers("<FastBusiness:QueryExtender Controller='dmbp'/>").SequenceEqual(["dmbp"]), "QueryExtender fallback when ReportExtender absent");
     Assert(SqlSuggestions.Get("SELECT o.", symbols, "SELECT o. FROM [dbo].[orders] AS [o]").Single().Text == "order_id", "SQL bracketed identifier alias completion");
+    var localSql = "DECLARE @from date, @to date\nCREATE TABLE #rows(id int)\nSELECT * INTO #copy FROM #rows";
+    var localSuggestions = SqlSuggestions.Get("SELECT ", symbols, localSql);
+    Assert(localSuggestions.Any(s => s.Text == "@from") && localSuggestions.Any(s => s.Text == "@to"), "SQL declared variable completion");
+    Assert(localSuggestions.Any(s => s.Text == "#rows") && localSuggestions.Any(s => s.Text == "#copy"), "SQL temporary table completion");
+    Assert(SqlSuggestions.Get("SELECT * FROM #", symbols, localSql).Any(s => s.Text == "#rows"), "SQL temporary table completion in FROM");
+    const string procedureSql = """
+        ALTER PROC [dbo].[Report]
+            @DateFrom smalldatetime,
+            @DateTo smalldatetime
+        AS
+        BEGIN
+            SELECT 1 AS id INTO #temp;
+            DECLARE @q nvarchar(4000) = 'SELECT 1 INTO #fake';
+            -- SELECT 1 INTO #comment
+            SELECT 1 AS id INTO #hddt;
+        END
+        """;
+    Assert(SqlSuggestions.Get("WHERE value >= @DateF", symbols, procedureSql).Single().InsertText == "@DateFrom",
+        "SQL completes procedure parameters by prefix");
+    Assert(SqlSuggestions.Get("SELECT * FROM #", symbols, procedureSql).Select(s => s.InsertText).SequenceEqual(["#temp", "#hddt"]),
+        "SQL completes temp tables from procedure bodies and ignores strings and comments");
     Assert(ProjectConventions.FindAppDatabase("ERP_Sys", ["ERP_App", "OTHER_A"]) == "ERP_App", "SYS to App suffix convention");
     Assert(ProjectConventions.FindAppDatabase("ERP_S", ["ERP_A", "ERP_App"]) == "ERP_A", "Prefer exact A suffix when both App databases exist");
     Assert(ProjectConventions.FindAppDatabase("ERP_TEST", ["ERP_A"]) == null, "Do not guess unrelated database prefix");
     Assert(ProjectConventions.Controllers("<%@ Page X='a' %><!-- <FastBusiness:ReportExtender Controller='Hidden'/> --><FastBusiness:QueryExtender Controller='Other'/><FastBusiness:ReportExtender ID=\"MainReport\" runat=\"server\" TargetControlID=\"panelReport\" ReadOnly=\"true\" Controller=\"IRTran\"/>").SequenceEqual(["IRTran"]), "Extract ASPX ReportExtender controller, ignore comments and QueryExtender");
     var webRoot = Path.Combine(root, "web"); Directory.CreateDirectory(Path.Combine(webRoot, "Main")); await File.WriteAllTextAsync(Path.Combine(webRoot, "Main", "voucher.aspx"), "fixture");
     Assert(ProjectConventions.ResolveMenuFile(webRoot, "voucher.aspx?x=1") == Path.Combine(webRoot, "Main", "voucher.aspx"), "Menu link resolves Main ASPX");
+    Assert(ProjectConventions.ResolveMenuFile(webRoot, "~/virtual/pages/voucher.aspx?x=1") == Path.Combine(webRoot, "Main", "voucher.aspx"),
+        "Menu link with a virtual folder falls back to the matching Main ASPX");
     Assert(ProjectConventions.ResolveMenuFile(webRoot, "../../search.sql") == null, "Menu link cannot escape project");
     var metadataRoot = Path.Combine(root, "page-metadata");
     Directory.CreateDirectory(Path.Combine(metadataRoot, "AppData"));
