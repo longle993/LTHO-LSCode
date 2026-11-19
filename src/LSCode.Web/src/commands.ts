@@ -28,11 +28,12 @@ export const commands = [
   ["connection", "Kết nối SQL", ""],
   ["table", "Cấu trúc và dữ liệu", "Ctrl+Shift+T"],
   ["advance-note", "Generate Update", "Ctrl+Shift+4"],
-  ["catalog", "Danh mục", ""],
+  ["catalog", "Tạo danh mục", ""],
   ["snippets", "Snippets", ""],
   ["compare", "So sánh văn bản / thư mục", ""],
   ["beautify", "Beautify SQL", ""],
   ["profiler", "SQL Profiler", ""],
+  ["check-mail", "Check Mail · Kiểm tra gửi mail", ""],
   ["template-studio", "Thiết kế template API", ""],
   ["xml", "XML: Outline / XPath", ""],
   ["xml.include", "Xem nhanh include", "F12"],
@@ -48,7 +49,7 @@ export const shortcutGroups = [
   { id: "editor", label: "Editor & XML", prefixes: ["editor.", "xml"] },
   { id: "sql", label: "SQL & dữ liệu", prefixes: ["sql.", "db.", "table", "connection", "catalog", "profiler"] },
   { id: "workspace", label: "Dự án & không gian làm việc", prefixes: ["workspace.", "project."] },
-  { id: "tools", label: "Công cụ", prefixes: ["request.", "advance-note", "snippets", "compare", "beautify", "template-studio", "translation", "external."] },
+  { id: "tools", label: "Công cụ", prefixes: ["request.", "advance-note", "snippets", "compare", "beautify", "template-studio", "check-mail", "translation", "external."] },
   { id: "system", label: "Giao diện & hệ thống", prefixes: ["theme.", "settings"] },
 ] as const;
 

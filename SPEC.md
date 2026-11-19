@@ -18,13 +18,29 @@ Xem [ma trận WebView](docs/specifications/WEBVIEW-MIGRATION.vi.md) và [đặc
 
 Lưới Cấu trúc và dữ liệu hiện viền trên mỗi ô được quét và dùng nền xám cho ô nhập. Lưu hoặc Ctrl+S ghi cả lô dữ liệu, gồm thay đổi khóa cho phép ghi. Khi có xung đột khóa, toàn bộ lần lưu được hoàn tác và các ô khóa của dòng lỗi được đánh dấu sau khi khôi phục giá trị.
 
+Sau khi tạo bảng trong LSCode, ô FROM tìm được bảng mới ngay khi quay lại tab Cấu trúc và dữ liệu trên cùng kết nối. Chọn bảng tải được cấu trúc và dữ liệu ngay lần đầu. Tập lệnh INSERT của bảng dùng `dd/MM/yyyy` cho `smalldatetime` và `dd/MM/yyyy HH:mm` cho `datetime`, với chuyển đổi ngày tường minh để chạy được trên phiên SQL Server dùng `mdy`. Lỗi SQL và lỗi tra cứu bảng hiện trong thông báo nổi có thể đóng mà không thay đổi vị trí vùng làm việc.
+
 ## Tải menu nhanh và menu Mobile
+
+### Tiêu chí nghiệm thu form F3 Web
+
+- Menu mới trong `dbo.wcommand` không có NULL sau khi lưu. Mặc định hoặc trigger tạo NULL phải khiến transaction rollback.
+- Các hàng nhập liệu, Loại D/V/trống, ô tick Trạng thái và thanh nút trên cùng theo [hướng dẫn Menu ERP](docs/guides/ERP-MENU-EDITOR.vi.md).
+- Form dùng được khi tài nguyên còn đang dò. Panel phải liệt kê file theo nhóm và mở từng bảng master/detail tìm được trong App DB, kèm cấu trúc và dữ liệu.
 
 Khi profile có đường dẫn source, mở dự án và tải lại web.config dùng file web.config trong thư mục source đã lưu.
 
 Chỉ hiện thanh Web / Mobile khi tải được cây menu Mobile có mục. Dự án chỉ có Web mở thẳng danh sách Web.
 
 Đặc tả: [tối ưu tải menu và tích hợp Mobile](docs/specifications/ERP-MENU-PERFORMANCE-MOBILE.vi.md). Đã triển khai cache/gộp request, giảm lượt SQL Web, tab Web/Mobile lazy-load, adapter `dbo.dvcommand`, tìm trong bộ nhớ và tra source Mobile bằng `sysid`. F3/F12 vẫn chỉ dành cho Web. Còn nghiệm thu baseline LAN, SQL Server ERP thật và Customize Mobile.
+
+## Tạo danh mục ERP
+
+- Mở được từ nhóm SQL & dữ liệu hoặc từ menu chuột phải trên cây Chức năng Web. Dùng controller mẫu cùng dự án để thu thập Main, Grid, Dir, Filter và controller chi tiết.
+- Có ánh xạ bảng/cột, đổi controller, xem trước từng file và xuất gói mới. Gói giữ đường dẫn tương đối và encoding; không ghi vào database hoặc ghi đè source mẫu. Thay đổi mẫu sau preview phải yêu cầu xem lại.
+- Thiết kế bảng SQL vẫn khả dụng trong cùng lệnh. Xem [đặc tả Tạo danh mục](docs/specifications/CATALOG-TABLE-DESIGNER.vi.md).
+- Tạo từ mô tả nhận dòng đầu là tên danh mục và mỗi dòng sau theo mẫu `Tên trường: kiểu, ràng buộc`. Quy ước mặc định: mã `char(16)`, chuỗi `nvarchar(128)`, số `int`, số thập phân/tiền `numeric(19,5)`, trạng thái `char(1)` mặc định `1`; kỳ/năm được tách thành hai trường `int`.
+- Thanh chế độ và thanh Xem trước/Tạo hoặc Xuất source cố định trong modal; chỉ phần nội dung cuộn. Bảng duyệt có chiều cao cố định, header dính và dùng dropdown LSCode trên top-layer. Lỗi, trạng thái và xác nhận bỏ nháp không dùng hộp thoại hệ thống.
 
 Batch kiểm tra `dbo.dvcommand` phải chạy được trên các SYS FAST cũ: dùng `RAISERROR + RETURN`, không dùng cú pháp `THROW` yêu cầu SQL Server 2012 trở lên.
 # Điều hướng XML và quản lý yêu cầu
@@ -39,9 +55,22 @@ Gợi ý biến `@@` trong SQL nhúng tiếp tục là thao tác trong editor, t
 
 ## Hoàn thiện workspace, snippet và Table Tool — 18/11/2026
 
+Hộp chọn dự án có thể hiện trước khi tải snippet. Khi chọn dự án, việc đọc bản nháp chưa lưu chạy đồng thời với mở dự án. Bản nháp vẫn được khôi phục sau khi áp dụng ngữ cảnh dự án.
+
 - Cây File phải hiện file ASPX dưới `Main` khi thư mục tồn tại, kể cả link menu chứa thư mục ảo; chọn menu vẫn chỉ dựng cây và không tự mở file Main.
 - Các mẫu SQL legacy có khóa `ss...` không trộn vào completion tên bảng/cột nữa mà xuất hiện trong tab Snippet. Biến session `@@...` dùng chung nguồn `sqlsnippet.xml`, không duy trì danh sách hard-code riêng trong WebView.
 - Mọi vùng chọn database có nút sao chép tên database hiện tại; phản hồi dùng thông báo nội bộ.
 - Tại Cấu trúc và dữ liệu, F5 chạy truy vấn và Home/End đi tới ô đầu/cuối của dòng đang chọn. Ctrl+G mở Go To và đặt con trỏ vào ô Tên trường. Danh sách gợi ý hiển thị nổi và có thể cuộn. Enter hoặc Nhận chuyển vùng chọn đến cột tương ứng.
 
 Bản publish chạy trực tiếp mặc định phải là Windows x64 self-contained, không yêu cầu cài .NET Desktop Runtime. Người dùng phải giữ nguyên thư mục publish và máy vẫn cần Microsoft Edge WebView2 Runtime.
+
+## Check Mail — gửi thư thử qua SMTP
+
+Mục tiêu là giúp người cấu hình ERP kiểm tra một cấu hình SMTP từ LSCode, độc lập với kết nối SQL. Ảnh tham chiếu xác định các trường và thứ tự thao tác.
+
+**Tiêu chí nghiệm thu**
+
+- Từ Ctrl+Shift+P, tìm được công cụ bằng “Check Mail” hoặc “Kiểm tra gửi mail”. Mở lại lệnh đưa người dùng về tab đã mở. Chỉ tải màn hình khi mở công cụ.
+- Form có máy chủ, cổng và chế độ bảo mật. Khối người gửi có email, tên hiển thị, tài khoản, mật khẩu và nút hiện/ẩn. Khối người nhận có To, Cc và Bcc, hỗ trợ nhiều địa chỉ. Bên dưới là tiêu đề, lựa chọn Text/HTML, nội dung, kết quả và nút Gửi thử. Khi thu hẹp cửa sổ, hai khối địa chỉ xếp dọc theo thứ tự nhập.
+- Mỗi lần bấm Gửi thử hợp lệ chỉ gửi một thư. Hiển thị lỗi ngay tại trường sai. Khi đang gửi, khóa thao tác gửi lặp. Kết quả phân biệt lỗi kết nối, TLS, xác thực, địa chỉ bị từ chối và máy chủ đã tiếp nhận thư. Việc tiếp nhận chỉ xác nhận giao dịch SMTP, chưa xác nhận thư đến hộp thư người nhận.
+- Dùng theme hiện tại. Che mật khẩu mặc định, chỉ giữ trong bộ nhớ khi tab đang mở. Nhật ký và dữ liệu khôi phục phiên phải loại thông tin xác thực và nội dung thư.

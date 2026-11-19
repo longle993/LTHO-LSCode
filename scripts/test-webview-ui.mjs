@@ -14,7 +14,8 @@ await page.addInitScript(()=>{
   window.__traceBatch=[];
   const doc=(id,text='',name='fixture.xml',filePath='C:\\Fixture\\fixture.xml')=>({id,path:filePath,name,text,encoding:'utf-8',bom:false,newline:'CRLF',version:1});
   const projectRoot='C:\\Fixture';
-  const otherProject={id:'other',name:'Dự án lịch sử',server:'.',database:'Other_App',sourcePath:'C:\\Other'};
+  const fixtureProject={id:'fixture',name:'Dự án thử UI',code:'Dự án thử UI',title:'Dự án thử UI',active:true,server:'.',database:'Fixture_App',sourcePath:projectRoot};
+  const otherProject={id:'other',name:'Dự án lịch sử',code:'Dự án lịch sử',title:'Dự án lịch sử',active:true,server:'.',database:'Other_App',sourcePath:'C:\\Other'};
   const pastFile='C:\\Other\\Controller\\Main\\past.xml';
   const history=new Map([['other',[pastFile]]]);
   const controllerFiles=name=>[
@@ -26,9 +27,9 @@ await page.addInitScript(()=>{
   const settings={theme:'Light',workspace:'C:\\Fixture',server:'.',database:'Fixture_App',integratedSecurity:true,sqlUser:'',trustCertificate:true,crystalPath:'',profiler18Path:'',shortcuts:{},activityCommands:null,projectLastAccess:{other:'2026-11-12T03:00:00Z'}};
   const native={addEventListener:(_,fn)=>listeners.push(fn),postMessage:request=>{window.__nativeCalls.push(request);let result,error;
     switch(request.method){
-      case 'studio.bootstrap':result={settings,projects:[{id:'fixture',name:'Dự án thử UI',server:'.',database:'Fixture_App',sourcePath:'C:\\Fixture'},otherProject],snippets:[{key:'select',category:'SQL',body:'SELECT * FROM {{table}};',description:'Mẫu SELECT',position:0,param:''}],version:'ui-test'};break;
+      case 'studio.bootstrap':result={settings,projects:[fixtureProject,otherProject],snippets:[{key:'select',category:'SQL',body:'SELECT * FROM {{table}};',description:'Mẫu SELECT',position:0,param:''}],version:'ui-test'};break;
       case 'project.open':result=request.payload.id==='other'?{project:otherProject,targets:[]}:
-        {project:{id:'fixture',name:'Dự án thử UI',server:'.',database:'Fixture_App',sourcePath:'C:\\Fixture'},targets:[{id:'project-app',server:'.',database:'Fixture_App'},{id:'project-sys',server:'.',database:'Fixture_Sys'}]};break;
+        {project:fixtureProject,targets:[{id:'project-app',server:'.',database:'Fixture_App'},{id:'project-sys',server:'.',database:'Fixture_Sys'}]};break;
       case 'project.history':result=history.get(request.payload.id)??[];break;
       case 'project.history.list':result=[...history].filter(([,files])=>files.length).map(([projectId,files])=>({projectId,files}));break;
       case 'project.history.remove':{
@@ -45,6 +46,28 @@ await page.addInitScript(()=>{
       case 'project.commands':result=request.payload.kind==='mobile'
         ? [{entry:{id:'mobile1',caption:'Mobile bán hàng',sysId:'MobileSales',commandId:'mobile1',link:''},children:[]}]
         : [{entry:{id:'menu1',caption:'Nhân viên',sysId:'HR',commandId:'Dir',link:'nhanvien.aspx'},children:[]},{entry:{id:'menu2',caption:'Bộ phận',sysId:'HR',commandId:'Dept',link:'bophan.aspx'},children:[]},{entry:{id:'menu3',caption:'Thông tin nhân viên',sysId:'HR',commandId:'Info',link:'hrEmployeeInformation.aspx'},children:[]},{entry:{id:'separator',caption:'-',sysId:'',commandId:'',link:''},children:[]}];break;
+      case 'project.menu.details':{
+        const values={wmenu_id0:'',wmenu_id:'menu1',menu_id:'Dir',bar:'Nhân viên',bar2:'Employee',link:'nhanvien.aspx',sysid:'HR',parameter:'',syscode:'',type:'D',status:'1',icon_url:'',icon:''};
+        result={mode:'edit',fields:Object.keys(values).map(name=>({name,type:'varchar',maxLength:80})),values,version:'fixture',canSave:true};break;
+      }
+      case 'project.menu.resources':result={controllers:['HR'],tables:['DanhMuc','hr.NhanVien'],resources:[
+        {kind:'Dir',paths:['App_Data\\Controllers\\Dir\\nhanvien.xml']},
+        {kind:'Filter',paths:[]},
+        {kind:'Grid',paths:['App_Data\\Controllers\\Grid\\nhanvien.f']},
+        {kind:'Main',paths:['Main\\nhanvien.aspx']},
+      ]};break;
+      case 'catalogSource.discover':result={controllers:['HR'],tables:['DanhMuc'],resources:[
+        {kind:'Grid',paths:['App_Data\\Controllers\\Grid\\HR.xml']},
+      ]};break;
+      case 'catalogSource.preview':result={fingerprint:'catalog-fixture',hasMain:true,
+        files:[{path:'App_Data\\Controllers\\Grid\\CatalogDemo.xml',text:"<grid table='DanhMucDemo' />"}]};break;
+      case 'project.menu.new':result={values:{wmenu_id0:'',wmenu_id:'',menu_id:'',bar:'',bar2:'',link:'',sysid:'',status:'1'}};break;
+      case 'catalogDescription.preview':result={fingerprint:'catalog-description-fixture',
+        sql:'CREATE TABLE [dbo].['+request.payload.design.table+'] (...);',
+        files:[{path:'App_Data\\Controllers\\Dir\\'+request.payload.design.source.controller+'.xml',text:'<controller />'}]};break;
+      case 'catalogDescription.apply':result=['C:\\Fixture\\App_Data\\Controllers\\Dir\\zdm_diem_danh_gia_theo_he_so.xml'];break;
+      case 'workspace.folder':result='C:\\Fixture\\Output';break;
+      case 'catalogSource.export':result={folder:'C:\\Fixture\\Output\\CatalogDemo',files:['CatalogDemo.xml']};break;
       case 'project.menu.insertScript':result="-- dbo.wcommand\r\nINSERT INTO dbo.wcommand ([wmenu_id]) VALUES ('menu1')\r\nGO\r\n\r\n-- dbo.command\r\nINSERT INTO dbo.command ([menu_id]) VALUES ('Dir')\r\nGO\r\n";break;
       case 'project.employeeTabs':result=[{sysId:'hrPIGeneralInformation',caption:'Thông tin chung'},{sysId:'hrPIPassportVisa',caption:'Hộ chiếu, thị thực'}];break;
       case 'project.controller':{
@@ -85,7 +108,10 @@ await page.addInitScript(()=>{
       case 'clipboard.write':clipboard=request.payload.text;result=true;break;
       case 'document.close':case 'recovery.save':case 'settings.save':case 'operation.cancel':case 'profiler.stop':result=true;break;
       case 'sql.connect':result={id:'target-'+(++serial),server:request.payload.server,database:request.payload.database};break;
-      case 'sql.execute':result={tables:[{columns:['Mã','Tên','Giá trị'],rows:Array.from({length:5000},(_,i)=>[String(i),'Tiếng Việt '+i,i===0?null:'1000000000.123456789'])},{columns:['Bảng phụ'],rows:[['Dòng bảng hai']]}],messages:['Query fixture'],durationMs:12,truncated:true};break;
+      case 'sql.execute':
+        if(window.__failSql){error={code:'sql_error',message:'Lỗi SQL fixture'};break;}
+        if(request.payload.sql.includes('CREATE TABLE dbo.BangMoiFixture')) window.__createdTableTarget=request.payload.targetId;
+        result={tables:[{columns:['Mã','Tên','Giá trị'],rows:Array.from({length:5000},(_,i)=>[String(i),'Tiếng Việt '+i,i===0?null:'1000000000.123456789'])},{columns:['Bảng phụ'],rows:[['Dòng bảng hai']]}],messages:['Query fixture'],durationMs:12,truncated:true};break;
       case 'sql.complete':result=request.payload.text===''?['COUNT','AS','IS NOT NULL','AND','BETWEEN','DESC','ASC'].map(text=>({text,isSnippet:false})):[];break;
       case 'javascript.complete':result=[];break;
       case 'xml.validate':case 'xml.viewWidth':result=null;break;
@@ -109,7 +135,10 @@ await page.addInitScript(()=>{
           {name:'ten',label:'Họ và tên',width:160},{name:'ma_bp',label:'Bộ phận',width:240}]}]};break;
       case 'schema.objects':result={columns:['Schema','Name','Type','Id'],rows:[['dbo','DanhMuc','USER_TABLE','1']]};break;
       case 'table.names':result={columns:['Schema','Name'],rows:[['dbo','DanhMuc']]};break;
-      case 'table.catalog':result={columns:['Schema','Name'],rows:[['dbo','DanhMuc_Archive'],['dbo','DanhMuc'],['hr','NhanVien']]};break;
+      case 'table.catalog':result={columns:['Schema','Name'],rows:[
+        ['dbo','DanhMuc_Archive'],['dbo','DanhMuc'],['hr','NhanVien'],
+        ...(window.__createdTableTarget===request.payload.targetId?[['dbo','BangMoiFixture']]:[]),
+      ]};break;
       case 'table.structure':result={columns:['Cột','Kiểu dữ liệu','Khóa'],rows:[['code','INT','PK · PK_DanhMuc'],...(!window.__columnDropped?[['label','NVARCHAR(20)','']]:[])]};break;
       case 'table.metadata':result={columns:[{name:'code',sqlType:'INT',key:'PK · PK_DanhMuc',primaryKey:true,nullable:false,identity:false,computed:false,generated:0,writable:true},...(!window.__columnDropped?[{name:'label',sqlType:'NVARCHAR(20)',key:'',primaryKey:false,nullable:true,identity:false,computed:false,generated:0,writable:true}]:[])]};break;
       case 'table.addScript':result='ALTER TABLE [dbo].[DanhMuc] ADD [label] NVARCHAR(20) NULL;';break;
@@ -125,22 +154,183 @@ await page.addInitScript(()=>{
       case 'profiler.read':result={events:window.__traceBatch.splice(0),dropped:0,truncated:false};break;
       case 'project.discover':result=[{name:'Project Fixture',folder:'C:\\Fixture\\Application',configPath:'C:\\Fixture\\Application\\web.config'}];break;
       case 'project.sync':result=true;break;
-      case 'project.list':result=[{id:'fixture',name:'Dự án thử UI',server:'.',database:'Fixture_App',sourcePath:'C:\\Fixture'},otherProject];break;
+      case 'project.list':result=[fixtureProject,otherProject];break;
       case 'catalog.references':result={columns:['Schema','Table','Column','Type'],rows:[]};break;
       case 'catalog.load':result={signature:'fixture-schema',columns:[{name:'code',type:'nvarchar',nullable:false,identity:false,computed:false,generated:0,managed:false,hasDefault:false},{name:'label',type:'nvarchar',nullable:true,identity:false,computed:false,generated:0,managed:false,hasDefault:false},...['user_id0','user_id2','datetime0','datetime2'].map(name=>({name,type:name.startsWith('user')?'int':'datetime',nullable:true,identity:false,computed:false,generated:0,managed:true,hasDefault:false}))],data:{columns:['code','label','user_id0','user_id2','datetime0','datetime2'],rows:[['one',null,null,null,null,null],[':null','literal',null,null,null,null]]}};break;
       case 'catalog.clipboard.write':result=request.payload.rows.map(r=>r.map(v=>'"'+(v??'').replaceAll('"','""')+'"').join('\t')).join('\r\n');break;
       default:error={code:'fixture',message:'Fixture không hỗ trợ '+request.method};
     }
     const reply=()=>listeners.forEach(fn=>fn({data:{protocolVersion:1,requestId:request.requestId,result,error}}));
-    if (request.method==='table.catalog'&&window.__holdTableCatalog) window.__releaseTableCatalog=reply;
+    if (request.method==='project.menu.resources'&&window.__holdMenuResources) window.__releaseMenuResources=reply;
+    else if (request.method==='table.catalog'&&window.__holdTableCatalog) window.__releaseTableCatalog=reply;
     else setTimeout(reply,10);
   }};
   window.chrome=window.chrome??{};window.chrome.webview=native;
 });
 const out='artifacts/webview-ui';mkdirSync(out,{recursive:true});
 let checks=0;const check=(value,name)=>{if(!value)throw Error('FAIL '+name);checks++;console.log('PASS '+name);};
+async function testMenuEditor(functionRow){
+  await page.evaluate(()=>{window.__holdMenuResources=true;});
+  await functionRow.focus();await functionRow.press('F3');
+  const menuPanel=page.locator('#menu-editor-panel');
+  await menuPanel.getByLabel('Main').waitFor();
+  check(await menuPanel.getByRole('button',{name:'Lưu',exact:true}).count()===1 &&
+    await menuPanel.getByRole('checkbox',{name:'Trạng thái'}).isChecked(),
+    'ERP menu has one save action and renders status as a checked checkbox');
+  await page.waitForFunction(()=>window.__releaseMenuResources);
+  check(await menuPanel.getByText('Đang dò controller và file…',{exact:true}).isVisible() &&
+    await menuPanel.getByLabel('Main').isEditable(), 'ERP menu can be edited before resources finish loading');
+  await page.evaluate(()=>{window.__holdMenuResources=false;window.__releaseMenuResources();});
+  await menuPanel.getByRole('button',{name:'hr.NhanVien',exact:true}).waitFor();
+  await menuPanel.screenshot({path:out+'/erp-menu-editor.png'});
+  const shell=menuPanel.locator('.menu-editor-shell');
+  await shell.evaluate(element=>{element.style.width='375px';});
+  check(await shell.locator('.menu-editor-body').evaluate(element=>element.scrollWidth===element.clientWidth),
+    'ERP menu form and resources fit a 375 px work area');
+  await shell.evaluate(element=>{element.style.removeProperty('width');});
+  await menuPanel.getByRole('button',{name:'Loại',exact:true}).click();
+  await page.getByRole('option',{name:'V',exact:true}).click();
+  check(await menuPanel.getByText('Có thay đổi chưa lưu',{exact:true}).isVisible(),
+    'ERP menu shows changes in the inspection panel');
+  await menuPanel.getByRole('button',{name:'hr.NhanVien',exact:true}).click();
+  await page.waitForFunction(()=>['table.metadata','table.view'].every(method=>window.__nativeCalls.some(c=>
+    c.method===method&&c.payload.targetId==='project-app'&&c.payload.schema==='hr'&&c.payload.table==='NhanVien')));
+  check(true,'ERP menu opens the selected Dir table structure and data on the App target');
+  await page.getByRole('button',{name:/^Đóng .*NhanVien/}).click();
+  await page.locator('#menu-editor-tab').click();
+  await menuPanel.getByRole('button',{name:'Đóng',exact:true}).click();
+}
+async function testTableRefreshAndNotice(){
+  await page.getByRole('button',{name:'Đóng',exact:true}).click();
+  await page.locator('[data-ready=true]').waitFor();
+  await page.getByRole('button',{name:'SQL mới',exact:true}).click();
+  await page.getByRole('button',{name:'Kết nối SQL',exact:true}).click();
+  await page.getByRole('textbox',{name:'Server',exact:true}).fill('.');
+  await page.getByRole('textbox',{name:'Database',exact:true}).fill('Fixture_App');
+  await page.getByRole('button',{name:'Kết nối',exact:true}).click();
+  await page.locator('dialog').waitFor({state:'detached'});
+  const sqlTab=page.locator('.document-tabs').getByRole('tab',{selected:true});
+  const sqlTabName=await sqlTab.getAttribute('aria-label') ?? await sqlTab.textContent();
+  const sqlDocument=page.locator('.document-tabs').getByRole('tab',{name:sqlTabName.trim(),exact:true});
+  await page.locator('.monaco-editor').first().click({position:{x:160,y:35}});
+  await page.keyboard.insertText('CREATE TABLE dbo.BangMoiFixture (code int);');
+  await page.keyboard.press('Control+Shift+t');
+  const firstTableTab=page.getByRole('tab',{name:/^Cấu trúc và dữ liệu(?: ·.*)?$/});
+  await firstTableTab.waitFor();
+  const tablePanel=page.locator('#'+await firstTableTab.getAttribute('aria-controls'));
+  const tableInput=tablePanel.getByRole('combobox',{name:'FROM',exact:true});
+  await tableInput.fill('DanhMuc');
+  await tablePanel.getByRole('option',{name:'DanhMuc',exact:true}).click();
+  await tablePanel.locator('.data-grid td[title="1"]').waitFor();
+  await page.waitForFunction(()=>window.__nativeCalls.some(c=>c.method==='table.catalog'));
+  await sqlDocument.click();
+  await page.getByRole('button',{name:'Chạy SQL',exact:true}).click();
+  await page.waitForFunction(()=>!!window.__createdTableTarget);
+  await firstTableTab.click();
+  await tableInput.fill('BangMoiFixture');
+  await tablePanel.getByRole('option',{name:'BangMoiFixture',exact:true}).click();
+  await tablePanel.locator('.data-grid td[title="1"]').waitFor();
+  await tablePanel.getByRole('button',{name:'Chọn tất cả',exact:true}).waitFor();
+  await page.waitForFunction(()=>document.querySelector('.profiler-panel:not([hidden]) .table-column-panel-actions button:enabled'));
+  check(await page.evaluate(()=>window.__nativeCalls.filter(c=>c.method==='table.view' && c.payload.table==='BangMoiFixture').length===1 &&
+    window.__nativeCalls.filter(c=>c.method==='table.catalog').length>=2 &&
+    window.__nativeCalls.some(c=>c.method==='table.metadata' && c.payload.table==='BangMoiFixture')),
+    'A new table appears after running SQL and keeps its first data snapshot');
+
+  await sqlDocument.click();
+  const workbenchTop=await page.locator('.workbench').evaluate(el=>el.getBoundingClientRect().top);
+  await page.evaluate(()=>{window.__failSql=true;});
+  await page.getByRole('button',{name:'Chạy SQL',exact:true}).click();
+  await page.locator('.table-notice[role="alert"]').getByText('Lỗi SQL fixture').waitFor();
+  check(await page.locator('.workbench').evaluate(el=>el.getBoundingClientRect().top)===workbenchTop,
+    'SQL errors use a floating notice without moving the workbench');
+  await page.screenshot({path:out+'/sql-error-toast.png',animations:'disabled'});
+  await page.setViewportSize({width:375,height:600});
+  const notice=page.locator('.table-notice[role="alert"]');
+  check(await notice.evaluate(el=>{
+    const {left,right}=el.getBoundingClientRect();
+    return left>=0 && right<=innerWidth;
+  }),'The error notice fits within a 375px workbench');
+  await notice.getByRole('button',{name:'Đóng thông báo'}).click();
+  await notice.waitFor({state:'detached'});
+}
 try{
-  await page.goto('http://127.0.0.1:4173');await page.getByRole('dialog',{name:'Dự án của bạn'}).waitFor();check(true,'Project picker opens before workbench');
+  await page.goto(process.env.LSCODE_UI_URL??'http://127.0.0.1:4173');await page.getByRole('dialog',{name:'Dự án của bạn'}).waitFor();check(true,'Project picker opens before workbench');
+  if(process.argv.includes('--catalog-source-regression')){
+    await page.locator('.project-row').filter({hasText:'Dự án thử UI'}).click();
+    await page.locator('dialog').waitFor({state:'detached'});
+    await page.getByRole('button',{name:'Chức năng',exact:true}).click();
+    await page.getByRole('button',{name:'Nhân viên',exact:true}).click({button:'right'});
+    await page.getByRole('button',{name:'Dùng làm mẫu tạo danh mục'}).click();
+    const catalog=page.getByRole('dialog',{name:'Tạo danh mục',exact:true});
+    await catalog.getByRole('button',{name:'Đọc mẫu'}).click();
+    check(await catalog.getByLabel('Mẫu ERP').inputValue()==='nhanvien.aspx','Menu seeds the ERP template in Create catalog');
+    await catalog.getByLabel('Controller mới').fill('CatalogDemo');
+    await catalog.getByLabel('DanhMuc',{exact:true}).fill('DanhMucDemo');
+    await catalog.getByRole('button',{name:'Xem trước'}).click();
+    await catalog.locator('pre').getByText("<grid table='DanhMucDemo' />").waitFor();
+    await catalog.screenshot({path:out+'/catalog-source.png'});
+    await catalog.getByRole('button',{name:'Xuất source'}).click();
+    await page.locator('.table-notice').getByText('Đã xuất 1 file',{exact:false}).waitFor();
+    check(await page.evaluate(()=>window.__nativeCalls.some(call=>call.method==='catalogSource.export'&&
+      call.payload.fingerprint==='catalog-fixture'&&call.payload.tables.DanhMuc==='DanhMucDemo')),
+      'Create catalog exports the reviewed configuration');
+    await catalog.getByRole('button',{name:'Tạo từ mô tả'}).click();
+    await catalog.getByLabel('Mô tả danh mục').fill(`Danh mục điểm đánh giá theo hệ số
+Hiệu lực từ kỳ/năm: kiểu số, khoá chính
+Mã điểm: kiểu chuỗi, khoá chính
+Tên điểm: kiểu chuỗi, bắt buộc nhập
+Tên khác: kiểu chuỗi
+Hệ số đánh giá (%): kiểu số thập phân
+Trạng thái: 1-Còn sử dụng, 0-Không còn sử dụng`);
+    await catalog.getByRole('button',{name:'Tách trường'}).click();
+    const fieldRows=catalog.locator('.catalog-description-table tbody tr');
+    check(await fieldRows.count()===7,'Description rules expand period/year and keep every declared field');
+    check((await Promise.all([0,1,2,3,4,5,6].map(index=>fieldRows.nth(index).locator('td').first().locator('input').inputValue()))).join(',')===
+      'ky_hl,nam_hl,ma_diem,ten_diem,ten_diem2,he_so_danh_gia,status',
+      'Description rules generate predictable ERP field names');
+    check((await fieldRows.nth(2).getByRole('button',{name:'Kiểu SQL 3'}).textContent()).includes('char') &&
+      await fieldRows.nth(2).getByLabel('Kích thước 3').inputValue()==='16' &&
+      (await fieldRows.nth(5).getByRole('button',{name:'Kiểu SQL 6'}).textContent()).includes('numeric') &&
+      await fieldRows.nth(5).getByLabel('Kích thước 6').inputValue()==='19,5',
+      'Description rules apply char(16) to codes and numeric(19,5) to decimals');
+    check(await fieldRows.nth(3).getByLabel('Bắt buộc 4').isChecked() &&
+      await fieldRows.nth(6).getByLabel('Mặc định 7').inputValue()==='1',
+      'Description rules preserve required and status defaults');
+    await fieldRows.nth(2).getByRole('button',{name:'Kiểu SQL 3'}).click();
+    check(await page.locator('.select-options-floating').isVisible(),'Catalog SQL types use the LSCode floating dropdown');
+    await page.keyboard.press('Escape');
+    const modeTop=await catalog.locator('.catalog-mode').evaluate(element=>element.getBoundingClientRect().top);
+    const footerBottom=await catalog.locator('.catalog-description-footer').evaluate(element=>element.getBoundingClientRect().bottom);
+    await catalog.locator('.catalog-source-scroll').evaluate(element=>element.scrollTop=element.scrollHeight);
+    check(await catalog.locator('.catalog-mode').evaluate(element=>element.getBoundingClientRect().top)===modeTop &&
+      await catalog.locator('.catalog-description-footer').evaluate(element=>element.getBoundingClientRect().bottom)===footerBottom,
+      'Catalog mode bar and actions stay fixed while the content scrolls');
+    await catalog.screenshot({path:out+'/catalog-description.png',animations:'disabled'});
+    await page.setViewportSize({width:375,height:700});
+    check(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),
+      'Create-from-description does not overflow the 375px viewport');
+    await catalog.screenshot({path:out+'/catalog-description-mobile.png',animations:'disabled'});
+    await page.setViewportSize({width:1440,height:1000});
+    await catalog.getByRole('button',{name:'Thiết kế bảng SQL'}).click();
+    const discard=page.getByRole('dialog',{name:'Bỏ bản nháp?'});
+    await discard.waitFor();
+    check(await discard.getByText('Bản nháp danh mục chưa được lưu',{exact:false}).isVisible(),
+      'Catalog uses an LSCode confirmation instead of a system dialog');
+    await discard.getByRole('button',{name:'Bỏ thay đổi'}).click();
+    check(await catalog.getByRole('button',{name:'Thiết kế bảng SQL'}).getAttribute('aria-pressed')==='true',
+      'Create catalog keeps the SQL designer available');
+    check(errors.length===0,'No uncaught browser errors');
+  } else if(process.argv.includes('--menu-regression')){
+    await page.locator('.project-row').filter({hasText:'Dự án thử UI'}).click();
+    await page.locator('dialog').waitFor({state:'detached'});
+    await page.getByRole('button',{name:'Chức năng',exact:true}).click();
+    await testMenuEditor(page.getByRole('button',{name:'Nhân viên',exact:true}));
+    check(errors.length===0,'No uncaught browser errors');
+  } else if(process.argv.includes('--table-regression')){
+    await testTableRefreshAndNotice();
+    check(errors.length===0,'No uncaught browser errors');
+  } else {
   check((await page.locator('.project-row').first().textContent()).includes('Dự án lịch sử'),'Project picker sorts by last access');
   await page.keyboard.press('Control+Shift+n');
   await page.waitForFunction(()=>window.__nativeCalls.filter(call=>call.method==='window.new').length===1);
@@ -346,6 +536,7 @@ try{
   await functionRowAgain.click({button:'right'});
   check(await page.getByRole('button',{name:/Tạo script INSERT menu/}).isVisible(),'ERP menu context menu exposes the INSERT script action');
   await page.keyboard.press('Escape');
+  await testMenuEditor(functionRowAgain);
   const workspaceResize=page.getByRole('separator',{name:'Đổi chiều rộng Không gian dự án'});
   const sidebar=page.locator('#project-sidebar');
   const initialWidth=(await sidebar.boundingBox()).width;
@@ -768,4 +959,5 @@ try{
     'Removing the last history entry hides the project and leaves the editor open');
   if(errors.length)console.log(JSON.stringify(errors,null,2));check(errors.length===0,'No uncaught browser errors');
   writeFileSync(out+'/interaction-report.json',JSON.stringify({passed:true,checks,transport:'explicit browser fixture; not a .NET/SQL integration test',errors},null,2));
+  }
 }finally{await browser.close();}

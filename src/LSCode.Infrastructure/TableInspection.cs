@@ -318,7 +318,8 @@ internal static class TableInspection
             data.Rows.Cast<DataRow>().Select(r => columns.Select(c => r.IsNull(c) ? null : DisplayValue(r[c])).ToArray()).ToArray());
     }
 
-    public static async Task<string> InsertScriptAsync(SqlTarget target, string qualified, DataTable data, CancellationToken ct)
+    public static async Task<string> InsertScriptAsync(SqlTarget target, string qualified, DataTable data, CancellationToken ct,
+        bool useTableDateFormats = false)
     {
         if (data.Rows.Count == 0) return "";
         var metadata = await TableDefinition.ColumnsAsync(target, qualified, ct).ConfigureAwait(false);
@@ -333,6 +334,7 @@ internal static class TableInspection
                 && (definition.IsNull("generated") || Convert.ToInt32(definition["generated"]) == 0);
         }).ToArray();
         if (writable.Length == 0) throw new NotSupportedException("Các cột đang hiển thị đều do SQL Server sinh tự động.");
+        var typeIds = writable.Select(c => Convert.ToInt32(byName[c.ColumnName]["system_type_id"])).ToArray();
         var identity = writable.Any(c => !byName[c.ColumnName].IsNull("seed"));
         var script = new StringBuilder();
         if (identity) script.AppendLine($"SET IDENTITY_INSERT {qualified} ON;");
@@ -341,7 +343,8 @@ internal static class TableInspection
         {
             ct.ThrowIfCancellationRequested();
             var row = data.Rows[i];
-            script.Append("    (").AppendJoin(", ", writable.Select(c => Literal(row[c])))
+            script.Append("    (").AppendJoin(", ", writable.Select((column, index) =>
+                    Literal(row[column], useTableDateFormats ? typeIds[index] : 0)))
                 .AppendLine(i == data.Rows.Count - 1 ? ");" : "),");
             if (script.Length > 2_000_000) throw new NotSupportedException("Script quá lớn. Hãy lọc bớt dòng hoặc cột.");
         }
@@ -357,11 +360,15 @@ internal static class TableInspection
         _ => Convert.ToString(value, CultureInfo.InvariantCulture) ?? ""
     };
 
-    private static string Literal(object value) => value switch
+    private static string Literal(object value, int systemTypeId) => value switch
     {
         DBNull => "NULL",
         bool boolean => boolean ? "1" : "0",
         byte or short or int or long or decimal or float or double or byte[] => DisplayValue(value),
+        DateTime date when systemTypeId == 58 =>
+            $"CONVERT(smalldatetime, '{date.ToString("dd'/'MM'/'yyyy", CultureInfo.InvariantCulture)}', 103)",
+        DateTime date when systemTypeId == 61 =>
+            $"CONVERT(datetime, '{date.ToString("dd'/'MM'/'yyyy HH':'mm", CultureInfo.InvariantCulture)}', 103)",
         string or char or Guid or DateTime or DateTimeOffset or TimeSpan => "N'" + DisplayValue(value).Replace("'", "''") + "'",
         _ => throw new NotSupportedException("Script INSERT chưa hỗ trợ kiểu " + value.GetType().Name + ".")
     };

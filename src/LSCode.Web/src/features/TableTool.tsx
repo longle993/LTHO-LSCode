@@ -1,8 +1,8 @@
 import { Component, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
 import type { ChangeEvent, ErrorInfo, KeyboardEvent as ReactKeyboardEvent, ReactNode, SyntheticEvent } from "react";
 import { createPortal } from "react-dom";
-import { CheckCircle2, ChevronRight, CircleAlert, Copy, Info, KeyRound, Play, RefreshCw, X } from "lucide-react";
-import { Button, IconButton, Modal, Select } from "../ui";
+import { ChevronRight, CircleAlert, Copy, KeyRound, Play, RefreshCw, X } from "lucide-react";
+import { Button, IconButton, Modal, Select, WorkbenchNotice } from "../ui";
 import { operation, quoteSqlName, request, writeClipboard } from "../bridge";
 import type { Table, Target } from "../bridge";
 import { useTask } from "./useTask";
@@ -12,6 +12,11 @@ import { TableScriptDialog } from "./TableScriptDialog";
 
 type TableName = { schema: string; table: string };
 const tableCatalogCache = new Map<string, { tables: TableName[]; expires: number }>();
+const tableCatalogChanged = "lscode:table-catalog-changed";
+export function invalidateTableCatalog(targetId: string) {
+  tableCatalogCache.delete(targetId);
+  window.dispatchEvent(new CustomEvent(tableCatalogChanged, { detail: targetId }));
+}
 function isTable(value: unknown): value is Table {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<Table>;
@@ -261,9 +266,15 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
   const key = JSON.stringify([targetId, schema, table]);
   const tables = catalog?.targetId === targetId ? catalog?.tables : undefined;
   const query = input.replace(/[\[\]]/g, "").trim().toLowerCase();
-  const candidates = tables ?? (quickCatalog?.targetId === targetId && quickCatalog?.query === query ? quickCatalog.tables : undefined);
-  const knownTable = !!candidates?.some((entry) =>
-    entry.schema.toLowerCase() === schema?.toLowerCase() && entry.table.toLowerCase() === table?.toLowerCase());
+  const matchesTable = (entry: TableName) =>
+    entry.schema.toLowerCase() === schema?.toLowerCase() && entry.table.toLowerCase() === table?.toLowerCase();
+  const listedTable = !!tables?.some(matchesTable);
+  const quickTables = quickCatalog?.targetId === targetId && quickCatalog?.query === query ? quickCatalog.tables : undefined;
+  const candidates = useMemo(() => {
+    if (!tables || !quickTables) return tables ?? quickTables;
+    return [...new Map([...tables, ...quickTables].map((entry) => [quoteSqlName(entry.schema, entry.table), entry])).values()];
+  }, [tables, quickTables]);
+  const knownTable = listedTable || !!quickTables?.some(matchesTable);
   const names = useMemo(() => {
     const terms = query.split(/\s+/).filter(Boolean);
     const ranked: Suggestion[][] = [[], [], []];
@@ -281,6 +292,7 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
   }, [candidates, query]);
   const currentMetadata = metadata?.key === key && Array.isArray(metadata.columns) ? metadata.columns : undefined;
   const currentPreview = preview?.key === key ? preview.result : undefined;
+  const canReadMetadata = knownTable || !!currentPreview;
   const fieldNames = currentMetadata?.map((column) => column.name) ?? [];
   const filteredMetadata = (currentMetadata ?? []).filter((column) =>
     column.name.toLowerCase().includes(columnSearch.trim().toLowerCase()));
@@ -298,12 +310,22 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
     return () => window.clearTimeout(timer);
   }, [task.busy]);
   useEffect(() => {
-    if (!status || task.error || dataError) return;
+    if (!status || task.error || dataError || catalogError) return;
     const timer = window.setTimeout(() => setStatus(""), 4200);
     return () => window.clearTimeout(timer);
-  }, [status, task.error, dataError]);
+  }, [status, task.error, dataError, catalogError]);
+  useLayoutEffect(() => {
+    function invalidate(event: Event) {
+      if ((event as CustomEvent<string>).detail !== targetId) return;
+      setQuickCatalog(undefined);
+      setCatalogRevision((version) => version + 1);
+      setMetadataRevision((version) => version + 1);
+    }
+    window.addEventListener(tableCatalogChanged, invalidate);
+    return () => window.removeEventListener(tableCatalogChanged, invalidate);
+  }, [targetId]);
   useEffect(() => {
-    setCatalog(undefined);
+    if (!visible) return;
     setCatalogError("");
     if (!targetId) return;
     const cached = tableCatalogCache.get(targetId);
@@ -327,11 +349,11 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
       current = false;
       void pending.cancel().catch(() => {});
     };
-  }, [targetId, catalogRevision]);
+  }, [targetId, catalogRevision, visible]);
   useEffect(() => {
-    if (!targetId || tables) return;
+    if (!visible || !targetId || (tables && (!query || listedTable))) return;
     const cached = tableCatalogCache.get(targetId);
-    if (cached && cached.expires > Date.now()) return;
+    if (!tables && cached && cached.expires > Date.now()) return;
     let current = true;
     let pending: ReturnType<typeof operation<Table>> | undefined;
     const timer = window.setTimeout(() => {
@@ -345,7 +367,7 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
       window.clearTimeout(timer);
       void pending?.cancel().catch(() => {});
     };
-  }, [targetId, tables, query, catalogRevision]);
+  }, [targetId, tables, query, listedTable, catalogRevision, visible]);
   useEffect(() => {
     setMetadata(undefined);
     setPreview(undefined);
@@ -370,9 +392,9 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
     setScriptPreview(undefined);
     setStatus("");
     setDataError("");
-  }, [key, targetId, schema, table, knownTable]);
+  }, [key]);
   useEffect(() => {
-    if (!targetId || !schema || !table || !knownTable) return;
+    if (!visible || !targetId || !schema || !table || !canReadMetadata) return;
     let current = true;
     let pending: ReturnType<typeof operation<{ columns?: unknown }>> | undefined;
     const timer = window.setTimeout(() => {
@@ -390,7 +412,7 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
       window.clearTimeout(timer);
       void pending?.cancel().catch(() => {});
     };
-  }, [key, targetId, schema, table, knownTable, metadataRevision]);
+  }, [key, targetId, schema, table, canReadMetadata, metadataRevision, visible]);
   useEffect(() => () => {
     const pending = reading.current;
     if (pending) void pending.cancel().catch(() => {});
@@ -466,8 +488,8 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
     try {
       const result = normalizePreview(await op.promise);
       startPreviewTransition(() => {
-        reportTableChange(chosen);
         setPreview({ key: JSON.stringify([targetId, chosen.schema, chosen.table]), result });
+        reportTableChange(chosen);
         setDataError("");
       });
     }
@@ -685,11 +707,9 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
         .then(() => setStatus(`Đã sao chép ${target.database}.`))
         .catch((error: Error) => setStatus(error.message));
     }}><Copy size={15} /></IconButton>}
-    {targetId && <IconButton label="Tải lại danh sách bảng" onClick={() => {
-      tableCatalogCache.delete(targetId);
-      setQuickCatalog(undefined);
-      setCatalogRevision((version) => version + 1);
-    }}><RefreshCw size={15} /></IconButton>}
+    {targetId && <IconButton label="Tải lại danh sách bảng" onClick={() => invalidateTableCatalog(targetId)}>
+      <RefreshCw size={15} />
+    </IconButton>}
     <div ref={scriptControls} className="relative">
       <Button aria-expanded={scriptMenu} aria-haspopup="menu" disabled={!canRead} onClick={() => setScriptMenu(!scriptMenu)}>Tập lệnh</Button>
       {scriptMenu && <div ref={scriptPopup} className="table-action-menu table-script-menu" role="menu" aria-label="Loại lệnh SQL">
@@ -760,26 +780,15 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
         </div>
       </div>
       <TableToolbarPortal slotId={toolbarSlotId}>{toolbarControls}</TableToolbarPortal>
-      {targetId && (!tables || !names.length) && <p className={catalogError ? "form-error" : "muted"} role={catalogError ? "alert" : "status"}>
-        {catalogError || (tables ? "Không tìm thấy bảng phù hợp." : "Đang tải danh sách bảng…")}
+      {targetId && !names.length && <p className="muted" role="status">
+        {tables ? "Không tìm thấy bảng phù hợp." : catalogError ? "Danh sách bảng chưa có dữ liệu." : "Đang tải danh sách bảng…"}
       </p>}
-      {(task.error || dataError || status) && createPortal(<div className="table-notice-stack" aria-live="polite">
-        <div className={`table-notice ${task.error || dataError ? "error" : "success"}`}
-          role={task.error || dataError ? "alert" : "status"}>
-          <span className="table-notice-icon" aria-hidden>
-            {task.error || dataError ? <CircleAlert size={18} /> : status.startsWith("Đã") ? <CheckCircle2 size={18} /> : <Info size={18} />}
-          </span>
-          <span className="table-notice-content">
-            <strong>{task.error || dataError ? "Chưa hoàn thành" : "Thông báo"}</strong>
-            <span>{task.error || dataError || status}</span>
-          </span>
-          <IconButton label="Đóng thông báo" onClick={() => {
-            task.clearError();
-            setDataError("");
-            setStatus("");
-          }}><X size={15} /></IconButton>
-        </div>
-      </div>, document.body)}
+      {visible && <WorkbenchNotice error={task.error || dataError || catalogError} status={status} onClose={() => {
+        task.clearError();
+        setDataError("");
+        setCatalogError("");
+        setStatus("");
+      }} />}
       <div className="table-inspection-body">
         <aside className="table-column-panel" aria-label="Các trường của bảng">
           <div className="table-column-panel-heading">
@@ -944,7 +953,7 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
   );
 }
 
-type TableToolErrorBoundaryProps = { children: ReactNode };
+type TableToolErrorBoundaryProps = { children: ReactNode; resetKey?: string };
 type TableToolErrorBoundaryState = { error?: Error };
 
 export class TableToolErrorBoundary extends Component<TableToolErrorBoundaryProps, TableToolErrorBoundaryState> {
@@ -956,6 +965,10 @@ export class TableToolErrorBoundary extends Component<TableToolErrorBoundaryProp
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error("TableTool render failed", error, info);
+  }
+
+  componentDidUpdate(previous: TableToolErrorBoundaryProps) {
+    if (this.state.error && previous.resetKey !== this.props.resetKey) this.setState({ error: undefined });
   }
 
   render() {

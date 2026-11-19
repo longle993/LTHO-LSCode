@@ -2,6 +2,19 @@
 
 Trạng thái: đã triển khai trong WebView LSCode. Ảnh WCOMMAND được dùng làm tham chiếu nội dung nhập liệu; giao diện thực tế theo theme Light/Dark/High Contrast của LSCode.
 
+## Bố cục và lưu menu hiện tại — 19/11/2026
+
+- Thanh đầu có Tải lại, Thêm mới, Lưu và Đóng. Form lần lượt xếp Mã cha / Mã cây / Mã command, Tên tiếng Việt / Tên tiếng Anh, Main, rồi Controller/SysId.
+- Thuộc tính kỹ thuật xếp Tham số / Syscode / Loại / Trạng thái và Icon URL / Icon. Loại có các giá trị trống, D, V. Loại cũ ngoài danh sách vẫn đọc được. Trạng thái dùng ô tick và lưu bằng 1 hoặc 0.
+- Cột phải gom trạng thái thay đổi, Controller và Table Dir vào một panel. Khung file riêng nhóm theo Dir, Filter, Grid và Main. Mỗi file mở trực tiếp trong editor.
+- Table Dir liệt kê tên bảng tĩnh từ khai báo bảng trong Dir chính và Dir tìm qua controller Grid chi tiết. Bấm từng tên để mở cấu trúc và dữ liệu trên App DB của dự án đã mở F3. Tên có schema hoặc hậu tố partition được giữ khi mở.
+- Khi thêm mới, native điền chuỗi rỗng hoặc 0 theo kiểu cột chưa có mặc định, dùng mặc định SQL nếu được khai báo và kiểm tra cả bản ghi trong transaction. Còn cột NULL thì rollback và báo tên cột. Bản ghi cũ giữ nguyên các giá trị NULL chưa sửa.
+- Form đọc dữ liệu độc lập với panel tài nguyên, nên việc dò file không giữ form ở trạng thái đang tải. Việc dò chỉ lập danh sách file controller XML/.f và hủy yêu cầu cũ khi đổi Main hoặc SysId.
+
+Phạm vi kiểm chứng ngày 19/11/2026 gồm build WebView, bộ test .NET với SQL Server cục bộ và kiểm tra tương tác F3 trên Chrome với bridge fixture. Chưa đo thời gian mở trên dự án ERP thật qua LAN.
+
+Các mục bên dưới lưu thiết kế và kết quả của bản triển khai ban đầu.
+
 ## Kết quả triển khai
 
 - Bản chạy trực tiếp để nghiệm thu: `artifacts/publish-webview-menu-editor/LSCode.WebView.exe` (giữ nguyên cả thư mục khi sao chép).
@@ -81,7 +94,7 @@ Trên FBISP30, `wcommand.sysid` có thể là tên controller chứ không phả
 - Mở bảng sử dụng App DB của project theo mặc định, xác minh schema/object; tên partition như `$000000` giữ nguyên. Không tự tạo bảng hay chạy SQL trong nội dung Dir.
 - Quét trong SourcePath, tái sử dụng index và có cancellation; khi controller thay đổi thì bỏ kết quả cũ. Tải lại cho phép kiểm lại sau khi người dùng bổ sung file bên ngoài.
 
-## Bố cục dự kiến
+## Bố cục của bản thiết kế ban đầu
 
 Form rộng, header/footer cố định, phần giữa cuộn. Trên màn rộng chia thông tin menu bên trái và file/bảng liên quan bên phải; màn hẹp xếp một cột. Trường kỹ thuật ít dùng nằm trong nhóm thu gọn. Tab nhập liệu đi theo thứ tự nhãn; dropdown chọn cha có tìm theo mã/tên. Theme và cỡ chữ lấy từ LSCode.
 

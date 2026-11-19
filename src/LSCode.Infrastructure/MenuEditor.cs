@@ -20,6 +20,7 @@ internal static class MenuEditor
 
     internal sealed record Field(string Name, string Type, int MaxLength, bool Nullable, bool ReadOnly, bool HasDefault);
     internal sealed record Resource(string Kind, string Status, string[] Paths);
+    internal sealed record ResourceResult(string[] Controllers, Resource[] Resources, string[] Tables);
 
     public static async Task<object> ReadAsync(SqlTarget target, string wmenuId, CancellationToken token)
     {
@@ -31,19 +32,21 @@ internal static class MenuEditor
         return new { mode = "edit", fields, values, version = Fingerprint(values), canSave = true };
     }
 
-    public static async Task<object> NewAsync(SqlTarget target, string selectedId, CancellationToken token)
+    internal sealed record NewMenu(string Mode, Field[] Fields, Dictionary<string, string?> Values, string Version, bool CanSave);
+    public static async Task<NewMenu> NewAsync(SqlTarget target, string selectedId, CancellationToken token)
     {
         await using var connection = new SqlConnection(target.ConnectionString);
         await connection.OpenAsync(token).ConfigureAwait(false);
         var fields = await FieldsAsync(connection, null, token).ConfigureAwait(false);
         var candidate = await GenerateIdAsync(connection, null, selectedId, token).ConfigureAwait(false);
-        var values = fields.ToDictionary(field => field.Name, field => DefaultValue(field), StringComparer.OrdinalIgnoreCase);
+        var values = fields.ToDictionary(field => field.Name,
+            field => field.ReadOnly || field.HasDefault ? null : DefaultValue(field), StringComparer.OrdinalIgnoreCase);
         values["wmenu_id"] = candidate.Id;
         if (values.ContainsKey("wmenu_id0")) values["wmenu_id0"] = candidate.Parent;
         if (values.ContainsKey("menu_id"))
             values["menu_id"] = await GenerateCommandIdAsync(connection, token).ConfigureAwait(false);
         if (values.ContainsKey("status")) values["status"] = "1";
-        return new { mode = "new", fields, values, version = "", canSave = true };
+        return new("new", fields, values, "", true);
     }
 
     public static async Task<string> InsertScriptAsync(SqlTarget target, string wmenuId, CancellationToken token)
@@ -69,12 +72,13 @@ internal static class MenuEditor
     }
 
     public static async Task<object> SaveAsync(SqlTarget target, string mode, string originalId, string version,
-        IReadOnlyDictionary<string, string?> submitted, CancellationToken token)
+        IReadOnlyDictionary<string, string?> submitted, CancellationToken token,
+        Func<SqlConnection, SqlTransaction, CancellationToken, Task>? beforeCommit = null)
     {
         await using var connection = new SqlConnection(target.ConnectionString);
         await connection.OpenAsync(token).ConfigureAwait(false);
         await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(IsolationLevel.Serializable, token).ConfigureAwait(false);
-        string savedId;
+        object saved;
         try
         {
             var fields = await FieldsAsync(connection, transaction, token).ConfigureAwait(false);
@@ -85,7 +89,7 @@ internal static class MenuEditor
                 if (!values.TryGetValue(required, out var value) || string.IsNullOrWhiteSpace(value))
                     throw new ArgumentException($"{required} không được để trống.");
 
-            savedId = values["wmenu_id"]!.Trim();
+            var savedId = values["wmenu_id"]!.Trim();
             if (savedId.Length > 128) throw new ArgumentException("wmenu_id vượt quá 128 ký tự.");
             if (values.TryGetValue("wmenu_id0", out var parent) && savedId.Equals(parent?.Trim(), StringComparison.OrdinalIgnoreCase))
                 throw new ArgumentException("Menu không thể là cha của chính nó.");
@@ -94,33 +98,51 @@ internal static class MenuEditor
             {
                 if (await ExistsAsync(connection, transaction, savedId, values.GetValueOrDefault("menu_id"), token).ConfigureAwait(false))
                     throw new InvalidOperationException("Mã menu đã tồn tại trong wcommand hoặc command. Nhấn Thêm mới để lấy mã khác.");
-                var columns = values.Keys.Where(name => !(values[name] is null && editable[name].HasDefault)).ToArray();
+                foreach (var field in editable.Values)
+                {
+                    if (values.GetValueOrDefault(field.Name) is not null) continue;
+                    if (field.HasDefault) values.Remove(field.Name);
+                    else values[field.Name] = DefaultValue(field);
+                }
+                var columns = values.Keys.ToArray();
                 var sql = $"INSERT dbo.wcommand ({string.Join(',', columns.Select(Quote))}) VALUES ({string.Join(',', columns.Select((_, i) => "@p" + i))})";
                 await ExecuteAsync(connection, transaction, sql, columns.Select((name, i) => Parameter("@p" + i, editable[name], values[name])).ToArray(), token).ConfigureAwait(false);
             }
             else
             {
+                if (!savedId.Equals(originalId, StringComparison.OrdinalIgnoreCase))
+                    throw new ArgumentException("Không thể đổi mã cây của menu hiện hữu.");
                 var current = await RowAsync(connection, transaction, fields, originalId, token, lockRow: true).ConfigureAwait(false)
                     ?? throw new KeyNotFoundException("Menu đã bị xóa bởi phiên khác.");
                 if (!CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(Fingerprint(current)), Encoding.UTF8.GetBytes(version)))
                     throw new InvalidOperationException("Menu đã được thay đổi bởi phiên khác. Tải lại trước khi lưu.");
                 var columns = values.Keys.Where(name => !name.Equals("wmenu_id", StringComparison.OrdinalIgnoreCase)).ToArray();
-                var sql = $"UPDATE dbo.wcommand SET {string.Join(',', columns.Select((name, i) => Quote(name) + "=@p" + i))} WHERE RTRIM(wmenu_id)=@original";
+                var sql = $"UPDATE dbo.wcommand SET {string.Join(',', columns.Select((name, i) => Quote(name) + "=@p" + i))} WHERE wmenu_id=@original";
                 var parameters = columns.Select((name, i) => Parameter("@p" + i, editable[name], values[name])).ToList();
                 parameters.Add(new SqlParameter("@original", originalId));
                 await ExecuteAsync(connection, transaction, sql, parameters.ToArray(), token).ConfigureAwait(false);
             }
-            await transaction.CommitAsync(token).ConfigureAwait(false);
+            var savedValues = await RowAsync(connection, transaction, fields, savedId, token).ConfigureAwait(false)
+                ?? throw new DBConcurrencyException("Không đọc được menu vừa lưu.");
+            if (mode.Equals("new", StringComparison.OrdinalIgnoreCase))
+            {
+                var nullColumns = savedValues.Where(pair => pair.Value is null).Select(pair => pair.Key).ToArray();
+                if (nullColumns.Length > 0)
+                    throw new InvalidOperationException("Menu mới còn giá trị NULL ở cột: " + string.Join(", ", nullColumns));
+            }
+            saved = new { mode = "edit", fields, values = savedValues, version = Fingerprint(savedValues), canSave = true };
+            if (beforeCommit is not null) await beforeCommit(connection, transaction, token).ConfigureAwait(false);
+            await transaction.CommitAsync(beforeCommit is null ? token : CancellationToken.None).ConfigureAwait(false);
         }
         catch
         {
             await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
             throw;
         }
-        return await ReadAsync(target, savedId, token).ConfigureAwait(false);
+        return saved;
     }
 
-    public static async Task<object> ResourcesAsync(string root, string link, string sysId, CancellationToken token)
+    public static async Task<ResourceResult> ResourcesAsync(string root, string link, string sysId, CancellationToken token)
     {
         return await Task.Run(async () =>
         {
@@ -134,26 +156,47 @@ internal static class MenuEditor
                 if (!string.IsNullOrWhiteSpace(metadataController)) names = [metadataController];
                 else if (names.Count == 0 && !string.IsNullOrWhiteSpace(sysId)) names = [sysId];
             }
-            var roots = new[] { Path.Combine(root, "App_Data"), Path.Combine(root, "AppData") }.Where(Directory.Exists).ToArray();
-            var files = (roots.Length == 0 ? [root] : roots).SelectMany(folder => WorkspaceFileIndex.Files(folder, token, false)).Take(100001).ToArray();
-            if (files.Length > 100000) throw new IOException("Project vượt 100000 file; cần thu hẹp thư mục.");
             var fallback = Path.GetFileNameWithoutExtension(main ?? Uri.UnescapeDataString(link.Split('?', '#')[0]));
-            var controllers = (names.Count > 0 ? names : [fallback]).Where(name => !string.IsNullOrWhiteSpace(name)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-            var related = files.Where(path => controllers.Contains(Path.GetFileNameWithoutExtension(path), StringComparer.OrdinalIgnoreCase)).ToArray();
-            var resources = new[] { "Dir", "Filter", "Grid" }.Select(kind =>
+            var controllers = (names.Count > 0 ? names : [fallback]).Where(name => !string.IsNullOrWhiteSpace(name))
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            var roots = new[] { Path.Combine(root, "App_Data"), Path.Combine(root, "AppData") }.Where(Directory.Exists).ToArray();
+            var kinds = new[] { "Dir", "Filter", "Grid" };
+            var files = controllers.Length == 0 ? [] : (roots.Length == 0 ? [root] : roots)
+                .SelectMany(folder => WorkspaceFileIndex.Files(folder, token, false))
+                .Where(path => Path.GetExtension(path).ToLowerInvariant() is ".xml" or ".f")
+                .Select(path => Path.GetRelativePath(root, path))
+                .Where(path => kinds.Any(kind => HasFolder(path, kind))).Take(100001).ToArray();
+            if (files.Length > 100000) throw new IOException("Project vượt 100000 file controller.");
+            var byName = files.ToLookup(Path.GetFileNameWithoutExtension, StringComparer.OrdinalIgnoreCase);
+            var visited = new HashSet<string>(controllers, StringComparer.OrdinalIgnoreCase);
+            var pending = new Queue<string>(controllers);
+            var related = new List<string>();
+            var tables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var timeout = TimeSpan.FromMilliseconds(300);
+            while (pending.TryDequeue(out var controller))
             {
-                var paths = related.Where(path => HasFolder(path, kind)).Select(path => Path.GetRelativePath(root, path)).ToArray();
+                foreach (var path in byName[controller])
+                {
+                    related.Add(path);
+                    var isDir = HasFolder(path, "Dir");
+                    if (!isDir && !HasFolder(path, "Grid")) continue;
+                    var content = await File.ReadAllTextAsync(Path.Combine(root, path), token).ConfigureAwait(false);
+                    content = Regex.Replace(content, """<!--[\s\S]*?-->""", "", RegexOptions.None, timeout);
+                    foreach (var child in ProjectConventions.GridControllers(content))
+                        if (visited.Add(child)) pending.Enqueue(child);
+                    if (!isDir) continue;
+                    foreach (Match match in Regex.Matches(content,
+                        """(?:\s(?:table|tableName|baseTable|masterTable|detailTable)\s*=\s*['"]|<(?:table|tableName|baseTable|masterTable|detailTable)\b[^>]*>\s*)(?<table>(?:[\w$]+|\[[\w$ ]+\])(?:\.(?:[\w$]+|\[[\w$ ]+\]))?)(?=\s*(?:['"]|</))""",
+                        RegexOptions.IgnoreCase, timeout))
+                        tables.Add(match.Groups["table"].Value);
+                }
+            }
+            var resources = kinds.Select(kind =>
+            {
+                var paths = related.Where(path => HasFolder(path, kind)).Order(StringComparer.OrdinalIgnoreCase).ToArray();
                 return new Resource(kind, paths.Length == 0 ? "missing" : paths.Length == 1 ? "found" : "multiple", paths);
             }).Append(new Resource("Main", main == null ? "missing" : "found", main == null ? [] : [Path.GetRelativePath(root, main)])).ToArray();
-            var dirFiles = related.Where(path => HasFolder(path, "Dir") && Path.GetExtension(path).ToLowerInvariant() is ".xml" or ".f").ToArray();
-            var tables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var path in dirFiles)
-            {
-                var text = await File.ReadAllTextAsync(path, token).ConfigureAwait(false);
-                foreach (Match match in Regex.Matches(text, """\b(?:table|tableName|baseTable)\s*=\s*['"](?<v>[\w.$]+)['"]|<table\b[^>]*>\s*(?<v>[\w.$]+)\s*</table>""", RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(300)))
-                    if (match.Groups["v"].Success) tables.Add(match.Groups["v"].Value);
-            }
-            return new { controllers, resources, tables = tables.ToArray() };
+            return new ResourceResult(controllers, resources, tables.ToArray());
         }, token).ConfigureAwait(false);
     }
 
@@ -167,7 +210,8 @@ internal static class MenuEditor
         await using var reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);
         var all = new List<Field>();
         while (await reader.ReadAsync(token).ConfigureAwait(false))
-            all.Add(new(reader.GetString(0), reader.GetString(1), reader.GetInt16(2), reader.GetBoolean(3), reader.GetBoolean(4) || reader.GetBoolean(5), reader.GetInt32(6) == 1));
+            all.Add(new(reader.GetString(0), reader.GetString(1), reader.GetInt16(2), reader.GetBoolean(3),
+                reader.GetBoolean(4) || reader.GetBoolean(5) || reader.GetString(1) is "timestamp" or "rowversion", reader.GetInt32(6) == 1));
         if (all.Count == 0) throw new InvalidOperationException("Không tìm thấy dbo.wcommand.");
         var byName = all.ToDictionary(field => field.Name, StringComparer.OrdinalIgnoreCase);
         var ordered = PreferredFields.Where(byName.ContainsKey).Select(name => byName[name]).ToList();
@@ -218,7 +262,7 @@ internal static class MenuEditor
         string id, CancellationToken token, bool lockRow = false)
     {
         var hint = lockRow ? " WITH (UPDLOCK,HOLDLOCK)" : "";
-        var sql = $"SELECT {string.Join(',', fields.Select(field => Quote(field.Name)))} FROM dbo.wcommand{hint} WHERE RTRIM(wmenu_id)=@id";
+        var sql = $"SELECT {string.Join(',', fields.Select(field => Quote(field.Name)))} FROM dbo.wcommand{hint} WHERE wmenu_id=@id";
         await using var command = new SqlCommand(sql, connection, transaction) { CommandTimeout = 0 };
         command.Parameters.AddWithValue("@id", id);
         await using var reader = await command.ExecuteReaderAsync(CommandBehavior.SingleRow, token).ConfigureAwait(false);
@@ -310,15 +354,15 @@ internal static class MenuEditor
         return new SqlParameter(name, value is null ? DBNull.Value : value);
     }
 
-    private static string? DefaultValue(Field field)
+    private static string DefaultValue(Field field)
     {
-        if (field.Nullable || field.HasDefault) return null;
         return field.Type is "tinyint" or "smallint" or "int" or "bigint" or "decimal" or "numeric" or "float" or "real" or "money" or "smallmoney" or "bit"
             ? "0" : "";
     }
 
     private static string StringValue(object value) => value switch
     {
+        bool flag => flag ? "1" : "0",
         byte[] bytes => Convert.ToBase64String(bytes),
         _ => Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture)?.TrimEnd() ?? ""
     };

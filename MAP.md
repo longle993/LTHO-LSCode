@@ -17,3 +17,5 @@
 | [.codex/](.codex/) | Hai tệp JSON khởi tạo cho thiết lập chung và thiết lập riêng. Các thư mục `rules/`, `skills/`, `workflows/` và `output-styles/` có `.gitkeep` để lưu cấu trúc trong Git. |
 
 Triển khai mới: [tối ưu menu và tích hợp Mobile](docs/specifications/ERP-MENU-PERFORMANCE-MOBILE.vi.md); kiến thức và phạm vi kiểm chứng lưu cùng [kiến trúc](contexte/kien-truc.md#tải-menu-erp-và-mobile).
+
+[Tạo danh mục ERP](docs/specifications/CATALOG-TABLE-DESIGNER.vi.md) liên kết khảo sát Create List trong [tư liệu nguồn](sources/README.md#khảo-sát-fcode) với [CatalogSourceTool](src/LSCode.Web/src/features/CatalogSourceTool.tsx) và [CatalogSourceGenerator](src/LSCode.Infrastructure/CatalogSourceGenerator.cs).

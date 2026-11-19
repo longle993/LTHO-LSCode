@@ -47,6 +47,7 @@ export function ProjectDialog({ projects, lastAccess, onProjects, onOpen, onClos
   const [importPreview, setImportPreview] = useState<ImportPreview>();
   const [overwrite, setOverwrite] = useState(false);
   const [currentUser, setCurrentUser] = useState("");
+  const [syncProject, setSyncProject] = useState<Project>();
   const [syncMessage, setSyncMessage] = useState("");
   const [sharedAccess, setSharedAccess] = useState<Record<string, string>>();
   const [opening, setOpening] = useState(false);
@@ -89,17 +90,25 @@ export function ProjectDialog({ projects, lastAccess, onProjects, onOpen, onClos
       setMode("edit");
     });
   }
-  async function syncStandard(user: string) {
+  async function syncStandard(user: string, project?: Project) {
     await task.run(async () => {
       const current = operation<{ summary: SyncSummary; projects: Project[] }>("project.standard.sync",
-        { currentUser: user.trim() });
+        { currentUser: user.trim(), projectId: project?.id });
       pending.current = current;
       const result = await current.promise;
       onProjects(result.projects);
       setCurrentUser(user.trim());
-      setSyncMessage(`Đã đồng bộ ${result.summary.added} dự án mới, ${result.summary.updated} cập nhật, ${result.summary.skipped} bỏ qua.`);
+      setSyncMessage(project
+        ? result.summary.updated ? `Đã cập nhật ${project.code}.` : `${project.code} đã có thông tin mới nhất.`
+        : `Đã đồng bộ ${result.summary.added + result.summary.updated} dự án, giữ nguyên ${result.summary.unchanged} dự án, bỏ qua ${result.summary.skipped} mục không hợp lệ.`);
       setMode("list");
     });
+  }
+  function startSync(project?: Project) {
+    setSyncProject(project);
+    setSyncMessage("");
+    if (currentUser.trim()) void syncStandard(currentUser, project);
+    else setMode("sync-user");
   }
   async function chooseImport() {
     await task.run(async () => {
@@ -153,11 +162,11 @@ export function ProjectDialog({ projects, lastAccess, onProjects, onOpen, onClos
       {mode !== "list" && <Button className="project-back" variant="ghost" onClick={back}><ArrowLeft size={15} /> Danh sách dự án</Button>}
       {mode === "list" && <>
         <div className="project-actions" aria-label="Thao tác dự án">
-          <Button variant="primary" disabled={task.busy} onClick={() => currentUser ? void syncStandard(currentUser) : setMode("sync-user")}><RefreshCw size={15} /> Đồng bộ</Button>
+          <Button variant="primary" disabled={task.busy} onClick={() => startSync()}><RefreshCw size={15} /> Đồng bộ</Button>
           <Button disabled={task.busy} onClick={() => { setEditing(undefined); setProfile(emptyProfile()); setMode("create"); }}><Plus size={15} /> Tạo profile</Button>
           <Button disabled={task.busy} onClick={() => void chooseImport()}><Upload size={15} /> Import XML</Button>
           <Button disabled={task.busy} onClick={() => void exportProjects()}><Download size={15} /> Export XML</Button>
-          {currentUser && <Button variant="ghost" className="project-sync-user" onClick={() => setMode("sync-user")}>{currentUser}</Button>}
+          {currentUser && <Button variant="ghost" className="project-sync-user" disabled={task.busy} onClick={() => { setSyncProject(undefined); setMode("sync-user"); }}>{currentUser}</Button>}
         </div>
         <LoadingLine busy={task.busy || opening} label={opening ? "Đang mở dự án…" : "Đang đồng bộ danh mục…"} />
         {syncMessage && <p className="project-sync-result" role="status">{syncMessage}</p>}
@@ -176,6 +185,7 @@ export function ProjectDialog({ projects, lastAccess, onProjects, onOpen, onClos
                 <small title={project.programPath}>{project.programPath || "Chưa khai báo đường dẫn chương trình"}</small>
               </span><ArrowRight size={16} />
             </button>
+            <IconButton label={`Đồng bộ lại ${project.code}`} disabled={task.busy} onClick={() => startSync(project)}><RefreshCw size={15} /></IconButton>
             <IconButton label={`Xóa profile ${project.code}`} disabled={task.busy} onClick={() => { setDeleting(project); setMode("delete"); }}><Trash2 size={15} /></IconButton>
           </div>)}
           {filtered.length === 0 && <div className="empty">{projects.length ? "Không tìm thấy dự án phù hợp." : "Chưa có dự án. Hãy đồng bộ hoặc tạo profile."}</div>}
@@ -184,7 +194,7 @@ export function ProjectDialog({ projects, lastAccess, onProjects, onOpen, onClos
           <span>Trang {currentPage} / {totalPages}</span><Button disabled={currentPage >= totalPages} onClick={() => setPage(value => value + 1)}>Sau</Button></div>}
       </>}
 
-      {mode === "sync-user" && <form className="project-compact-form" onSubmit={event => { event.preventDefault(); void syncStandard(currentUser); }}>
+      {mode === "sync-user" && <form className="project-compact-form" onSubmit={event => { event.preventDefault(); void syncStandard(currentUser, syncProject); }}>
         <label>Tên<input autoFocus required value={currentUser} onChange={event => setCurrentUser(event.target.value)} /></label>
         <div className="form-actions"><Button variant="primary" disabled={task.busy || !currentUser.trim()}>Đồng bộ</Button>
           {task.busy && <Button type="button" onClick={() => void pending.current?.cancel()}>Dừng</Button>}</div>

@@ -19,6 +19,8 @@ Chi tiết luồng request ở [Clean Architecture và MediatR](../docs/architec
 
 Generate Update (tên cũ: Advance Note) được mô tả trong [đặc tả và hướng dẫn](../docs/guides/ADVANCE-NOTE.vi.md). Infrastructure hiện sao chép source theo đường dẫn tương đối và xuất script App/Sys UTF-16. SQL Object lưu tên object rồi đọc metadata của target App/Sys để sinh DROP + CREATE cho table/store/function. SQL Data lưu `bảng: WHERE`, đọc các dòng phù hợp và dùng metadata bảng để sinh INSERT; Ctrl+D ở Table Tool đưa khóa này vào yêu cầu đang chọn. Nội dung SQL thô của XML cũ vẫn được xuất theo chế độ tương thích. ID bridge `advance-note` và phần tử XML `advanceNotes` được giữ để không làm mất dữ liệu cũ.
 
+Từ 19/11/2026, tab Bảng làm mới cache danh mục theo target sau khi tab SQL chạy xong hoặc Thiết kế danh mục lưu thành công. Việc cập nhật tên bảng trên tab giữ nguyên phiên đọc theo `scope`. Chỉ lệnh `table.insertScript` trong màn Cấu trúc và dữ liệu dùng định dạng ngày rút gọn theo kiểu cột. Generate Update dùng giá trị ISO đầy đủ để giữ độ chính xác khi triển khai.
+
 React nhận thao tác drop và gửi các `File` qua `postMessageWithAdditionalObjects`; host đọc đường dẫn tuyệt đối từ `CoreWebView2File.Path`, chỉ nhận file đang tồn tại, giới hạn 100 file mỗi lượt rồi phát sự kiện `files.dropped`. React dùng lại `document.open`, vì vậy kiểm tra tab trùng, encoding và lịch sử mở file không có luồng thứ hai.
 
 Toolbar editor chỉ dành chỗ cho thao tác theo tài liệu đang mở. Advance Note và SQL Watch vẫn được mở từ thanh lối tắt hoặc bảng lệnh, sau đó xuất hiện dưới dạng tab công cụ; không lặp lại thành nút chữ trên toolbar. Khi cửa sổ hẹp, ô tìm trong file và ô chọn database được phép co theo chiều ngang, còn nút Chạy và các nút icon giữ kích thước để nhãn không bị bẻ thành từng ký tự.
@@ -40,6 +42,14 @@ Hiện tại LSCode kiểm tra cây Mobile ở nền khi mở dự án. Thanh ch
 Triển khai ngày 17/11/2026: [tối ưu và tích hợp Mobile](../docs/specifications/ERP-MENU-PERFORMANCE-MOBILE.vi.md). WebView gọi `project.commands` với `kind/refresh/context` tới `ProjectDatabase.CommandsAsync` (source Shell được Compile Link vào Infrastructure). Web dùng một connection, đọc schema rồi chạy batch có Startup; `command_id/sysid` nằm trong result cuối. Cache tối đa 8 ngữ cảnh, TTL 5 phút, gộp request đồng thời và invalidate sau khi lưu menu. Cây Web vẫn ba cấp. Mobile đọc `dbo.dvcommand`, dựng không giới hạn độ sâu theo `wmenu_id0`, dùng `bar/bar2` và `sysid`; tab Mobile lazy-load và không bật F3/F12. Source Mobile đi qua fallback `sysid` của `project.controller`, kể cả dự án còn thư mục Main. Chưa có benchmark LAN hoặc smoke database ERP thật.
 
 Cập nhật 18/11/2026: batch Mobile không dùng `THROW` vì một số SYS FAST cũ không parse cú pháp SQL Server 2012 này. Kiểm tra thiếu `dbo.dvcommand` dùng `RAISERROR` rồi `RETURN`, giữ tương thích mà không thay đổi dữ liệu hay quy tắc dựng cây.
+
+Cập nhật 19/11/2026: [form F3 Web](../docs/guides/ERP-MENU-EDITOR.vi.md) tải bản ghi SYS độc lập với lần dò file, hủy lần dò cũ khi Main/SysId đổi và giữ kết nối App của dự án để mở từng bảng Dir. Native kiểm tra kết quả INSERT trước COMMIT và rollback khi bản ghi mới còn NULL. Fixture SQL cục bộ kiểm tra cả bản ghi gửi thiếu trường và mặc định SQL trả NULL. Chưa đo thời gian trên nguồn ERP qua LAN.
+
+## Sinh source danh mục ERP
+
+`CatalogSourceTool` và `CatalogSourceGenerator` dùng bridge `catalogSource.*` cho đọc mẫu, xem trước và xuất. Native dùng chung bộ dò Main/Dir/Grid/Filter với Menu ERP, giữ encoding qua `DocumentStore`, kiểm tra fingerprint của nội dung xem trước rồi chuyển thư mục staging thành thư mục đầu ra. Thiết kế bảng SQL đi qua `catalog.*` và giữ transaction riêng. [Đặc tả và cách dùng](../docs/specifications/CATALOG-TABLE-DESIGNER.vi.md).
+
+`CatalogDescriptionTool` giữ parser quy ước ở WebView vì người dùng phải duyệt và có thể sửa toàn bộ đề xuất trước khi gọi bridge. Dòng đầu tạo tên danh mục/bảng; các dòng sau sinh kiểu theo nhóm mã, chuỗi, số, thập phân/tiền và trạng thái. `CatalogDefinition` vẫn là chốt kiểm tra kiểu/kích thước và dựng SQL phía .NET, nên payload sửa tay không bỏ qua xác thực. Modal dùng một vùng cuộn giữa hai thanh cố định; dropdown, toast và xác nhận đều dùng component LSCode.
 
 ## Điều hướng XML và QLYC
 

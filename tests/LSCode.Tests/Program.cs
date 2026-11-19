@@ -233,9 +233,10 @@ try
     Assert(CommandHierarchy.Filter(searchable, "phiếu").Count == 1 && CommandHierarchy.Filter(searchable, "missing").Count == 0, "Menu name search and no-result state");
     SqlSymbol[] symbols = [new("dbo", "orders", null, "table"), new("dbo", "orders", "order_id", "int"), new("dbo", "customers", "customer_id", "int")];
     Assert(SqlSuggestions.Get("SELECT o.", symbols, "SELECT o. FROM dbo.orders AS o").Single().Text == "order_id", "SQL alias column completion with FROM after caret");
-    Assert(SqlSuggestions.Get("SELECT * FROM dbo.", symbols).Single().InsertText == "[orders]", "SQL schema-qualified object completion");
+    Assert(SqlSuggestions.Get("SELECT * FROM dbo.", symbols).Single().InsertText == "orders", "SQL schema-qualified object completion");
+    Assert(SqlSuggestions.Get("SELECT * FROM d46", [new("dbo", "d46$000000", null, "TABLE")]).Single().InsertText == "dbo.d46$000000", "SQL completion inserts ERP table names without brackets");
     Assert(SqlSuggestions.Get("SEL", symbols).Any(s => s.Text == "SELECT"), "SQL syntax suggestions without schema qualifier");
-    Assert(SqlSuggestions.Get("SELECT order_", symbols).Any(s => s.InsertText == "[order_id]"), "SQL unqualified column suggestions preserve underscore");
+    Assert(SqlSuggestions.Get("SELECT order_", symbols).Any(s => s.InsertText == "order_id"), "SQL unqualified column suggestions preserve underscore");
     Assert(ProjectConventions.Controllers("<FastBusiness:QueryExtender Controller='dmbp'/>").SequenceEqual(["dmbp"]), "QueryExtender fallback when ReportExtender absent");
     Assert(SqlSuggestions.Get("SELECT o.", symbols, "SELECT o. FROM [dbo].[orders] AS [o]").Single().Text == "order_id", "SQL bracketed identifier alias completion");
     var localSql = "DECLARE @from date, @to date\nCREATE TABLE #rows(id int)\nSELECT * INTO #copy FROM #rows";

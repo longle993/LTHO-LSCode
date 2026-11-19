@@ -1,8 +1,52 @@
 import { writeClipboard } from "./bridge";
 import { useEffect, useLayoutEffect, useRef, useState, useId } from "react";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
-import { X, ChevronDown, Check } from "lucide-react";
+import { X, ChevronDown, Check, CircleAlert, CheckCircle2, Info } from "lucide-react";
+import { createPortal } from "react-dom";
 import type { Table } from "./bridge";
+export function WorkbenchNotice({ error, status, onClose }: {
+  error?: string;
+  status?: string;
+  onClose: () => void;
+}) {
+  const message = error || status;
+  const Icon = error ? CircleAlert : status?.startsWith("Đã") ? CheckCircle2 : Info;
+  return createPortal(
+    <div className="table-notice-stack" aria-live="polite">
+      {message && <div key={message} className={`table-notice ${error ? "error" : "success"}`}
+        role={error ? "alert" : "status"}>
+        <Icon size={18} className="table-notice-icon" aria-hidden />
+        <span className="table-notice-content">
+          <strong>{error ? "Thao tác thất bại" : "Thông báo"}</strong>
+          <span>{message}</span>
+        </span>
+        <IconButton label="Đóng thông báo" onClick={onClose}><X size={15} /></IconButton>
+      </div>}
+    </div>, document.body,
+  );
+}
+export function ConfirmDialog({ title, message, confirmLabel = "Tiếp tục", danger = false, onConfirm, onClose }: {
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  danger?: boolean;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  return createPortal(
+    <Modal title={title} onClose={onClose} className="confirm-modal">
+      <div className="modal-copy">
+        <p>{message}</p>
+      </div>
+      <div className="modal-footer">
+        <Button onClick={onClose}>Hủy</Button>
+        <Button variant={danger ? "outline" : "primary"} className={danger ? "danger-action" : undefined}
+          onClick={onConfirm}>{confirmLabel}</Button>
+      </div>
+    </Modal>,
+    document.body,
+  );
+}
 export function Button({
   children,
   variant = "outline",

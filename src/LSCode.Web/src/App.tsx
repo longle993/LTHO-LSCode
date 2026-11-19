@@ -1,3 +1,5 @@
+import { lazy, Suspense } from "react";
+const CheckMail = lazy(() => import("./features/CheckMail"));
 import ControllerExplorer, { FileIcon } from "./ControllerExplorer";
 import { SourceCollectionDialog } from "./features/SourceCollectionDialog";
 import { pathIsWithin, rebasePath, tabFolderLabel } from "./fileLabels";
@@ -48,7 +50,7 @@ import {
 import { native, request, operation, subscribe, quoteSqlName, notifyWindowReady, writeClipboard } from "./bridge";
 import { PanelResizeHandle, WorkspaceResizeHandle } from "./PanelResizeHandle";
 import { ProfilerTool } from "./features/ProfilerTool";
-import { TableTool, TableToolErrorBoundary } from "./features/TableTool";
+import { invalidateTableCatalog, TableTool, TableToolErrorBoundary } from "./features/TableTool";
 import { TemplateStudio } from "./features/TemplateStudio";
 import { SqlWatchTool } from "./features/SqlWatchTool";
 import { MenuEditor } from "./features/MenuEditor";
@@ -74,7 +76,7 @@ import {
   setEditorSnippets,
 } from "./editor";
 import type { EditorDiagnostic, EditorHandle } from "./editor";
-import { Button, IconButton, Select, Modal, DataGrid } from "./ui";
+import { Button, IconButton, Select, Modal, DataGrid, WorkbenchNotice } from "./ui";
 import {
   ToolDialog,
   ProjectDialog,
@@ -150,6 +152,11 @@ export default function App({
   const [formatMenuOpen, setFormatMenuOpen] = useState(false);
   const formatMenuRef = useRef<HTMLDivElement>(null);
   const profilerSelected = selectedTool === "profiler";
+  const [checkMailOpen, setCheckMailOpen] = useState(false);
+  function closeCheckMail() {
+    setCheckMailOpen(false);
+    if (selectedTool === "check-mail") setSelectedTool(undefined);
+  }
   const [studioOpen, setStudioOpen] = useState(false);
   const studioDirty = useRef(false);
   const studioBusy = useRef(false);
@@ -358,8 +365,9 @@ export default function App({
   const [selectedCommands, setSelectedCommands] = useState<Record<"web" | "mobile", string>>({ web: "", mobile: "" });
   const selectedCommand = selectedCommands[menuKind];
   const setSelectedCommand = (id: string) => setSelectedCommands((current) => ({ ...current, [menuKind]: id }));
-  const [menuEditor, setMenuEditor] = useState<{ command: CommandNode; target: Target; root: string }>();
+  const [menuEditor, setMenuEditor] = useState<{ command: CommandNode; target: Target; appTarget?: Target; root: string }>();
   const [menuContext, setMenuContext] = useState<{ command: CommandNode; x: number; y: number }>();
+  const [catalogTemplate, setCatalogTemplate] = useState("");
   const menuDirty = useRef(false);
   const menuBusy = useRef(false);
   function closeMenuEditor() {
@@ -375,7 +383,9 @@ export default function App({
     }
     if (menuBusy.current || (menuDirty.current && !window.confirm("Bỏ thay đổi menu chưa lưu để mở menu khác?"))) return;
     menuDirty.current = false;
-    setMenuEditor({ command, target: projectSysTarget.current, root: workspace });
+    const sys = projectSysTarget.current;
+    const app = defaultTarget.current;
+    setMenuEditor({ command, target: sys, appTarget: app?.id === sys.id ? undefined : app, root: workspace });
     setSelectedTool("menu-editor");
   }
   function openMenuInsertScript(command: CommandNode) {
@@ -761,9 +771,21 @@ export default function App({
       const b = bootstrap ?? (await request<Bootstrap>("studio.bootstrap"));
       setSettings(migratePreferences(b.settings));
       setProjects(b.projects);
-      setSnippets(b.snippets);
       setWorkspace(b.settings.workspace ?? "");
-      const recovery = await request<
+      if (bootstrap) {
+        setSnippets(b.snippets);
+        void request<Snippet[]>("snippet.list")
+          .then((loaded) => setSnippets((current) => current === b.snippets ? loaded : current))
+          .catch(() => {});
+      } else setSnippets(b.snippets);
+      const selected = b.projects.find((p) => p.id === initialProjectId);
+      const opening = guard(async () => {
+        if (!selected) return;
+        const start = performance.now();
+        await openProject(selected);
+        performance.measure("startup.project", { start, end: performance.now() });
+      }).finally(() => setOpeningInitialProject(false));
+      const recovery = await guard(() => request<
         {
           name: string;
           text: string;
@@ -771,7 +793,8 @@ export default function App({
           bom: boolean;
           newline: string;
         }[]
-      >("recovery.load");
+      >("recovery.load")) ?? [];
+      await opening;
       for (const r of recovery) {
         const d = await request<DocumentInfo>("document.restore", {
           ...r,
@@ -783,10 +806,6 @@ export default function App({
         setActiveId(d.id);
       }
       setReady(true);
-      if (initialProjectId) {
-        const selected = b.projects.find((p) => p.id === initialProjectId);
-        if (selected) await openProject(selected);
-      }
       setStatus(
         recovery.length
           ? `Đã khôi phục ${recovery.length} file chưa lưu`
@@ -1010,9 +1029,10 @@ export default function App({
     setError("");
     markSqlErrors(active, []);
     const queryDocument = active;
+    const targetId = active.target.id;
     queryDurationByTab.current.delete(queryDocument.id);
     const op = operation<QueryResult>("sql.execute", {
-      targetId: active.target.id,
+      targetId,
       sql: selected || textOf(active),
     });
     runRef.current = op;
@@ -1036,7 +1056,7 @@ export default function App({
       if (failure.code === "cancelled") setStatus("Đã dừng query");
       else {
         setError(failure.message);
-        setBottom("messages");
+        setStatus("SQL gặp lỗi");
         if (failure.details)
           markSqlErrors(
             queryDocument,
@@ -1049,6 +1069,7 @@ export default function App({
       queryDurationByTab.current.set(queryDocument.id, elapsed);
       if (latest.current.activeId === queryDocument.id) setQueryElapsedMs(elapsed);
     } finally {
+      invalidateTableCatalog(targetId);
       window.clearInterval(queryTimer.current);
       queryTimer.current = undefined;
       if (latest.current.activeId !== queryDocument.id)
@@ -1114,6 +1135,7 @@ export default function App({
         else if (selectedTool === "menu-editor") closeMenuEditor();
         else if (selectedTool === "advance-note") closeAdvanceNote();
         else if (profilerSelected) await closeProfilerTab();
+        else if (selectedTool === "check-mail") closeCheckMail();
         else if (selectedTool === "template-studio") closeStudio();
         else if (tableTab) closeTableTab(tableTab.id);
         else if (active) await closeTab(active);
@@ -1121,6 +1143,10 @@ export default function App({
       case "profiler":
         setProfilerTab((existing) => existing ?? { target });
         setSelectedTool("profiler");
+        break;
+      case "check-mail":
+        setCheckMailOpen(true);
+        setSelectedTool("check-mail");
         break;
       case "template-studio":
         setStudioOpen(true);
@@ -1862,15 +1888,7 @@ export default function App({
           .NET.
         </div>
       )}
-      {error && (
-        <div className="error-banner" role="alert">
-          <strong>Chưa hoàn thành.</strong>
-          <span>{error}</span>
-          <IconButton label="Đóng thông báo" onClick={() => setError("")}>
-            <X size={16} />
-          </IconButton>
-        </div>
-      )}
+      <WorkbenchNotice error={error} onClose={() => setError("")} />
       <div className={`workbench ${side ? "" : "side-closed"}`} style={{
         "--workspace-width": (settings.explorerWidth ?? 264) + "px",
         "--explorer-font-size": (settings.explorerFontSize ?? 12) + "px",
@@ -2353,7 +2371,7 @@ export default function App({
           </aside>
         )}
         {menuContext && <div className="table-action-menu explorer-action-menu" role="menu"
-          style={{ left: Math.max(8, Math.min(menuContext.x, window.innerWidth - 248)), top: Math.max(8, Math.min(menuContext.y, window.innerHeight - 104)) }}
+          style={{ left: Math.max(8, Math.min(menuContext.x, window.innerWidth - 248)), top: Math.max(8, Math.min(menuContext.y, window.innerHeight - 136)) }}
           onPointerDown={(event) => event.stopPropagation()}>
           <Button variant="ghost" onClick={() => { const command = menuContext.command; setMenuContext(undefined); openMenuEditor(command); }}>
             Sửa thông tin menu<kbd>F3</kbd>
@@ -2361,6 +2379,12 @@ export default function App({
           <Button variant="ghost" onClick={() => openMenuInsertScript(menuContext.command)}>
             Tạo script INSERT menu<kbd>F12</kbd>
           </Button>
+          <Button variant="ghost" disabled={!menuContext.command.entry.link && !menuContext.command.entry.sysId}
+            onClick={() => {
+              setCatalogTemplate(menuContext.command.entry.link || menuContext.command.entry.sysId);
+              setMenuContext(undefined);
+              setDialog("catalog");
+            }}>Dùng làm mẫu tạo danh mục</Button>
         </div>}
         <main className="editor-area">
           <div
@@ -2408,7 +2432,7 @@ export default function App({
                   "Không gian làm việc"}
               </span>
             </div>
-            {(watchTab || menuEditor || profilerTab || studioOpen || advanceNoteOpen || tableTabs.length > 0) && (
+            {(checkMailOpen || watchTab || menuEditor || profilerTab || studioOpen || advanceNoteOpen || tableTabs.length > 0) && (
               <div className="workspace-tools" role="tablist" aria-label="Công cụ làm việc">
                 {watchTab && <div className={`document-tab ${selectedTool === "sql-watch" ? "active" : ""}`}>
                   <button id="sql-watch-tab" role="tab" aria-controls="sql-watch-panel" aria-selected={selectedTool === "sql-watch"} onClick={() => setSelectedTool("sql-watch")}>SQL Debug / Watch</button>
@@ -2420,6 +2444,11 @@ export default function App({
                     <span>Menu ERP · {menuEditor.command.entry.id}</span>
                   </button>
                   <IconButton label="Đóng thông tin menu ERP" onClick={closeMenuEditor}><X size={13} /></IconButton>
+                </div>}
+                {checkMailOpen && <div className={`document-tab ${selectedTool === "check-mail" ? "active" : ""}`}>
+                  <button id="check-mail-tab" role="tab" aria-controls="check-mail-panel"
+                    aria-selected={selectedTool === "check-mail"} onClick={() => setSelectedTool("check-mail")}>Check Mail</button>
+                  <IconButton label="Đóng Check Mail" onClick={closeCheckMail}><X size={13} /></IconButton>
                 </div>}
                 {studioOpen && <div className={`document-tab ${selectedTool === "template-studio" ? "active" : ""}`}>
                   <button id="template-studio-tab" role="tab" aria-controls="template-studio-panel"
@@ -2591,12 +2620,28 @@ export default function App({
               onClose={closeMenuEditor} onDirtyChange={value => { menuDirty.current = value; }}
               onBusyChange={value => { menuBusy.current = value; }}
               onOpenPath={path => void guard(() => open(path))}
+              onOpenTable={menuEditor.appTarget ? table => {
+                const target = menuEditor.appTarget;
+                const existing = tableTabs.find(tab => tab.target?.id === target?.id && tab.table === table);
+                if (existing) {
+                  setSelectedTool(existing.id);
+                  return;
+                }
+                const id = "table-" + crypto.randomUUID();
+                const number = ++tableNumber.current;
+                setTableTabs(tabs => [...tabs, { id, number, target, table }]);
+                setSelectedTool(id);
+              } : undefined}
               onSaved={async id => {
                 if (projectSysTarget.current?.id === menuEditor.target.id) {
                   await loadCommands("web", true); setSelectedCommands((current) => ({ ...current, web: id }));
                 }
                 setStatus("Đã lưu thông tin menu " + id);
               }} />
+          </section>}
+          {checkMailOpen && <section id="check-mail-panel" className="profiler-panel" role="tabpanel"
+            aria-labelledby="check-mail-tab" hidden={selectedTool !== "check-mail"}>
+            <Suspense fallback={<div role="status">Đang mở Check Mail…</div>}><CheckMail /></Suspense>
           </section>}
           {studioOpen && <section id="template-studio-panel" className="profiler-panel" role="tabpanel"
             aria-labelledby="template-studio-tab" hidden={selectedTool !== "template-studio"}>
@@ -2621,7 +2666,7 @@ export default function App({
           )}
           {tableTabs.map((tab) => (
             <section key={tab.id} id={tab.id + "-panel"} className="profiler-panel" role="tabpanel" aria-labelledby={tab.id + "-tab"} hidden={tab.id !== selectedTool}>
-              <TableToolErrorBoundary key={tab.id + ":" + (tab.table ?? "")}>
+              <TableToolErrorBoundary resetKey={tab.target?.id + ":" + (tab.table ?? "")}>
                 <TableTool scope={tab.id} target={tab.target} initialTable={tab.table} toolbarSlotId={tab.id === selectedTool ? "table-toolbar-slot" : undefined} visible={tab.id === selectedTool}
                   targets={project ? targets.filter((entry) => projectTargetIds.current.includes(entry.id) || entry.id === tab.target?.id) : targets}
                   onTargetChange={(target) => setTableTabs((current) => current.map((entry) =>
@@ -3011,11 +3056,15 @@ export default function App({
           }}
           kind={dialog}
           target={target}
+          workspaceRoot={dialog === "catalog" ? project?.sourcePath || workspace : undefined}
+          catalogTemplate={dialog === "catalog" ? catalogTemplate : undefined}
+          catalogApp={dialog === "catalog" ? defaultTarget.current : undefined}
+          catalogSys={dialog === "catalog" ? projectSysTarget.current : undefined}
           document={active}
           snippets={snippets}
           onSnippets={setSnippets}
           onProjects={setProjects}
-          onClose={() => setDialog("")}
+          onClose={() => { setDialog(""); setCatalogTemplate(""); }}
           selectedText={
             editor.current?.getSelection()
               ? editor.current

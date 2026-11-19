@@ -1,5 +1,32 @@
 # Kế hoạch và nghiệm thu
 
+## Tạo danh mục ERP từ khảo sát Create List — 19/11/2026
+
+- [x] Đọc luồng cấu hình, các bước master/detail và điểm xuất source của Fcode.
+- [x] Bổ sung chế độ sinh source vào lệnh **Tạo danh mục**. Dùng controller mẫu của dự án để mang theo cấu trúc đúng phiên bản.
+- [x] Nối dò file, ánh xạ controller/bảng/cột, xem trước từng file và xuất cả gói vào thư mục mới.
+- [x] Nghiệm thu bằng fixture Main/Dir/Grid/Filter, kể cả bảng detail, tên trùng và mẫu thay đổi sau khi xem trước.
+- [x] Chuẩn hóa mẫu đầu vào Tạo từ mô tả và quy tắc sinh `char(16)`, `nvarchar(128)`, `int`, `numeric(19,5)`, `char(1)`; cho phép duyệt/sửa trước khi tạo.
+- [x] Cố định thanh chế độ và thanh hành động, chuyển bảng sang vùng cuộn 300 px, thay select/thông báo/xác nhận hệ thống bằng component LSCode.
+- [x] Kiểm tra production build và Chrome fixture ở desktop/375 px: quy tắc 7 trường, dropdown nổi, thanh cố định, xác nhận nội bộ và không tràn viewport.
+- [ ] Chạy gói sinh ra trên dự án ERP thử nghiệm và đối chiếu mẫu PageMetadata/ASPX theo phiên bản.
+- [ ] Nếu cần mở rộng theo Fcode, bổ sung chọn cột từ schema, cấu hình bố cục Grid/Dir/Filter, mẫu Import và bước đăng ký page/menu.
+
+## Thiết kế lại form Menu ERP — 19/11/2026
+
+- [x] Đổi bố cục form và panel kiểm tra, gom nút lên thanh trên.
+- [x] Nối từng bảng Dir master/detail với công cụ Cấu trúc và dữ liệu trên App DB.
+- [x] Tách tải bản ghi và tài nguyên, kiểm tra NULL trong transaction tạo menu.
+- [ ] Đo thời gian mở F3 và xác nhận giao diện trên WebView2 với dự án ERP thật.
+
+## Làm mới bảng, xuất INSERT và báo lỗi — 19/11/2026
+
+- [x] Nối thao tác SQL và lưu Thiết kế danh mục với việc làm mới danh sách bảng theo kết nối. Giữ kết quả đọc đầu tiên khi cập nhật tên tab.
+- [x] Xuất kiểu ngày theo metadata cột trong menu Tập lệnh và dùng thẻ thông báo nổi cho lỗi SQL và lỗi tra cứu bảng.
+- [x] Build frontend và chạy 160 kiểm tra .NET, gồm tạo bảng trên SQL Server cục bộ và chạy lại INSERT trong phiên dùng `DATEFORMAT mdy`.
+- [x] Chạy kiểm thử Chrome `--table-regression` với dữ liệu mẫu. Bảng mới tải cột và dữ liệu ngay lần đầu. Thẻ lỗi giữ nguyên vị trí vùng làm việc và vừa chiều rộng 375 px.
+- [ ] Bộ kiểm thử Chrome đầy đủ dừng ở bước kiểm tra thứ tự dự án theo lần truy cập gần nhất, trước nhóm kiểm tra Cấu trúc và dữ liệu.
+
 - [x] Sửa gợi ý SQL cho tham số procedure và bảng tạm. Kiểm tra bằng fixture `ALTER PROC` trong bộ Core và build frontend.
 
 ## Toast, snippet nhanh và lịch sử — 18/11/2026
@@ -118,3 +145,19 @@ Chi tiết và tiêu chí: [ERP-MENU-PERFORMANCE-MOBILE](docs/specifications/ERP
 - [x] Sửa Go To để focus ô Tên trường khi mở và hiển thị danh sách nổi qua mép hộp thoại. Kiểm tra bằng Chrome với dữ liệu mẫu ở 1440×900 và 375×320.
 - [x] Kiểm chứng production build, 153 Core checks, 158 WebView checks có SQL fixture và publish Windows x64 self-contained.
 - [ ] Smoke thủ công với menu ERP thật có link chứa virtual directory và bảng có nhiều cột trên màn hình người dùng.
+
+## Tối ưu khởi động — 19/11/2026
+
+- [x] Hiển thị danh sách dự án trước khi tải snippet. Khi chọn dự án, bắt đầu mở dự án đồng thời với đọc bản nháp.
+- [x] Ghi thời gian mở dự án bằng `startup.project` bên cạnh số đo danh sách dự án `startup.picker`.
+- [ ] Đo thời gian mở nguội và mở lại trên máy người dùng.
+
+## Kế hoạch Check Mail
+
+Phạm vi và tiêu chí nghiệm thu nằm trong [SPEC.md](SPEC.md#check-mail--gửi-thư-thử-qua-smtp). Đã đối chiếu package Web, component dùng chung và kiến trúc Desktop → Application → Infrastructure. Đã triển khai tab Check Mail và adapter SMTP MailKit với thời gian chờ 30 giây. Kiểm thử dùng máy chủ loopback và địa chỉ mẫu.
+
+1. **Dựng tab công cụ.** Đăng ký lệnh trong command palette, mở tab theo yêu cầu. Dùng Button, Select và theme hiện có. Bố trí kết nối ở trên, người gửi và người nhận ở giữa, phần soạn thư và kết quả chiếm hết chiều ngang phía dưới. Đặt thứ tự Tab theo luồng nhập. Bản đầu nhập cấu hình trực tiếp và dùng được khi chưa chọn dự án.
+2. **Chốt cách nhập và kiểm tra.** Dùng một lựa chọn cho STARTTLS bắt buộc, TLS ngay khi kết nối hoặc kết nối thường. Đề xuất ban đầu là STARTTLS và cổng 587. Cho sửa cổng để dùng máy chủ nội bộ. Kiểm tra host, cổng 1–65535, From và To. Tách các địa chỉ bằng dấu chấm phẩy hoặc xuống dòng. Cho phép relay không xác thực khi bỏ trống tài khoản và mật khẩu. Khi nhập mật khẩu, yêu cầu chế độ mã hóa.
+3. **Nối luồng C#.** Khai báo request/response ở Contracts, command và handler MediatR ở Application, adapter SMTP bất đồng bộ ở Infrastructure. Đề xuất dùng MailKit cho hai chế độ TLS, kiểm tra tương thích với target framework trước khi thêm gói. Giữ kiểm tra chứng chỉ máy chủ. Tạo thư UTF-8 theo Text/HTML, xử lý Bcc đúng vai trò. Gắn giới hạn thời gian và hủy khi đóng tab. Rà đường ghi log bridge trước khi truyền mật khẩu.
+4. **Trả kết quả tại chỗ.** Hiện bước gặp lỗi, mã phản hồi SMTP nếu có và địa chỉ bị từ chối khi xác định được. Khi mất kết nối sau khi đã chuyển nội dung nhưng chưa có xác nhận, báo chưa xác định được kết quả và để người dùng quyết định gửi lại. Không tự động gửi lại.
+5. **Kiểm thử và bàn giao.** Dùng SMTP thử nghiệm cục bộ và địa chỉ thuộc example.test. Kiểm tra Text/HTML tiếng Việt, nhiều người nhận, Bcc ẩn khỏi header, lỗi cổng/chứng chỉ/mật khẩu, bấm gửi liên tiếp, đóng tab khi đang gửi và mở công cụ khi chưa chọn dự án. Kiểm tra theme sáng/tối, thu hẹp cửa sổ, điều hướng bàn phím và log đã lọc dữ liệu. Sau khi đạt tiêu chí, cập nhật hướng dẫn sử dụng và build bản chạy trực tiếp.

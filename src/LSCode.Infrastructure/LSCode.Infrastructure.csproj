@@ -3,7 +3,9 @@
     <TargetFramework>net10.0-windows</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="MailKit" Version="5.0.0" />
     <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.13" />
+    <ProjectReference Include="../LSCode.Contracts/LSCode.Contracts.csproj" />
     <ProjectReference Include="../LSCode.Application/LSCode.Application.csproj" />
     <ProjectReference Include="../LSCode.Core/LSCode.Core.csproj" />
     <ProjectReference Include="../DynamicTemplateStudio.Infrastructure/DynamicTemplateStudio.Infrastructure.csproj" />

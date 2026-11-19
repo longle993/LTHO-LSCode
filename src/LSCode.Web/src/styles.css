@@ -365,21 +365,6 @@ kbd {
   @apply [color:var(--foreground)];
   @apply [font-size:12px];
 }
-.error-banner {
-  @apply flex;
-  @apply items-center;
-  @apply [gap:8px];
-  @apply [padding:6px_16px];
-  @apply [background:var(--error-bg)];
-  @apply [color:var(--error-text)];
-  @apply shrink-0;
-  @apply [max-height:100px];
-  @apply overflow-auto;
-}
-.error-banner span {
-  @apply [flex:1];
-  @apply [overflow-wrap:anywhere];
-}
 .workbench {
   @apply grid;
   grid-template-columns: 48px clamp(210px, var(--workspace-width, 264px), min(620px, calc(100vw - 400px))) minmax(0, 1fr);
@@ -1703,6 +1688,10 @@ button.function-menu-id:focus-visible {
   @apply [min-height:40px];
   @apply [border-radius:12px];
 }
+.confirm-modal { overflow: hidden; }
+.confirm-modal .modal-copy p { margin: 0; line-height: 1.5; }
+.button.danger-action { color: var(--error-text); border-color: color-mix(in srgb, var(--error-text) 40%, var(--border)); }
+.button.danger-action:hover { background: color-mix(in srgb, var(--error-text) 9%, var(--surface)); }
 .form {
   @apply [padding:22px];
   @apply flex;
@@ -2351,12 +2340,6 @@ button.function-menu-id:focus-visible {
     @apply [padding:6px_10px];
     @apply [font-size:12px];
   }
-  .error-banner {
-    @apply [padding:6px_10px];
-  }
-  .error-banner strong {
-    @apply hidden;
-  }
   .split {
     @apply flex-col;
   }
@@ -2726,10 +2709,6 @@ button.function-menu-id:focus-visible {
   @apply whitespace-nowrap;
   @apply min-w-0;
 }
-.error-banner {
-  @apply shrink-0;
-  @apply overflow-auto;
-}
 .pane-file-picker .select > button {
   @apply [height:26px];
   @apply [min-height:26px];
@@ -2933,7 +2912,7 @@ button.function-menu-id:focus-visible {
   z-index: 260;
   top: 56px;
   right: 16px;
-  width: min(400px, calc(100vw - 32px));
+  max-width: min(400px, calc(100vw - 32px));
   pointer-events: none;
 }
 .table-notice {
@@ -2946,15 +2925,28 @@ button.function-menu-id:focus-visible {
   border-radius: 10px;
   background: var(--surface);
   box-shadow: 0 8px 24px #0003;
-  color: var(--text);
+  color: var(--foreground);
   pointer-events: auto;
+  animation: workbench-notice-enter 300ms ease-out;
+}
+@keyframes workbench-notice-enter {
+  from { opacity: 0; transform: translateY(-100%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .table-notice { animation: none; }
 }
 .table-notice.success { border-left-color: var(--success, #16845b); }
 .table-notice.error { border-left-color: var(--error-text); }
 .table-notice.success .table-notice-icon { color: var(--success, #16845b); }
 .table-notice.error .table-notice-icon { color: var(--error-text); }
 .table-notice-content { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 2px; }
-.table-notice-content > span { color: var(--muted); overflow-wrap: anywhere; }
+.table-notice-content > span {
+  color: var(--muted);
+  max-height: min(35vh, 12rem);
+  overflow: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
 .table-notice .icon-button { margin: -4px -3px 0 0; }
 .table-delete-message { display: flex; gap: 10px; align-items: flex-start; }
 .table-delete-message > svg { flex: none; color: var(--error-text); }

@@ -52,7 +52,7 @@ public static class StandardProjectSync
     }
 
     public static StandardProjectPlan Plan(IEnumerable<LegacyProject> saved, IEnumerable<StandardProjectRow> source,
-        CancellationToken token = default)
+        CancellationToken token = default, bool skipSynced = false)
     {
         var projects = saved.ToList();
         var rows = source.ToArray();
@@ -74,6 +74,13 @@ public static class StandardProjectSync
                 previews.Add(new(code, row.Title, "", "skipped", "Thiếu hoặc trùng mã dự án trong danh mục chuẩn."));
                 continue;
             }
+            var index = byCode.TryGetValue(code, out var foundIndex) ? foundIndex : -1;
+            var previous = index >= 0 ? projects[index] : null;
+            if (skipSynced && !string.IsNullOrWhiteSpace(previous?.Field("StandardProjectCode")))
+            {
+                previews.Add(new(code, row.Title, "", "unchanged", null));
+                continue;
+            }
             var sourcePath = new[] { row.WebSourcePath, row.WebProgramPath, row.AppSourcePath, row.AppProgramPath }
                 .Select(path => path.Trim().TrimEnd('\\', '/'))
                 .FirstOrDefault(Path.IsPathFullyQualified);
@@ -82,8 +89,6 @@ public static class StandardProjectSync
                 previews.Add(new(code, row.Title, sourcePath ?? "", "skipped", "Thiếu đường dẫn nguồn, server hoặc SYS database."));
                 continue;
             }
-            var index = byCode.TryGetValue(code, out var foundIndex) ? foundIndex : -1;
-            var previous = index >= 0 ? projects[index] : null;
             var candidate = previous ?? ProjectImporter.Create(code, row.Server.Trim(), row.SysDatabase.Trim(), sourcePath);
             var xml = XmlTools.Parse(candidate.RawXml).Root!;
             if (row.Fields is not null)

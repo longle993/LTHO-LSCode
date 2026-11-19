@@ -70,6 +70,9 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
         t.Rows.Cast<DataRow>().Select(r => r.ItemArray.Select(x => x is null or DBNull ? null : Convert.ToString(x, System.Globalization.CultureInfo.InvariantCulture)).ToArray()).ToArray());
     public async Task<object?> ExecuteAsync(string method, JsonElement p, CancellationToken ct)
     {
+        if (method == "mail.sendTest")
+            return await CheckMail.SendAsync(p.Deserialize<LSCode.Contracts.CheckMailRequest>(Json)
+                ?? throw new ArgumentException("Cấu hình SMTP không hợp lệ."), ct);
         if (method.StartsWith("templateStudio.", StringComparison.Ordinal))
             return await templateStudio.ExecuteAsync(method, p, ct);
         if (method.StartsWith("catalog.", StringComparison.Ordinal)) return await catalog.ExecuteAsync(method, p, Target(p), ct);
@@ -148,7 +151,7 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                 {
                     settings = SettingsStore.Load(),
                     projects = ProjectStore.Load().Select(Project).ToArray(),
-                    snippets = ReadSnippets(),
+                    snippets = B("deferSnippets") ? [] : ReadSnippets(),
                     version = "0.1-webview"
                 }, ct);
             case "settings.read": return SettingsStore.Load();
@@ -359,7 +362,28 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                 await persistenceGate.WaitAsync(ct);
                 try
                 {
-                    var plan = StandardProjectSync.Plan(ProjectStore.Load(), syncRows, ct);
+                    var saved = ProjectStore.Load();
+                    var projectId = S("projectId");
+                    var selected = projectId.Length > 0
+                        ? saved.Find(project => project.Id == projectId) ?? throw new InvalidOperationException("Dự án không còn trong danh sách.")
+                        : null;
+                    var code = selected?.Field("StandardProjectCode");
+                    if (string.IsNullOrWhiteSpace(code)) code = selected?.Name;
+                    var matchingRows = selected is null ? syncRows
+                        : syncRows.Where(row => row.Code.Trim().Equals(code, StringComparison.OrdinalIgnoreCase)).ToArray();
+                    if (selected is not null && matchingRows.Length == 0)
+                        throw new InvalidOperationException("Không tìm thấy dự án này trong danh mục chuẩn của bạn.");
+                    var plan = selected is null
+                        ? StandardProjectSync.Plan(saved, matchingRows, ct, skipSynced: true)
+                        : StandardProjectSync.Plan([selected], matchingRows, ct);
+                    if (selected is not null)
+                    {
+                        if (plan.Summary.Skipped > 0)
+                            throw new InvalidOperationException(plan.Summary.Projects.First(item => item.Status == "skipped").Note);
+                        saved[saved.FindIndex(project => project.Id == selected.Id)] = plan.Projects.Single();
+                        plan = plan with { Projects = saved };
+                    }
+                    ct.ThrowIfCancellationRequested();
                     if (plan.Summary.Added > 0 || plan.Summary.Updated > 0)
                         ProjectStore.Save(plan.Projects);
                     var standardSettings = SettingsStore.Load();
@@ -456,7 +480,8 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
             case "table.insertScript":
                 if (!tableSnapshots.TryGetValue(S("scope"), out var snapshot) || snapshot.Id != S("snapshotId"))
                     throw new InvalidOperationException("Dữ liệu đã thay đổi. Hãy đọc lại bảng.");
-                return await TableInspection.InsertScriptAsync(snapshot.Target, snapshot.Qualified, snapshot.Data, ct);
+                return await TableInspection.InsertScriptAsync(snapshot.Target, snapshot.Qualified, snapshot.Data, ct,
+                    useTableDateFormats: true);
             case "table.releaseSnapshot":
                 tableSnapshots.TryRemove(S("scope"), out _);
                 return true;
@@ -561,6 +586,32 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                 tableSnapshots[S("scope")] = new(snapshotId, readTarget, qualified, data);
                 return new { data = preview, snapshotId };
             case "project.commands": return await ProjectDatabase.CommandsAsync(Target(p), ct, S("appDatabase"), S("kind"), B("refresh"), S("context"));
+            case "catalogDescription.preview":
+            case "catalogDescription.apply":
+                var design = p.GetProperty("design").Deserialize<CatalogFromDescription.Input>(Json)
+                    ?? throw new ArgumentException("Thiếu thiết kế danh mục.");
+                var designSys = Target(p);
+                var designApp = Target(p.GetProperty("app"));
+                if (method == "catalogDescription.preview")
+                {
+                    var prepared = await CatalogFromDescription.PreviewAsync(design, designApp, designSys, ct);
+                    return new { prepared.Sql, prepared.Fingerprint,
+                        files = prepared.Source.Files.Select(file => new { file.Path, file.Text }).ToArray() };
+                }
+                var createdFiles = await CatalogFromDescription.ApplyAsync(design, designApp, designSys, S("fingerprint"), ct);
+                SqlSchemaCompletion.Clear();
+                ProjectDatabase.InvalidateCommands(designSys);
+                return createdFiles;
+            case "catalogSource.discover":
+                return await CatalogSourceGenerator.DiscoverAsync(S("root"), S("template"), ct);
+            case "catalogSource.preview":
+                var catalogSourceDraft = await CatalogSourceGenerator.PreviewAsync(p.Deserialize<CatalogSourceGenerator.Input>(Json)
+                    ?? throw new ArgumentException("Thiếu cấu hình Tạo danh mục."), ct);
+                return new { catalogSourceDraft.Fingerprint, catalogSourceDraft.HasMain,
+                    files = catalogSourceDraft.Files.Select(file => new { file.Path, file.Text }).ToArray() };
+            case "catalogSource.export":
+                return await CatalogSourceGenerator.ExportAsync(p.Deserialize<CatalogSourceGenerator.Input>(Json)
+                    ?? throw new ArgumentException("Thiếu cấu hình Tạo danh mục."), S("fingerprint"), S("folder"), ct);
             case "project.menu.details": return await MenuEditor.ReadAsync(Target(p), S("wmenuId"), ct);
             case "project.menu.new": return await MenuEditor.NewAsync(Target(p), S("selectedId"), ct);
             case "project.menu.insertScript": return await MenuEditor.InsertScriptAsync(Target(p), S("wmenuId"), ct);
@@ -704,9 +755,20 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
         foreach (var item in CompletionSnippets.Read(File.ReadAllText(sqlFile))
             .Where(item => item.Key.StartsWith("ss", StringComparison.OrdinalIgnoreCase)))
         {
-            if (values.Any(value => value.Key.Equals(item.Key, StringComparison.OrdinalIgnoreCase))) continue;
+            var quickKey = "/" + item.Key;
+            var legacyIndex = values.FindIndex(value => value.Key.Equals(item.Key, StringComparison.OrdinalIgnoreCase));
+            if (values.Any(value => value.Key.Equals(quickKey, StringComparison.OrdinalIgnoreCase)))
+            {
+                if (legacyIndex >= 0) values.RemoveAt(legacyIndex);
+                continue;
+            }
+            if (legacyIndex >= 0)
+            {
+                values[legacyIndex] = values[legacyIndex] with { Key = quickKey };
+                continue;
+            }
             var expanded = CompletionSnippets.Expand(item.Body);
-            values.Add(new Snippet(item.Key, "SQL dựng sẵn", expanded.Text,
+            values.Add(new Snippet(quickKey, "SQL dựng sẵn", expanded.Text,
                 item.Description.Length > 0 ? item.Description : "Mẫu SQL chuyển từ gợi ý ss", expanded.Offset));
         }
         return values;
