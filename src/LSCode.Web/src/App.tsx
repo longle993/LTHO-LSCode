@@ -1595,10 +1595,27 @@ export default function App({
     const closed = new Set<string>();
     try {
       const ownerIds = new Set((owner ? [owner] : projects).map(item => item.id));
+      const pathKey = (path: string) => path.replaceAll("\\", "/").toLowerCase();
+      const historyOwners = new Map<string, Set<string>>();
+      for (const entry of history ?? []) {
+        for (const file of entry.files) {
+          const key = pathKey(file);
+          const ids = historyOwners.get(key) ?? new Set<string>();
+          ids.add(entry.projectId);
+          historyOwners.set(key, ids);
+        }
+      }
       const closing = latest.current.tabs.filter(tab => {
-        const projectId = tab.project ?? projects.filter(item => tab.path && item.sourcePath && pathIsWithin(tab.path, item.sourcePath))
+        if (tab.project && projects.some(item => item.id === tab.project)) return ownerIds.has(tab.project);
+        const path = tab.path;
+        const projectId = path && projects.filter(item => item.sourcePath && pathIsWithin(path, item.sourcePath))
           .sort((left, right) => right.sourcePath.length - left.sourcePath.length)[0]?.id;
-        return !!projectId && ownerIds.has(projectId);
+        if (projectId) return ownerIds.has(projectId);
+        if (path && project && workspace && pathIsWithin(path, workspace)) return ownerIds.has(project.id);
+        const recorded = path ? historyOwners.get(pathKey(path)) : undefined;
+        if (recorded?.size === 1) return ownerIds.has(recorded.values().next().value!);
+        if (!owner && recorded) return [...recorded].some(id => ownerIds.has(id));
+        return !!(project && tab.target && projectTargetIds.current.includes(tab.target.id) && ownerIds.has(project.id));
       });
       const edited = closing.filter(dirty);
       if (edited.length) {
