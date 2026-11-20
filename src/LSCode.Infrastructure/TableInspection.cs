@@ -91,15 +91,15 @@ internal static class TableInspection
         for (var index = 0; index < rows.Length; index++)
         {
             var row = rows[index];
-            if (row.Mode is not ("update" or "insert"))
+            if (row.Mode is not ("update" or "insert" or "delete"))
                 throw new ArgumentException("Chế độ ghi không hợp lệ.");
-            if (row.Mode == "update" && (primaryNames.Count == 0 || !primaryNames.SetEquals(row.KeyColumns)))
-                throw new ArgumentException("Cần đủ các cột khóa chính để cập nhật dòng.");
+            if ((row.Mode is "update" or "delete") && (primaryNames.Count == 0 || !primaryNames.SetEquals(row.KeyColumns)))
+                throw new ArgumentException("Cần đủ các cột khóa chính để cập nhật hoặc xóa dòng.");
             try
             {
                 var count = await WriteAsync(target, qualified, row.Mode, row.Columns, row.Values,
                     row.KeyColumns, row.KeyValues, ct, transaction, metadata).ConfigureAwait(false);
-                if (row.Mode == "update" && count == 0)
+                if ((row.Mode is "update" or "delete") && count == 0)
                     throw new InvalidOperationException("Dòng không còn tồn tại. Hãy đọc lại bảng.");
             }
             catch (SqlException ex) when (ex.Number is 2601 or 2627)
@@ -173,6 +173,19 @@ internal static class TableInspection
             }
             command.CommandText = "UPDATE " + qualified + " SET " + string.Join(", ", assignments)
                 + " WHERE " + string.Join(" AND ", predicates);
+        }
+        else if (mode.Equals("delete", StringComparison.OrdinalIgnoreCase))
+        {
+            if (keyNames.Length == 0) throw new InvalidOperationException("Bảng không có khóa chính để xóa dòng.");
+            var predicates = new List<string>();
+            for (var i = 0; i < keyNames.Length; i++)
+            {
+                var row = Column(keyNames[i]);
+                var parameterName = "@k" + i;
+                predicates.Add(ProjectDatabase.Quote(Convert.ToString(row["name"])!) + " = " + parameterName);
+                command.Parameters.Add(CreateParameter(parameterName, row, keyValues[i]));
+            }
+            command.CommandText = "DELETE FROM " + qualified + " WHERE " + string.Join(" AND ", predicates);
         }
         else throw new ArgumentException("Chế độ ghi không hợp lệ.");
         return await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
@@ -305,7 +318,8 @@ internal static class TableInspection
             data.Rows.Cast<DataRow>().Select(r => columns.Select(c => r.IsNull(c) ? null : DisplayValue(r[c])).ToArray()).ToArray());
     }
 
-    public static async Task<string> InsertScriptAsync(SqlTarget target, string qualified, DataTable data, CancellationToken ct)
+    public static async Task<string> InsertScriptAsync(SqlTarget target, string qualified, DataTable data, CancellationToken ct,
+        bool useTableDateFormats = false)
     {
         if (data.Rows.Count == 0) return "";
         var metadata = await TableDefinition.ColumnsAsync(target, qualified, ct).ConfigureAwait(false);
@@ -320,6 +334,7 @@ internal static class TableInspection
                 && (definition.IsNull("generated") || Convert.ToInt32(definition["generated"]) == 0);
         }).ToArray();
         if (writable.Length == 0) throw new NotSupportedException("Các cột đang hiển thị đều do SQL Server sinh tự động.");
+        var typeIds = writable.Select(c => Convert.ToInt32(byName[c.ColumnName]["system_type_id"])).ToArray();
         var identity = writable.Any(c => !byName[c.ColumnName].IsNull("seed"));
         var script = new StringBuilder();
         if (identity) script.AppendLine($"SET IDENTITY_INSERT {qualified} ON;");
@@ -328,7 +343,8 @@ internal static class TableInspection
         {
             ct.ThrowIfCancellationRequested();
             var row = data.Rows[i];
-            script.Append("    (").AppendJoin(", ", writable.Select(c => Literal(row[c])))
+            script.Append("    (").AppendJoin(", ", writable.Select((column, index) =>
+                    Literal(row[column], useTableDateFormats ? typeIds[index] : 0)))
                 .AppendLine(i == data.Rows.Count - 1 ? ");" : "),");
             if (script.Length > 2_000_000) throw new NotSupportedException("Script quá lớn. Hãy lọc bớt dòng hoặc cột.");
         }
@@ -344,11 +360,15 @@ internal static class TableInspection
         _ => Convert.ToString(value, CultureInfo.InvariantCulture) ?? ""
     };
 
-    private static string Literal(object value) => value switch
+    private static string Literal(object value, int systemTypeId) => value switch
     {
         DBNull => "NULL",
         bool boolean => boolean ? "1" : "0",
         byte or short or int or long or decimal or float or double or byte[] => DisplayValue(value),
+        DateTime date when systemTypeId == 58 =>
+            $"CONVERT(smalldatetime, '{date.ToString("dd'/'MM'/'yyyy", CultureInfo.InvariantCulture)}', 103)",
+        DateTime date when systemTypeId == 61 =>
+            $"CONVERT(datetime, '{date.ToString("dd'/'MM'/'yyyy HH':'mm", CultureInfo.InvariantCulture)}', 103)",
         string or char or Guid or DateTime or DateTimeOffset or TimeSpan => "N'" + DisplayValue(value).Replace("'", "''") + "'",
         _ => throw new NotSupportedException("Script INSERT chưa hỗ trợ kiểu " + value.GetType().Name + ".")
     };

@@ -86,6 +86,12 @@ public static class CommandHierarchy
         return result;
     }
     public static List<CommandNode> Build(IEnumerable<CommandEntry> entries)
+        => Build(entries, remainingLevels: 2);
+
+    public static List<CommandNode> BuildAll(IEnumerable<CommandEntry> entries)
+        => Build(entries, remainingLevels: int.MaxValue);
+
+    private static List<CommandNode> Build(IEnumerable<CommandEntry> entries, int remainingLevels)
     {
         var ordered = entries
             .Where(entry => entry.Id.Length > 0)
@@ -105,7 +111,7 @@ public static class CommandHierarchy
         {
             var root = new CommandNode(rootEntry);
             roots.Add(root);
-            AddChildren(root, rootEntry.Id, childrenByParent, remainingLevels: 2);
+            AddChildren(root, rootEntry.Id, childrenByParent, remainingLevels, new HashSet<string>(StringComparer.OrdinalIgnoreCase) { rootEntry.Id });
         }
         return roots;
     }
@@ -114,14 +120,17 @@ public static class CommandHierarchy
         CommandNode parent,
         string parentId,
         IReadOnlyDictionary<string, CommandEntry[]> childrenByParent,
-        int remainingLevels)
+        int remainingLevels,
+        HashSet<string> path)
     {
         if (remainingLevels == 0 || !childrenByParent.TryGetValue(parentId, out var children)) return;
         foreach (var childEntry in children)
         {
+            if (!path.Add(childEntry.Id)) continue;
             var child = new CommandNode(childEntry);
             parent.Children.Add(child);
-            AddChildren(child, childEntry.Id, childrenByParent, remainingLevels - 1);
+            AddChildren(child, childEntry.Id, childrenByParent, remainingLevels - 1, path);
+            path.Remove(childEntry.Id);
         }
     }
 }

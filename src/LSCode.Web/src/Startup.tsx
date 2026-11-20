@@ -35,7 +35,7 @@ export default function Startup() {
       setEntered(true);
       return;
     }
-    void request<Bootstrap>("studio.bootstrap")
+    void request<Bootstrap>("studio.bootstrap", { deferSnippets: true })
       .then((b) => {
         setBootstrap(b);
         performance.mark("startup.picker");

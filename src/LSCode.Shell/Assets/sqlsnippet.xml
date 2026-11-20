@@ -70,6 +70,19 @@
 		<Item keyword='@@rowcount'>
 			<![CDATA[@@rowcount {{-}}]]>
 		</Item>
+		<Item keyword='@@id' description='Mã chứng từ (ví dụ PND)'><![CDATA[@@id]]></Item>
+		<Item keyword='@@unit' description='Mã đơn vị hiện tại'><![CDATA[@@unit]]></Item>
+		<Item keyword='@@userID' description='ID người dùng'><![CDATA[@@userID]]></Item>
+		<Item keyword='@@admin' description='1 = admin, 0 = user'><![CDATA[@@admin]]></Item>
+		<Item keyword='@@language' description='Ngôn ngữ V hoặc E'><![CDATA[@@language]]></Item>
+		<Item keyword='@@action' description='Thao tác New, Edit hoặc View'><![CDATA[@@action]]></Item>
+		<Item keyword='@@master' description='Tên bảng master (cXX$000000)'><![CDATA[@@master]]></Item>
+		<Item keyword='@@prime$partition$current' description='Bảng master kỳ hiện tại'><![CDATA[@@prime$partition$current]]></Item>
+		<Item keyword='@@prime$partition$previous' description='Bảng master kỳ trước'><![CDATA[@@prime$partition$previous]]></Item>
+		<Item keyword='@@inquiry$partition$current' description='Bảng inquiry kỳ hiện tại'><![CDATA[@@inquiry$partition$current]]></Item>
+		<Item keyword='@@partition' description='Thông tin partition'><![CDATA[@@partition]]></Item>
+		<Item keyword='@@expression' description='Biểu thức partition'><![CDATA[@@expression]]></Item>
+		<Item keyword='@@sysDatabaseName' description='Tên DB hệ thống'><![CDATA[@@sysDatabaseName]]></Item>
 		<Item keyword='substring('>
 			<![CDATA[substring({{-}}, {{1}}, {{2}})]]>
 		</Item>

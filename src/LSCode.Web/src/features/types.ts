@@ -11,6 +11,10 @@ export type ToolProps = {
   target?: Target;
   document?: DocumentInfo;
   selectedText?: string;
+  workspaceRoot?: string;
+  catalogTemplate?: string;
+  catalogApp?: Target;
+  catalogSys?: Target;
   snippets: Snippet[];
   onSnippets: (s: Snippet[]) => void;
   onProjects: (p: Project[]) => void;

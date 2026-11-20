@@ -41,6 +41,52 @@ await using (var provider = new ServiceCollection().AddLSCodeInfrastructure().Bu
     Check(provider.GetRequiredService<IDeveloperTools>() is DeveloperTools, "Profiler resolves through its single DI registration");
 checks++;
 Console.WriteLine("PASS Closing DI container disposes Profiler once");
+await using (var provider = new ServiceCollection().AddLSCodeInfrastructure().BuildServiceProvider())
+{
+    var tools = provider.GetRequiredService<IDeveloperTools>();
+    using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+    using var server = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+    server.Start();
+    var port = ((System.Net.IPEndPoint)server.LocalEndpoint).Port;
+    var capture = Task.Run(async () =>
+    {
+        using var socket = await server.AcceptTcpClientAsync(deadline.Token);
+        using var stream = socket.GetStream();
+        using var reader = new StreamReader(stream, Encoding.ASCII);
+        using var writer = new StreamWriter(stream, Encoding.ASCII) { NewLine = "\r\n", AutoFlush = true };
+        var transcript = new StringBuilder();
+        await writer.WriteLineAsync("220 localhost SMTP fixture");
+        while (await reader.ReadLineAsync(deadline.Token) is { } line)
+        {
+            transcript.AppendLine(line);
+            if (line == "DATA")
+            {
+                await writer.WriteLineAsync("354 End with dot");
+                while (await reader.ReadLineAsync(deadline.Token) is { } content && content != ".")
+                    transcript.AppendLine(content);
+                await writer.WriteLineAsync("250 Accepted");
+                return transcript.ToString();
+            }
+            await writer.WriteLineAsync("250 OK");
+        }
+        return transcript.ToString();
+    });
+    var payload = JsonSerializer.SerializeToElement(new
+    {
+        host = "127.0.0.1", port, security = "none", from = "sender@example.test",
+        to = "one@example.test;two@example.test", bcc = "hidden@example.test",
+        subject = "Thử SMTP", body = "<p>Thử SMTP</p>", html = true
+    });
+    var result = await tools.ExecuteAsync("mail.sendTest", payload, deadline.Token);
+    var transcript = await capture;
+    Check(result is CheckMailResult { Success: true } &&
+        transcript.Contains("RCPT TO:<one@example.test>") &&
+        transcript.Contains("RCPT TO:<two@example.test>") &&
+        transcript.Contains("RCPT TO:<hidden@example.test>") &&
+        !transcript.Contains("Bcc:", StringComparison.OrdinalIgnoreCase) &&
+        transcript.Contains("Content-Type: text/html", StringComparison.OrdinalIgnoreCase),
+        "Check Mail sends HTML with multiple recipients and hides Bcc from headers");
+}
 var noteProject = "advance-note-project";
 var noteItem = new AdvanceNoteItem("request-1", "Kiểm tra phiếu nhập", "Đang xử lý", "Đối chiếu controller",
     "01.01", "Phiếu nhập", "PNTran", "PNTran.aspx", [Path.Combine(root, "PNTran.xml")], DateTimeOffset.UtcNow);
@@ -145,6 +191,7 @@ var sql = CatalogDefinition.Build("dbo", "DanhMuc", true, [new("ma", "nvarchar",
 Check(CatalogDefinition.Audit.All(n => sql.Contains("[" + n + "]")), "Catalog includes all four system fields");
 Check(sql.Contains("O''Brien") && sql.Contains("PRIMARY KEY ([ma])"), "Catalog escapes default and preserves PK");
 Check(CatalogDefinition.Quote("x]; DROP TABLE t--") == "[x]]; DROP TABLE t--]", "SQL identifiers cannot escape brackets");
+Check(CatalogDefinition.TypeSql(new("he_so", "numeric", "19,5")) == "numeric(19,5)", "Catalog description decimal convention is accepted by SQL builder");
 await Reject<ArgumentException>(() => Task.FromResult(CatalogDefinition.Build("dbo", "t", true, [new("user_id0")], [], false, false)), "System field collision rejected");
 await Reject<ArgumentException>(() => Task.FromResult(CatalogDefinition.Build("dbo", "t", true, [new("x", "nvarchar", Identity: true)], [], false, false)), "Invalid identity rejected");
 await Reject<ArgumentException>(() => Task.FromResult(CatalogDefinition.TypeSql(new("x", "decimal", "99,2"))), "Invalid precision rejected");
@@ -317,16 +364,58 @@ await using (var projectTools = new DeveloperTools())
     Directory.CreateDirectory(Path.Combine(resourceControllers, "Dir"));
     Directory.CreateDirectory(Path.Combine(resourceControllers, "Grid"));
     await File.WriteAllTextAsync(Path.Combine(resourceMain, "fixture.aspx"), "<FastBusiness:ReportExtender Controller='Fixture' />");
-    await File.WriteAllTextAsync(Path.Combine(resourceControllers, "Dir", "Fixture.xml"), "<controller tableName='d46$000000'/>");
+    await File.WriteAllTextAsync(Path.Combine(resourceControllers, "Dir", "Fixture.xml"),
+        "<controller tableName='d46$000000' detailTable='dbo.d47$000000'><items style='Grid' controller='FixtureDetail'/><!-- <table>Ignored</table> --></controller>");
+    await File.WriteAllTextAsync(Path.Combine(resourceControllers, "Dir", "FixtureDetail.f"),
+        "<controller><table>[dbo].[FixtureLines]</table></controller>");
     await File.WriteAllTextAsync(Path.Combine(resourceControllers, "Grid", "Fixture.f"), "<controller/>");
     var menuResources = JsonSerializer.SerializeToElement(await CallProject("project.menu.resources", new { root = resourceRoot, link = "fixture.aspx" }), Protocol.Json);
     var resourceStates = menuResources.GetProperty("resources").EnumerateArray().ToDictionary(
         item => item.GetProperty("kind").GetString()!, item => item.GetProperty("status").GetString());
     Check(menuResources.GetProperty("controllers")[0].GetString() == "Fixture" &&
-        menuResources.GetProperty("tables")[0].GetString() == "d46$000000" &&
-        resourceStates["Dir"] == "found" && resourceStates["Grid"] == "found" &&
+        menuResources.GetProperty("tables").EnumerateArray().Select(table => table.GetString()).ToHashSet()
+            .SetEquals(["d46$000000", "dbo.d47$000000", "[dbo].[FixtureLines]"]) &&
+        resourceStates["Dir"] == "multiple" && resourceStates["Grid"] == "found" &&
         resourceStates["Filter"] == "missing" && resourceStates["Main"] == "found",
-        "Menu editor resolves controller, Dir table and missing file groups");
+        "Menu editor resolves master and detail Dir tables, including a linked controller, and missing file groups");
+    Directory.CreateDirectory(Path.Combine(resourceControllers, "Filter"));
+    await File.WriteAllTextAsync(Path.Combine(resourceControllers, "Filter", "Fixture.xml"),
+        "<filter><title v='Mẫu' e='Sample'/><fields><field name='old_code'/></fields></filter>", new UTF8Encoding(true));
+    var createList = new
+    {
+        root = resourceRoot, template = "fixture.aspx", controller = "CatalogDemo", titleVi = "Danh mục A & B", titleEn = "Catalog demo",
+        tables = new Dictionary<string, string> { ["d46$000000"] = "demo_master", ["dbo.d47$000000"] = "dbo.demo_detail" },
+        fields = new Dictionary<string, string> { ["old_code"] = "new_code" }
+    };
+    var listDraft = JsonSerializer.SerializeToElement(await CallProject("catalogSource.preview", createList), Protocol.Json);
+    var listFiles = listDraft.GetProperty("files").EnumerateArray().ToDictionary(
+        entry => entry.GetProperty("path").GetString()!, entry => entry.GetProperty("text").GetString()!);
+    string ControllerPath(string kind, string name) => Path.Combine("App_Data", "Controllers", kind, name);
+    Check(listFiles.Count == 5 &&
+        listFiles[Path.Combine("Main", "CatalogDemo.aspx")].Contains("Controller='CatalogDemo'") &&
+        listFiles[ControllerPath("Dir", "CatalogDemo.xml")].Contains("tableName='demo_master' detailTable='dbo.demo_detail'") &&
+        listFiles[ControllerPath("Dir", "CatalogDemo.xml")].Contains("controller='CatalogDemo_FixtureDetail'") &&
+        listFiles.ContainsKey(ControllerPath("Dir", "CatalogDemo_FixtureDetail.f")) &&
+        listFiles[ControllerPath("Filter", "CatalogDemo.xml")].Contains("Danh mục A &amp; B") &&
+        listFiles[ControllerPath("Filter", "CatalogDemo.xml")].Contains("name='new_code'"),
+        "Create catalog previews renamed Main, master/detail controllers, table mappings and escaped labels");
+    var exportParent = Directory.CreateDirectory(Path.Combine(root, "catalog-output")).FullName;
+    var listExport = new
+    {
+        createList.root, createList.template, createList.controller, createList.titleVi, createList.titleEn,
+        createList.tables, createList.fields, folder = exportParent,
+        fingerprint = listDraft.GetProperty("fingerprint").GetString()
+    };
+    await CallProject("catalogSource.export", listExport);
+    var exportedList = Path.Combine(exportParent, "CatalogDemo");
+    var exportedFilter = await File.ReadAllBytesAsync(Path.Combine(exportedList, ControllerPath("Filter", "CatalogDemo.xml")));
+    Check(exportedFilter.AsSpan().StartsWith(new UTF8Encoding(true).GetPreamble()) &&
+        !File.Exists(Path.Combine(resourceMain, "CatalogDemo.aspx")) &&
+        File.Exists(Path.Combine(exportedList, Path.Combine("Main", "CatalogDemo.aspx"))),
+        "Create catalog exports a separate package and preserves template BOM");
+    await Reject<IOException>(() => CallProject("catalogSource.export", listExport), "Create catalog refuses to replace an existing package");
+    await File.AppendAllTextAsync(Path.Combine(resourceMain, "fixture.aspx"), "<!-- Mẫu đã sửa -->");
+    await Reject<InvalidOperationException>(() => CallProject("catalogSource.export", listExport), "Create catalog rejects a stale source preview");
     var modernRoot = Directory.CreateDirectory(Path.Combine(root, "metadata-menu-resources")).FullName;
     var modernMetadata = Directory.CreateDirectory(Path.Combine(modernRoot, "AppData")).FullName;
     var modernIncludes = Directory.CreateDirectory(Path.Combine(modernMetadata, "Metadata")).FullName;
@@ -350,6 +439,12 @@ await using (var projectTools = new DeveloperTools())
     Check(modernFiles.GetProperty("files").EnumerateArray().Select(item => item.GetString())
         .SequenceEqual([Path.Combine(modernDir, "Item.f")]),
         "Controller explorer loads PageMetadata controller files without Main or ASPX");
+    Directory.CreateDirectory(Path.Combine(modernRoot, "Main"));
+    var mobileFiles = JsonSerializer.SerializeToElement(await CallProject("project.controller",
+        new { root = modernRoot, link = "", sysId = "Customer" }), Protocol.Json);
+    Check(mobileFiles.GetProperty("files").EnumerateArray().Select(item => item.GetString())
+        .SequenceEqual([Path.Combine(modernDir, "Customer.f")]),
+        "Mobile controller explorer falls back to dvcommand sysid when a legacy Main folder exists");
     Check(typeof(DeveloperTools).Assembly.GetManifestResourceNames()
         .Contains("LSCode.Infrastructure.StandardCatalogConnection"),
         "Standard catalog connection ships inside LSCode without an FSD Studio source checkout");
@@ -377,6 +472,15 @@ await using (var projectTools = new DeveloperTools())
     var newStandardFolder = Directory.CreateDirectory(Path.Combine(root, "standard-new")).FullName;
     var newPlan = StandardProjectSync.Plan([], [new StandardProjectRow("NEW", "Dự án mới", ".", "NEW_S",
         newStandardFolder, "", "", "", @"D:\StandardUpdates")]);
+    var changedRow = standardRows[0] with { Title = "Danh mục đã sửa" };
+    var syncedProfile = standardPlan.Projects.Single();
+    var initialSync = StandardProjectSync.Plan([syncedProfile], [changedRow], skipSynced: true);
+    Check(initialSync.Summary.Unchanged == 1 && initialSync.Projects.Single() == syncedProfile,
+        "Bulk sync preserves existing synchronized profile even when the standard catalog changes");
+    var explicitSync = StandardProjectSync.Plan([syncedProfile], [changedRow]);
+    Check(explicitSync.Summary.Updated == 1 && explicitSync.Projects.Single().Id == syncedProfile.Id &&
+        explicitSync.Projects.Single().Field("StandardProjectTitle") == changedRow.Title,
+        "Explicit sync refreshes the selected existing profile");
     Check(newPlan.Summary.Added == 1 && newPlan.Projects[0].Field("StandardProjectCode") == "NEW" &&
         newPlan.Projects[0].Field("WebConfigPath") == Path.Combine(newStandardFolder, "web.config") &&
         string.IsNullOrEmpty(newPlan.Projects[0].Field("AppConnectionString")) &&
@@ -469,11 +573,15 @@ await using (var projectTools = new DeveloperTools())
     await CallProject("project.history.record", new { id = syncedProject.Id, path = generated });
     Check(((string[])(await CallProject("project.history", new { id = syncedProject.Id }))!).SequenceEqual([generated]),
         "Project history persists and deduplicates file paths");
-    await CallProject("project.history.remove", new { id = syncedProject.Id, path = generated });
+    var secondHistoryFile = Path.Combine(nested, "second.xml");
+    await File.WriteAllTextAsync(secondHistoryFile, "<cache/>");
+    await CallProject("project.history.record", new { id = syncedProject.Id, path = secondHistoryFile });
+    await CallProject("project.history.removeMany", new { id = syncedProject.Id, paths = new[] { generated, secondHistoryFile } });
     var emptyHistory = JsonSerializer.SerializeToElement(await CallProject("project.history.list", new { }), Protocol.Json);
-    Check(emptyHistory.GetArrayLength() == 0 && File.Exists(generated) &&
+    Check(emptyHistory.GetArrayLength() == 0 && File.Exists(generated) && File.Exists(secondHistoryFile) &&
         !Directory.EnumerateFiles(Path.Combine(root, "file-history"), "*.json").Any(),
-        "Removing the last history entry removes the group and preserves the source file");
+        "Batch history removal writes once, removes the group, and preserves source files");
+    File.Delete(secondHistoryFile);
     await CallProject("project.history.record", new { id = syncedProject.Id, path = generated });
     await Reject<IOException>(() => CallProject("project.structure.clear", new { id = syncedProject.Id, path = nested }),
         "Clear Structure rejects a different path");
@@ -557,6 +665,30 @@ if (args.Contains("--sql"))
     try
     {
         var target = (TargetInfo)(await Call("sql.connect", new { server, database, integratedSecurity = true, trustCertificate = true }))!;
+        await Call("sql.execute", new { targetId = target.Id, sql = """
+            CREATE TABLE dbo.nbphyc (stt_rec varchar(20), ma_da varchar(20), ngay_ht datetime,
+                ma_lt1 varchar(20), trang_thai varchar(2), noi_dung nvarchar(200));
+            CREATE TABLE dbo.nbctdaumuc (stt_rec varchar(20), ma_lt varchar(20), so_luong decimal(18,2));
+            INSERT dbo.nbphyc VALUES
+                ('YC01','DA01','20261105 08:30','DEV01','HT',N'Hoàn thành'),
+                ('YC02','DA02','20261106 09:15','DEV01','UP',N'Cập nhật'),
+                ('YC03','DA03','20261107 10:00','DEV02','MO',N'Đang mở');
+            INSERT dbo.nbctdaumuc VALUES ('YC01','DEV01',2),('YC02','DEV01',3);
+            """ });
+        var requestRows = (ResultSet)(await Call("requestTracking.list", new
+        {
+            targetId = target.Id, legacy = false, user = "DEV01", from = "2026-11-01", to = "2026-11-30"
+        }))!;
+        Check(requestRows.Rows.Length == 2 && requestRows.Rows.All(row => row[3] == "DEV01"),
+            "QLYC filters requests by user and date through the selected LSCode connection");
+        var requestStatistics = (ResultSet)(await Call("requestTracking.statistics", new
+        {
+            targetId = target.Id, legacy = false, year = 2026
+        }))!;
+        var devStatistics = requestStatistics.Rows.Single(row => row[1] == "DEV01");
+        Check(decimal.Parse(devStatistics[14]!, System.Globalization.CultureInfo.InvariantCulture) == 2m &&
+            decimal.Parse(devStatistics[28]!, System.Globalization.CultureInfo.InvariantCulture) == 5m,
+            "QLYC View All returns request and quantity totals without hard-coded employee groups");
         await Call("sql.execute", new { targetId = admin.Id, sql = $"CREATE DATABASE [{menuAppDatabase}]" });
         menuAppCreated = true;
         var menuAppTarget = (TargetInfo)(await Call("sql.connect", new { server, database = menuAppDatabase, integratedSecurity = true, trustCertificate = true }))!;
@@ -582,10 +714,30 @@ if (args.Contains("--sql"))
                 ('orphan', 'missing', N'Mồ côi', '', '', ''),
                 ('empty', '', N'Nhóm trống', '', '', ''),
                 ('separator', 'empty', N'-', '', '', '');
+            CREATE TABLE dbo.dvcommand (wmenu_id varchar(20), wmenu_id0 varchar(20), bar nvarchar(80), bar2 nvarchar(80), sysid varchar(80), hide_yn bit);
+            INSERT dbo.dvcommand VALUES
+                ('M', '', N'Mobile', N'', '', 0),
+                ('M.1', 'M', N'Bán hàng', N'', 'MobileSales', 0),
+                ('M.1.1', 'M.1', N'Phiếu bán', N'', 'MobileVoucher', 0),
+                ('M.1.1.1', 'M.1.1', N'Chi tiết', N'', 'MobileDetail', 0);
             """ });
         var menu = (List<CommandNode>)(await Call("project.commands", new { targetId = target.Id, appDatabase = menuAppDatabase }))!;
         Check(menu is [{ Entry.Id: "root", Children: [{ Entry.Id: "branch", Children: [{ Entry: { Id: "leaf", Caption: "Startup", Link: "leaf.aspx", CommandId: "leaf", SysId: "ControllerLeaf" } }] }] }],
             "Menu loads Sys wcommand without userinfo, uses App deny/Startup and retains the required ancestors");
+        var mobileMenu = (List<CommandNode>)(await Call("project.commands", new { targetId = target.Id, appDatabase = menuAppDatabase, kind = "mobile" }))!;
+        Check(mobileMenu.Single().Children.Single().Children.Single().Children.Single().Entry.SysId == "MobileDetail",
+            "Mobile menu loads dbo.dvcommand recursively and keeps sysid for source lookup");
+        await Call("sql.execute", new { targetId = target.Id, sql = "UPDATE dbo.dvcommand SET bar=N'Đã đổi' WHERE wmenu_id='M.1.1.1'" });
+        var cachedMobile = (List<CommandNode>)(await Call("project.commands", new { targetId = target.Id, appDatabase = menuAppDatabase, kind = "mobile" }))!;
+        var refreshedMobile = (List<CommandNode>)(await Call("project.commands", new { targetId = target.Id, appDatabase = menuAppDatabase, kind = "mobile", refresh = true }))!;
+        Check(cachedMobile.Single().Children.Single().Children.Single().Children.Single().Entry.Caption == "Chi tiết" &&
+            refreshedMobile.Single().Children.Single().Children.Single().Children.Single().Entry.Caption == "Đã đổi",
+            "Menu cache avoids repeated queries and explicit refresh reloads Mobile data");
+        await Call("sql.execute", new { targetId = target.Id, sql = "ALTER TABLE dbo.wcommand ADD menu_id varchar(20) NULL;\nGO\nUPDATE dbo.wcommand SET menu_id='AA.01.02' WHERE wmenu_id='leaf'; CREATE TABLE dbo.command(menu_id varchar(20), parameter nvarchar(80), enabled bit); INSERT dbo.command VALUES ('AA.01.02',N'Việt'' Nam',1);" });
+        var menuInsertScript = (string)(await Call("project.menu.insertScript", new { targetId = target.Id, wmenuId = "leaf" }))!;
+        Check(menuInsertScript.Contains("INSERT INTO dbo.wcommand") && menuInsertScript.Contains("INSERT INTO dbo.command")
+            && menuInsertScript.Contains("N'Việt'' Nam'") && menuInsertScript.Contains("GO"),
+            "Menu F12 script includes matching wcommand and command rows with Unicode literals");
         var menuDetails = JsonSerializer.SerializeToElement(await Call("project.menu.details", new { targetId = target.Id, wmenuId = "leaf" }), Protocol.Json);
         Check(menuDetails.GetProperty("values").GetProperty("bar").GetString() == "Menu" &&
             menuDetails.GetProperty("values").GetProperty("wmenu_id").GetString() == "leaf",
@@ -593,13 +745,16 @@ if (args.Contains("--sql"))
         var menuDraft = JsonSerializer.SerializeToElement(await Call("project.menu.new", new { targetId = target.Id, selectedId = "leaf" }), Protocol.Json);
         var draftValues = menuDraft.GetProperty("values").Deserialize<Dictionary<string, string?>>(Protocol.Json)!;
         draftValues["bar"] = "Menu mới";
+        draftValues["link"] = null;
+        draftValues.Remove("sysid");
         var insertedMenu = JsonSerializer.SerializeToElement(await Call("project.menu.save", new
         {
             targetId = target.Id, mode = "new", originalId = "", version = "", values = draftValues
         }), Protocol.Json);
         var insertedId = insertedMenu.GetProperty("values").GetProperty("wmenu_id").GetString()!;
-        Check(insertedId == "leaf.01" && insertedMenu.GetProperty("values").GetProperty("bar").GetString() == "Menu mới",
-            "Menu editor generates a free branch code and inserts wcommand");
+        Check(insertedId == "leaf.01" && insertedMenu.GetProperty("values").GetProperty("bar").GetString() == "Menu mới" &&
+            insertedMenu.GetProperty("values").EnumerateObject().All(column => column.Value.ValueKind != JsonValueKind.Null),
+            "Menu editor generates a free branch code and inserts wcommand without NULL, including omitted and null fields");
         var insertedVersion = insertedMenu.GetProperty("version").GetString()!;
         var editValues = insertedMenu.GetProperty("values").Deserialize<Dictionary<string, string?>>(Protocol.Json)!;
         editValues["bar"] = "Đã sửa";
@@ -608,6 +763,20 @@ if (args.Contains("--sql"))
         {
             targetId = target.Id, mode = "edit", originalId = insertedId, version = insertedVersion, values = editValues
         }), "Menu editor rejects a stale edit instead of overwriting it");
+        await Call("sql.execute", new { targetId = target.Id,
+            sql = "ALTER TABLE dbo.wcommand ADD fixture_nullable varchar(10) NULL DEFAULT (NULL);" });
+        var rejectedValues = new Dictionary<string, string?>(draftValues)
+        {
+            ["wmenu_id"] = "leaf.02", ["menu_id"] = "AA.99.99", ["bar"] = "Menu fixture"
+        };
+        await Reject<InvalidOperationException>(async () => await Call("project.menu.save", new
+        {
+            targetId = target.Id, mode = "new", originalId = "", version = "", values = rejectedValues
+        }), "Menu editor rejects a new row when a SQL default would leave a NULL column");
+        await Reject<KeyNotFoundException>(async () => await Call("project.menu.details", new
+        {
+            targetId = target.Id, wmenuId = "leaf.02"
+        }), "Menu editor rolls back a new row that still contains NULL");
         var batch = (ExecutionResult)(await Call("sql.execute", new { targetId = target.Id, sql = "CREATE TABLE #test(value int);\nGO\nINSERT INTO #test VALUES (42);\nGO\nSELECT value FROM #test;" }))!;
         Check(batch.Tables[0].Rows[0][0] == "42", "SQL keeps connection/temp table across GO batches");
         await Call("sql.execute", new { targetId = target.Id, sql = """
@@ -685,6 +854,15 @@ if (args.Contains("--sql"))
         var retry = JsonSerializer.SerializeToElement(await Call("table.writeBatch", new { targetId = target.Id, table = "grid_save_fixture", rows = gridWrites.Take(1).ToArray() }), Protocol.Json);
         Check(!retry.TryGetProperty("conflict", out var retryConflict) || retryConflict.ValueKind == JsonValueKind.Null,
             "Duplicate grid key rolls back the earlier update and its original key can be used to retry");
+        var deleteRows = new[]
+        {
+            new { mode = "delete", columns = Array.Empty<string>(), values = Array.Empty<string>(), keyColumns = new[] { "id" }, keyValues = new[] { "2" } },
+        };
+        var deleted = JsonSerializer.SerializeToElement(await Call("table.writeBatch", new { targetId = target.Id, table = "grid_save_fixture", rows = deleteRows }), Protocol.Json);
+        Check(!deleted.TryGetProperty("conflict", out var deleteConflict) || deleteConflict.ValueKind == JsonValueKind.Null,
+            "Grid F8 delete removes rows transactionally by primary key");
+        var afterDelete = (ResultSet)(await Call("table.read", new { targetId = target.Id, schema = "dbo", table = "grid_save_fixture" }))!;
+        Check(afterDelete.Rows.Length == 1 && afterDelete.Rows[0][0] == "3", "Grid delete refresh source contains only the retained row");
         await Call("sql.execute", new { targetId = target.Id, sql = "CREATE TABLE dbo.viewer_fixture (value int); INSERT dbo.viewer_fixture VALUES (1),(2),(3);" });
         var tableCatalog = (ResultSet)(await Call("table.catalog", new { targetId = target.Id }))!;
         Check(tableCatalog.Rows.Any(row => row.SequenceEqual(new[] { "dbo", "viewer_fixture" })), "Table catalog returns the new table and its schema");
@@ -757,6 +935,14 @@ if (args.Contains("--sql"))
         await File.WriteAllTextAsync(Path.Combine(root,"App_Data","detail.f"),"<controller/>");
         var related=JsonSerializer.SerializeToElement(await Call("project.controller",new{root,link="menu.aspx"}),Protocol.Json);
         Check(related.GetProperty("files").GetArrayLength()==3,"Controller explorer includes ASPX and child grid files");
+        Directory.CreateDirectory(Path.Combine(root, "Main"));
+        var mainFixture = Path.Combine(root, "Main", "virtual-menu.aspx");
+        await File.WriteAllTextAsync(mainFixture, "<FastBusiness:QueryExtender Controller='employee' />");
+        var relatedFromMain = JsonSerializer.SerializeToElement(
+            await Call("project.controller", new { root, link = "~/virtual/routes/virtual-menu.aspx" }), Protocol.Json);
+        Check(relatedFromMain.GetProperty("files").EnumerateArray().Any(item =>
+                string.Equals(item.GetString(), mainFixture, StringComparison.OrdinalIgnoreCase)),
+            "Controller explorer keeps the resolved Main file when menu links contain virtual folders");
         var fOnly = Path.Combine(root, "App_Data", "legacy.f");
         await File.WriteAllTextAsync(fOnly, "<controller><items style='Grid' controller='legacyGrid'/></controller>");
         var fGrid = Path.Combine(root, "App_Data", "legacyGrid.f");
@@ -804,11 +990,25 @@ if (args.Contains("--sql"))
         var addColumns = (string)(await Call("table.addScript", new { targetId = target.Id, table = "child_fixture", columns = new[] { "label", "parent_id" } }))!;
         Check(addColumns.Contains("ALTER TABLE [dbo].[child_fixture] ADD") && addColumns.Contains("[label] NVARCHAR(20) NULL")
             && addColumns.Contains("[parent_id] INT NULL"), "Add column script preserves selected type and nullability");
-        await Call("sql.execute", new { targetId = target.Id, sql = "CREATE TABLE dbo.insert_fixture(id int IDENTITY PRIMARY KEY, label nvarchar(60) NULL, payload varbinary(8), spare int, version rowversion); INSERT dbo.insert_fixture(label,payload) VALUES (N'Việt'' Nam',0x0AFF),(NULL,0x00);" });
-        var view = JsonSerializer.SerializeToElement(await Call("table.view", new { targetId = target.Id, table = "insert_fixture", where = "id=1", columns = new[] { "id", "label", "payload", "version" } }), Protocol.Json);
+        await Call("sql.execute", new { targetId = target.Id, sql = """
+            CREATE TABLE dbo.insert_fixture(id int IDENTITY PRIMARY KEY, label nvarchar(60) NULL, payload varbinary(8),
+                spare int, version rowversion, short_date smalldatetime, full_date datetime, precise_date datetime2(7));
+            INSERT dbo.insert_fixture(label,payload,short_date,full_date,precise_date) VALUES
+                (N'Việt'' Nam',0x0AFF,'2026-11-19T13:07:00','2026-11-19T13:07:48','2026-11-19T13:07:48.1234567'),
+                (NULL,0x00,NULL,NULL,NULL);
+            """ });
+        var view = JsonSerializer.SerializeToElement(await Call("table.view", new { targetId = target.Id, table = "insert_fixture", where = "id=1", columns = new[] { "id", "label", "payload", "version", "short_date", "full_date", "precise_date" } }), Protocol.Json);
         var insert = (string)(await Call("table.insertScript", new { snapshotId = view.GetProperty("snapshotId").GetString() }))!;
         Check(view.GetProperty("data").GetProperty("rows").GetArrayLength() == 1 && insert.Contains("N'Việt'' Nam'")
             && insert.Contains("0x0AFF") && insert.Contains("IDENTITY_INSERT") && !insert.Contains("[version]"), "Insert script uses the filtered snapshot and skips rowversion");
+        Check(insert.Contains("CONVERT(smalldatetime, '19/11/2026', 103)") &&
+            insert.Contains("CONVERT(datetime, '19/11/2026 13:07', 103)") &&
+            insert.Contains("2026-11-19T13:07:48.1234567"), "Table INSERT formats dates by SQL column type");
+        var replayed = (ExecutionResult)(await Call("sql.execute", new { targetId = target.Id, sql =
+            "SET DATEFORMAT mdy; BEGIN TRANSACTION; DELETE dbo.insert_fixture WHERE id=1;\n" + insert +
+            "\nSELECT CONVERT(varchar(19),short_date,120),CONVERT(varchar(19),full_date,120) FROM dbo.insert_fixture WHERE id=1; ROLLBACK;" }))!;
+        Check(replayed.Tables.Single().Rows.Single().SequenceEqual(new[] { "2026-11-19 00:00:00", "2026-11-19 13:07:00" }),
+            "Table INSERT replays day-first values regardless of the SQL session date format");
         await Call("sql.execute", new { targetId = target.Id, sql = """
             CREATE PROCEDURE dbo.advance_proc_fixture AS SELECT 1;
             GO

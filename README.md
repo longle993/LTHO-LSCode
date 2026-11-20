@@ -4,7 +4,7 @@ IDE Windows cho việc phát triển và bảo trì dự án FAST ERP. Giao di�
 
 ## Chạy và cài đặt
 
-- Nếu đã có bản publish, mở `artifacts/publish-webview/LSCode.WebView.exe` và giữ các tệp đi kèm. Máy chạy bản publish mặc định cần .NET 10 Desktop Runtime và Microsoft Edge WebView2 Runtime.
+- Nếu đã có bản publish, mở `artifacts/publish-webview/LSCode.WebView.exe` và giữ các tệp đi kèm. Bản publish mặc định là Windows x64 self-contained nên không cần cài .NET 10 Desktop Runtime; máy chạy vẫn cần Microsoft Edge WebView2 Runtime.
 - Từ thư mục gốc, dùng .NET 10 SDK và Node.js để build bản WebView bằng `./build-webview.ps1 -Publish`.
 - Xem cách tạo và cài bộ cài Windows x64 trong [hướng dẫn cài đặt](docs/guides/CAI-DAT-LSCODE.vi.md).
 - Khi mở app, chọn profile hoặc bấm **Đồng bộ** trong **Dự án của bạn**. Màn này còn có **Tạo profile**, **Import XML** và **Export XML**. Để thử editor mà không cần dữ liệu ERP, mở [ERP-Demo](samples/ERP-Demo/README.md).

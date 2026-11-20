@@ -8,7 +8,7 @@ Ngày 10/11/2026. Stack được chọn: React 18, TypeScript, Monaco Editor, WP
 
 ## Chạy bản đã đóng gói
 
-Mở `artifacts/publish-webview/LSCode.WebView.exe`. Giữ nguyên toàn bộ thư mục đi kèm, đặc biệt `wwwroot`, `Assets`, `Template`, DLL và `LSCode.TraceHost.exe`; không chỉ sao chép một file EXE. Máy chạy cần .NET 10 Desktop Runtime và Microsoft Edge WebView2 Runtime.
+Mở `artifacts/publish-webview/LSCode.WebView.exe`. Giữ nguyên toàn bộ thư mục đi kèm, đặc biệt `wwwroot`, `Assets`, `Template`, DLL và `LSCode.TraceHost.exe`; không chỉ sao chép một file EXE. `build-webview.ps1 -Publish` tạo bản Windows x64 self-contained nên máy chạy không cần cài .NET 10 Desktop Runtime; vẫn cần Microsoft Edge WebView2 Runtime.
 
 ### Khởi động và thao tác trong trình soạn thảo
 
@@ -31,7 +31,7 @@ Styles do dự án quản lý được build qua Tailwind v4. `motion.css` là �
 
 ### Kiểm tra và đóng gói
 
-Chạy `./build-webview.ps1 -Test -Smoke -Publish` để tạo bản chạy trực tiếp. Bài kiểm tra SQL có thể dùng SQL Server LocalDB thông qua `LSCODE_TEST_SQL_SERVER`.
+Chạy `./build-webview.ps1 -Test -Smoke -Publish` để tạo bản Windows x64 self-contained chạy trực tiếp. Bài kiểm tra SQL có thể dùng SQL Server LocalDB thông qua `LSCODE_TEST_SQL_SERVER`.
 
 Khi bản trước đang mở, dùng `-PublishDirectory artifacts/publish-webview-profiler` để xuất bản cạnh bản đang chạy.
 
@@ -199,6 +199,7 @@ Phạm vi: `MenuEditor.NextCommandId` trong `src/LSCode.Infrastructure/MenuEdito
 - Bỏ nhãn `WebView`, `.NET Desktop` trên thanh tiêu đề.
 - **Chức năng ERP** chỉ giữ ô tìm kiếm và cây menu; bỏ hai nút Tải chức năng / Đồng bộ. Nút tải lại ở góc trên sidebar vẫn nạp lại cây chức năng. Nút tải lại trong tab sửa menu là thao tác riêng, vẫn giữ để đọc lại bản ghi.
 - Chuột phải vào **tên dự án cấp trên cùng** trong Lịch sử: **Close project** đóng các tab thuộc dự án đó; **Close all projects** đóng tab thuộc tất cả dự án. File được nhận diện theo dự án gắn với tab hoặc thư mục dự án gần nhất chứa file; SQL chưa lưu không thuộc dự án được giữ lại. Các thao tác này không xóa file, profile hay lịch sử.
+- Bấm **×** ở nhiều file liên tiếp sẽ ẩn từng mục ngay. LSCode gom các lần xóa gần nhau theo dự án rồi ghi file lịch sử một lần; file nguồn và tab đang mở không bị xóa. Nếu lần lưu nền thất bại, danh sách được tải lại từ dữ liệu đã lưu và lỗi xuất hiện trên giao diện.
 - Bản nháp được hỏi một lần cho cả nhóm: Lưu thay đổi / Đóng không lưu / Hủy. Hủy lưu hoặc lưu lỗi giữ các tab mở. Khi query editor đang chạy, dừng query trước khi đóng nhóm.
 
 ### Watch và bảng dữ liệu trong LSCode
@@ -241,11 +242,20 @@ Generate Update và SQL Watch được mở từ thanh lối tắt hoặc bảng
 - Kéo một hoặc nhiều file từ Windows Explorer vào cửa sổ LSCode để mở. Thư mục và đường dẫn không còn tồn tại bị bỏ qua; tối đa 100 file mỗi lượt. File đã mở được đưa về tab hiện có thay vì tạo bản sao.
 - Trong **Cài đặt → Phím tắt**, các lệnh được chia theo File & cửa sổ, Editor & XML, SQL & dữ liệu, Dự án, Công cụ, Giao diện & hệ thống. Ô tìm lọc theo tên, ID lệnh hoặc phím mặc định; mỗi lệnh vẫn hỗ trợ hai tổ hợp.
 
+## Theo dõi thời gian query (17/11/2026)
+
+Khi nhấn **F5** hoặc **Chạy**, thanh công cụ của panel Kết quả hiển thị **Đang chạy · …** và cập nhật mỗi 100 ms. Khi query kết thúc, nhãn đổi thành **Thời gian · …**; kết quả thành công dùng thời gian do SQL runner trả về, còn query lỗi hoặc bị dừng giữ thời gian đã chạy ở phía giao diện. Thời gian dưới một giây hiển thị bằng mili giây, dưới một phút bằng giây và query dài hơn hiển thị theo `phút:giây`.
+
+## Viền cửa sổ (17/11/2026)
+
+LSCode dùng cửa sổ không có chrome mặc định của Windows, vì vậy toàn bộ ứng dụng có viền 1 px riêng theo Light, Dark và High Contrast. Viền nằm trong kích thước cửa sổ, giúp nhận ra mép cửa sổ khi mở nhiều dự án chồng nhau mà không làm thay đổi bố cục editor.
+
 ## Cấu trúc và dữ liệu (17/11/2026)
 
+- WHERE và ORDER BY nằm cùng hàng theo tỷ lệ 70/30; cửa sổ hẹp tự chuyển thành hai hàng. Thông báo thành công/lỗi là toast LSCode ở góc trên, không làm lưới bị đẩy xuống; xác nhận xóa dữ liệu cũng dùng modal của ứng dụng thay hộp thoại hệ thống.
 - Nút **Lưu** nằm cạnh **Chạy**. Nhấn chuột phải vào ô **App/Sys** để sao chép tên database đang chọn.
 - **Tập lệnh → Tạo lệnh INSERT cho kết quả hiện tại** mở script từ các dòng và cột của lần tải gần nhất, theo bộ lọc đã chạy. Các chỉnh sửa chưa lưu chưa có trong script.
-- Lưới hiển thị `datetime` theo `dd/MM/yyyy HH:mm` và `smalldatetime` theo `dd/MM/yyyy`. Dữ liệu gốc dùng khi sửa và tạo script vẫn giữ đầy đủ độ chính xác.
+- Lưới hiển thị `datetime` theo `dd/MM/yyyy HH:mm` và `smalldatetime` theo `dd/MM/yyyy`. Khi chỉnh sửa trên lưới, LSCode vẫn dùng giá trị gốc.
 
 - Các ô trong vùng quét đều có viền. Ô đang nhập có nền xám theo theme.
 - Nhập ở dòng `*` hoặc nhấp đúp để sửa ô, kể cả cột khóa cho phép ghi. **Lưu** hoặc **Ctrl+S** ghi các thay đổi cùng lúc. Khi trùng khóa, SQL Server hoàn tác lần lưu và LSCode đánh dấu dòng lỗi, khôi phục các ô khóa của dòng đó và giữ các chỉnh sửa còn lại để lưu lại.
@@ -253,3 +263,44 @@ Generate Update và SQL Watch được mở từ thanh lối tắt hoặc bảng
 - Màn hình dùng lưới cùng kiểu với kết quả SQL. Bấm một lần để chọn ô và dùng phím mũi tên hoặc **Tab** để di chuyển. Kéo chuột để chọn vùng hoặc bấm số dòng, tên cột hay ô `#` để chọn cả dòng, cột hay toàn bảng. **Ctrl+C** sao chép TSV. Nhấp đúp hoặc nhấn **F2** để mở ô nhập liệu. **Enter** kết thúc nhập ô và **Escape** bỏ lần sửa ô đang mở.
 - Dropdown trên tab hiển thị **App** hoặc **Sys**. Nhấn **Ctrl+Alt+D** để chuyển database của tab Cấu trúc và dữ liệu đang mở.
 - Menu **Tập lệnh** mở nổi ngoài toolbar nên không bị cắt khi cửa sổ hẹp. Menu có **Thêm key vào SQL Data (Ctrl+D)**, **Tạo lệnh tạo bảng** và **Tạo lệnh xóa bảng**. Các mục tạo/xóa chỉ mở script SQL để xem và tự chạy khi người dùng chủ động bấm Chạy.
+
+### Bảng mới, định dạng INSERT và thông báo lỗi (19/11/2026)
+
+- Sau khi tạo bảng bằng tab SQL hoặc lưu từ **Tạo danh mục → Thiết kế bảng SQL**, quay lại **Cấu trúc và dữ liệu** trên đúng kết nối App/Sys. Ô **FROM** làm mới danh sách. Chọn bảng mới để tải cột và dữ liệu trong lần mở đầu tiên. Nếu tạo bảng ở công cụ khác, gõ tên vào **FROM** để LSCode tra thêm trên SQL Server, hoặc nhấn **Tải lại danh sách bảng** để lấy lại cả danh sách.
+- Chế độ **Tạo danh mục → Sinh source ERP** đọc controller mẫu từ workspace, xem trước và xuất gói file. Xem [quy trình Tạo danh mục](../specifications/CATALOG-TABLE-DESIGNER.vi.md).
+- **Tập lệnh → Tạo lệnh INSERT cho kết quả hiện tại** dùng kiểu cột trong SQL Server. Ví dụ `smalldatetime` sinh `CONVERT(smalldatetime, '19/11/2026', 103)` và `datetime` sinh `CONVERT(datetime, '19/11/2026 13:07', 103)`. Kiểu 103 đọc ngày theo thứ tự ngày/tháng/năm kể cả khi phiên SQL dùng `mdy`. Khi chạy lại script, `smalldatetime` nhận giờ `00:00` và `datetime` nhận giây, phần lẻ bằng 0. `datetime2` vẫn xuất theo định dạng ISO đầy đủ.
+- Lỗi thực thi SQL và lỗi tra cứu bảng xuất hiện trong thẻ thông báo nổi, có nút **Đóng thông báo**. Vị trí lưới và thanh công cụ được giữ khi thông báo xuất hiện.
+
+## Snippet nhập nhanh trong SQL (18/11/2026)
+
+Mở **Snippets**, tạo mẫu có **Từ khóa nhanh** bắt đầu bằng `/`, ví dụ `/1`, nhập nội dung và vị trí con trỏ rồi bấm **Lưu mẫu**. Trong tab SQL, gõ `/1`: Monaco mở danh sách snippet khớp; nhấn Enter hoặc Tab để thay từ khóa bằng nội dung. Việc gõ khóa không tự chạy SQL. Mẫu không bắt đầu bằng `/` vẫn dùng được qua màn Snippets và nút **Chèn vào editor**, nhưng không chen vào gợi ý nhanh để tránh trùng tên bảng/cột.
+
+Các mẫu SQL cũ có khóa `ss...` nằm trong nhóm **SQL dựng sẵn** của tab Snippets thay vì xuất hiện lẫn trong gợi ý tên bảng/cột. Các biến session FAST `@@id`, `@@unit`, `@@userID`, `@@admin`, `@@language`, `@@action`, `@@master`, các biến partition và `@@sysDatabaseName` lấy từ cùng tệp snippet cho cả tab SQL lẫn SQL nhúng trong XML.
+
+## Điều hướng nhanh Cấu trúc và dữ liệu (18/11/2026)
+
+- **F5** chạy dữ liệu của tab Cấu trúc và dữ liệu đang chọn.
+- Chọn một ô hoặc dòng rồi nhấn **Home** để tới ô đầu dòng, **End** để tới ô cuối dòng. Phím không sửa dữ liệu và vẫn giữ dòng hiện hành.
+- Nhấn **Ctrl+G**, nhập hoặc chọn tên trường được gợi ý, rồi nhấn Enter hoặc **Nhận**. Lưới cuộn ngang và đặt vùng chọn vào cột đó trên dòng hiện hành.
+- Nút sao chép cạnh bộ chọn App/Sys chép đúng tên database đang dùng. Toolbar của tab SQL có nút tương tự cạnh nút kết nối.
+
+Khi chức năng ERP dùng link có thêm thư mục ảo nhưng ASPX thật nằm trong `Main`, LSCode dò theo tên file và vẫn hiển thị nhánh Main trong cây File. Thao tác chọn menu chỉ dựng cây, không tự mở file.
+
+## Script INSERT menu ERP (17/11/2026)
+
+Chọn menu trong **Chức năng ERP** chỉ tải cây controller vào File. Ứng dụng không tự mở file Main. Khi focus ở menu, nhấn **F12** để mở tab SQL chứa INSERT của bản ghi `dbo.wcommand` và bản ghi `dbo.command` theo `menu_id`. Có thể dùng chuột phải rồi chọn **Tạo script INSERT menu**. Nếu menu không có `menu_id` hoặc không tìm thấy dòng `command`, tab SQL ghi chú rõ trường hợp đó.
+
+## Menu Web và Mobile (17/11/2026)
+
+- Mở **Chức năng ERP**, chọn **Web** hoặc **Mobile** phía trên ô tìm. Web được tải nền khi mở dự án; Mobile chỉ tải lần đầu khi chọn tab.
+- Web lấy `wcommand` theo quy tắc quyền/Startup hiện hữu. Mobile lấy `dbo.dvcommand`, hiển thị cây theo `wmenu_id0`, nhãn `bar` (fallback `bar2`) và dùng `sysid` để tìm controller.
+- Ô tìm lọc tên, sysid và mã trên dữ liệu đã tải. Chuyển Web/Mobile giữ từ khóa và cây riêng, không truy vấn SQL theo từng ký tự.
+- Nút **Tải lại** bỏ qua cache của tab đang chọn. Cache tối đa 8 ngữ cảnh và hết hạn sau 5 phút; lưu menu Web cũng xóa cache liên quan.
+- Nhấp đúp hoặc bấm mã của node để dựng cây source trong File; không tự mở Main. Khi Generate Update đang chọn yêu cầu, thao tác menu tiếp tục đưa cây source vào luồng chọn file.
+- F3, F12 và menu chuột phải sửa/xuất INSERT chỉ dành cho Web. Mobile chưa có trình sửa `dvcommand`; nếu dự án không có bảng này, lỗi chỉ hiện trong vùng Mobile và không ảnh hưởng cây Web.
+
+### Check Mail
+
+Nhấn Ctrl+Shift+P, tìm **Check Mail** rồi nhập cấu hình SMTP. Cổng mặc định là 587 với STARTTLS. Điền To và tùy chọn Cc/Bcc, ngăn cách nhiều địa chỉ bằng dấu chấm phẩy hoặc xuống dòng. Chọn Text hoặc HTML rồi bấm **Gửi thử**. Máy chủ tiếp nhận thư là kết quả của giao dịch SMTP. Đóng tab để xóa nội dung form và yêu cầu hủy thao tác đang chạy.
+
+Trong **Dự án của bạn**, nút **Đồng bộ** bỏ qua các profile đã có mã từ danh mục chuẩn. Muốn lấy lại thông tin chuẩn cho một dự án, bấm biểu tượng đồng bộ trên dòng của dự án đó. Profile tạo tay hoặc nhập XML chưa có mã đồng bộ vẫn được đối chiếu với danh mục trong lần đồng bộ đầu.

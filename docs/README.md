@@ -22,7 +22,7 @@ Ranh giới module, bridge và luồng lệnh.
 
 Yêu cầu và tiêu chí nghiệm thu chi tiết.
 
-- [Tạo danh mục — thiết kế bảng và nhập dữ liệu](specifications/CATALOG-TABLE-DESIGNER.vi.md)
+- [Tạo danh mục — sinh source ERP, thiết kế bảng và nhập dữ liệu](specifications/CATALOG-TABLE-DESIGNER.vi.md)
 - [LSCode — đặc tả chuyển đổi toàn bộ tính năng sang WebView](specifications/WEBVIEW-MIGRATION.vi.md)
 
 ## Lịch sử và ghi chú triển khai
@@ -64,3 +64,7 @@ Các quyết định, quy trình và bằng chứng của từng đợt. Đườ
 - [Cây thư mục ERP, đổi tên và tìm bảng SQL](history/WORKBENCH-FOLDER-TREE.vi.md)
 - [Lịch sử file và thao tác dự án](history/WORKBENCH-PROJECT-HISTORY.vi.md)
 - [Màu giao diện, lưới SQL và điều hướng](history/WORKBENCH-WORKFLOW.vi.md)
+
+## Kế hoạch đang chuẩn bị
+
+- [Tối ưu tải menu ERP và tích hợp Mobile từ Fcode](specifications/ERP-MENU-PERFORMANCE-MOBILE.vi.md) — đã triển khai cache, giảm round trip, tab Web/Mobile và tra source bằng sysid; còn nghiệm thu ERP/LAN.

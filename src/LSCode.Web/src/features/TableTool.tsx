@@ -1,8 +1,8 @@
 import { Component, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
 import type { ChangeEvent, ErrorInfo, KeyboardEvent as ReactKeyboardEvent, ReactNode, SyntheticEvent } from "react";
 import { createPortal } from "react-dom";
-import { ChevronRight, KeyRound, Play, RefreshCw } from "lucide-react";
-import { Button, IconButton, Modal, Select } from "../ui";
+import { ChevronRight, CircleAlert, Copy, KeyRound, Play, RefreshCw, X } from "lucide-react";
+import { Button, IconButton, Modal, Select, WorkbenchNotice } from "../ui";
 import { operation, quoteSqlName, request, writeClipboard } from "../bridge";
 import type { Table, Target } from "../bridge";
 import { useTask } from "./useTask";
@@ -12,6 +12,11 @@ import { TableScriptDialog } from "./TableScriptDialog";
 
 type TableName = { schema: string; table: string };
 const tableCatalogCache = new Map<string, { tables: TableName[]; expires: number }>();
+const tableCatalogChanged = "lscode:table-catalog-changed";
+export function invalidateTableCatalog(targetId: string) {
+  tableCatalogCache.delete(targetId);
+  window.dispatchEvent(new CustomEvent(tableCatalogChanged, { detail: targetId }));
+}
 function isTable(value: unknown): value is Table {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<Table>;
@@ -60,8 +65,9 @@ type Preview = { data: Table; snapshotId: string };
 type ColumnMenu = { x: number; y: number; columns: string[] };
 type ScriptPreview = { title: string; script: string };
 type ColumnDialog = { mode: "add" | "alter"; column?: string };
+type DeleteRequest = { count: number; table: string; resolve: (confirmed: boolean) => void };
 type Suggestion = { label: string; value: string; caret?: number };
-type Clause = "select" | "where";
+type Clause = "select" | "where" | "orderBy";
 const ident = /^(?:\[((?:[^\]]|\]\])+)\]|([^.[\]]+))(?:\s*\.\s*(?:\[((?:[^\]]|\]\])+)\]|([^.[\]]+)))?$/u;
 const parseTable = (input: string): TableName | undefined => {
   const match = ident.exec(input.trim());
@@ -77,6 +83,7 @@ const functions = new Set(["ISNULL", "COALESCE", "COUNT", "SUM", "AVG", "MIN", "
 const clauseKeywords: Record<Clause, string[]> = {
   select: ["AS", "DISTINCT", "CASE", "WHEN", "THEN", "ELSE", "END", "NULL", "OVER", "PARTITION BY"],
   where: ["AND", "OR", "NOT", "IN", "NOT IN", "LIKE", "BETWEEN", "IS NULL", "IS NOT NULL", "NULL", "EXISTS", "NOT EXISTS", "CASE", "WHEN", "THEN", "ELSE", "END"],
+  orderBy: ["ASC", "DESC"],
 };
 function clauseSuggestions(input: string, caret: number, columns: string[], clause: Clause): Suggestion[] {
   const before = input.slice(0, caret);
@@ -112,9 +119,10 @@ function clauseSuggestions(input: string, caret: number, columns: string[], clau
     });
 }
 
-function SuggestedInput({ label, placeholder, value, options, disabled, focus, onChange, onChoose, onSubmit, onCaret, className, multiline = false }: {
+function SuggestedInput({ label, placeholder, value, options, disabled, focus, autoFocus, onChange, onChoose, onSubmit, onCaret, className, multiline = false }: {
   label: string; placeholder?: string; value: string; options: Suggestion[]; disabled: boolean;
   focus?: boolean;
+  autoFocus?: boolean;
   onChange: (value: string) => void; onChoose?: (value: string) => void;
   onSubmit?: () => void; onCaret?: (position: number) => void; className?: string; multiline?: boolean;
 }) {
@@ -162,7 +170,10 @@ function SuggestedInput({ label, placeholder, value, options, disabled, focus, o
     } else if (event.key === "Enter" && !multiline) onSubmit?.();
   };
   const inputProps = {
-    ref: (element: HTMLInputElement | HTMLTextAreaElement | null) => { inputElement.current = element; },
+    ref: (element: HTMLInputElement | HTMLTextAreaElement | null) => {
+      inputElement.current = element;
+      if (element) element.autofocus = autoFocus ?? false;
+    },
     role: "combobox" as const,
     "aria-label": label,
     "aria-autocomplete": "list" as const,
@@ -214,7 +225,7 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
   onTableChange: (table: string) => void;
   onCaptureData: (target: Target, table: string, where: string) => void;
 }) {
-  const [input, setInput] = useState(initialTable ?? ""), [where, setWhere] = useState(""),
+  const [input, setInput] = useState(initialTable ?? ""), [where, setWhere] = useState(""), [orderBy, setOrderBy] = useState(""),
     [columns, setColumns] = useState("*"),
     [readonly, setReadonly] = useState(false), [selectedColumns, setSelectedColumns] = useState<string[]>([]),
     [columnSearch, setColumnSearch] = useState(""), [filterField, setFilterField] = useState(""),
@@ -223,7 +234,7 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
     [catalogRevision, setCatalogRevision] = useState(0),
     [quickCatalog, setQuickCatalog] = useState<{ targetId: string; query: string; tables: TableName[] }>(),
     [catalogError, setCatalogError] = useState(""),
-    [carets, setCarets] = useState<Record<Clause, number>>({ select: 0, where: 0 }),
+    [carets, setCarets] = useState<Record<Clause, number>>({ select: 0, where: 0, orderBy: 0 }),
     [metadata, setMetadata] = useState<{ key: string; columns: TableColumn[] }>(),
     [metadataRevision, setMetadataRevision] = useState(0),
     [preview, setPreview] = useState<{ key: string; result: Preview }>(),
@@ -234,7 +245,11 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
     [columnMenuGroup, setColumnMenuGroup] = useState<string>(),
     [scriptMenu, setScriptMenu] = useState(false),
     [status, setStatus] = useState(""),
-    [dataError, setDataError] = useState("");
+    [dataError, setDataError] = useState(""),
+    [goToOpen, setGoToOpen] = useState(false),
+    [goToField, setGoToField] = useState(""),
+    [goToRequest, setGoToRequest] = useState<{ name: string; sequence: number }>(),
+    [deleteRequest, setDeleteRequest] = useState<DeleteRequest>();
   const task = useTask();
   const [saveSlot, setSaveSlot] = useState<HTMLSpanElement | null>(null);
   const [previewPending, startPreviewTransition] = useTransition();
@@ -251,9 +266,15 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
   const key = JSON.stringify([targetId, schema, table]);
   const tables = catalog?.targetId === targetId ? catalog?.tables : undefined;
   const query = input.replace(/[\[\]]/g, "").trim().toLowerCase();
-  const candidates = tables ?? (quickCatalog?.targetId === targetId && quickCatalog?.query === query ? quickCatalog.tables : undefined);
-  const knownTable = !!candidates?.some((entry) =>
-    entry.schema.toLowerCase() === schema?.toLowerCase() && entry.table.toLowerCase() === table?.toLowerCase());
+  const matchesTable = (entry: TableName) =>
+    entry.schema.toLowerCase() === schema?.toLowerCase() && entry.table.toLowerCase() === table?.toLowerCase();
+  const listedTable = !!tables?.some(matchesTable);
+  const quickTables = quickCatalog?.targetId === targetId && quickCatalog?.query === query ? quickCatalog.tables : undefined;
+  const candidates = useMemo(() => {
+    if (!tables || !quickTables) return tables ?? quickTables;
+    return [...new Map([...tables, ...quickTables].map((entry) => [quoteSqlName(entry.schema, entry.table), entry])).values()];
+  }, [tables, quickTables]);
+  const knownTable = listedTable || !!quickTables?.some(matchesTable);
   const names = useMemo(() => {
     const terms = query.split(/\s+/).filter(Boolean);
     const ranked: Suggestion[][] = [[], [], []];
@@ -271,6 +292,7 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
   }, [candidates, query]);
   const currentMetadata = metadata?.key === key && Array.isArray(metadata.columns) ? metadata.columns : undefined;
   const currentPreview = preview?.key === key ? preview.result : undefined;
+  const canReadMetadata = knownTable || !!currentPreview;
   const fieldNames = currentMetadata?.map((column) => column.name) ?? [];
   const filteredMetadata = (currentMetadata ?? []).filter((column) =>
     column.name.toLowerCase().includes(columnSearch.trim().toLowerCase()));
@@ -288,7 +310,22 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
     return () => window.clearTimeout(timer);
   }, [task.busy]);
   useEffect(() => {
-    setCatalog(undefined);
+    if (!status || task.error || dataError || catalogError) return;
+    const timer = window.setTimeout(() => setStatus(""), 4200);
+    return () => window.clearTimeout(timer);
+  }, [status, task.error, dataError, catalogError]);
+  useLayoutEffect(() => {
+    function invalidate(event: Event) {
+      if ((event as CustomEvent<string>).detail !== targetId) return;
+      setQuickCatalog(undefined);
+      setCatalogRevision((version) => version + 1);
+      setMetadataRevision((version) => version + 1);
+    }
+    window.addEventListener(tableCatalogChanged, invalidate);
+    return () => window.removeEventListener(tableCatalogChanged, invalidate);
+  }, [targetId]);
+  useEffect(() => {
+    if (!visible) return;
     setCatalogError("");
     if (!targetId) return;
     const cached = tableCatalogCache.get(targetId);
@@ -312,11 +349,11 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
       current = false;
       void pending.cancel().catch(() => {});
     };
-  }, [targetId, catalogRevision]);
+  }, [targetId, catalogRevision, visible]);
   useEffect(() => {
-    if (!targetId || tables) return;
+    if (!visible || !targetId || (tables && (!query || listedTable))) return;
     const cached = tableCatalogCache.get(targetId);
-    if (cached && cached.expires > Date.now()) return;
+    if (!tables && cached && cached.expires > Date.now()) return;
     let current = true;
     let pending: ReturnType<typeof operation<Table>> | undefined;
     const timer = window.setTimeout(() => {
@@ -330,18 +367,19 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
       window.clearTimeout(timer);
       void pending?.cancel().catch(() => {});
     };
-  }, [targetId, tables, query, catalogRevision]);
+  }, [targetId, tables, query, listedTable, catalogRevision, visible]);
   useEffect(() => {
     setMetadata(undefined);
     setPreview(undefined);
     setDataError("");
     autoReadKey.current = "";
     setWhere("");
+    setOrderBy("");
     setColumns("*");
     setSelectedColumns([]);
     setFilterField("");
     setFilterValue("");
-    setCarets({ select: 0, where: 0 });
+    setCarets({ select: 0, where: 0, orderBy: 0 });
     setScriptMenu(false);
   }, [targetId]);
   useEffect(() => {
@@ -354,9 +392,9 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
     setScriptPreview(undefined);
     setStatus("");
     setDataError("");
-  }, [key, targetId, schema, table, knownTable]);
+  }, [key]);
   useEffect(() => {
-    if (!targetId || !schema || !table || !knownTable) return;
+    if (!visible || !targetId || !schema || !table || !canReadMetadata) return;
     let current = true;
     let pending: ReturnType<typeof operation<{ columns?: unknown }>> | undefined;
     const timer = window.setTimeout(() => {
@@ -374,7 +412,7 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
       window.clearTimeout(timer);
       void pending?.cancel().catch(() => {});
     };
-  }, [key, targetId, schema, table, knownTable, metadataRevision]);
+  }, [key, targetId, schema, table, canReadMetadata, metadataRevision, visible]);
   useEffect(() => () => {
     const pending = reading.current;
     if (pending) void pending.cancel().catch(() => {});
@@ -443,26 +481,26 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
     const pattern = filterOperator === "LIKE" || filterOperator === "NOT LIKE" ? "%" + value + "%" : value;
     return field + " " + filterOperator + " N'" + pattern + "'";
   };
-  const readDataRequest = async (chosen = name, filters = { where: [where.trim(), generatedWhere()].filter(Boolean).join(" AND "), select: columns || "*" }) => {
+  const readDataRequest = async (chosen = name, filters = { where: [where.trim(), generatedWhere()].filter(Boolean).join(" AND "), select: columns || "*", orderBy: orderBy.trim() }) => {
     if (!chosen || !targetId) return;
     const op = operation<Preview>("table.view", { scope, targetId, ...chosen, ...filters });
     reading.current = op;
     try {
       const result = normalizePreview(await op.promise);
       startPreviewTransition(() => {
-        reportTableChange(chosen);
         setPreview({ key: JSON.stringify([targetId, chosen.schema, chosen.table]), result });
+        reportTableChange(chosen);
         setDataError("");
       });
     }
     finally { if (reading.current === op) reading.current = undefined; }
   };
-  const readData = (chosen = name, filters = { where: [where.trim(), generatedWhere()].filter(Boolean).join(" AND "), select: columns || "*" }) => task.run(() => readDataRequest(chosen, filters));
+  const readData = (chosen = name, filters = { where: [where.trim(), generatedWhere()].filter(Boolean).join(" AND "), select: columns || "*", orderBy: orderBy.trim() }) => task.run(() => readDataRequest(chosen, filters));
   useEffect(() => {
     const chosen = initialTable ? parseTable(initialTable) : undefined;
     if (!visible || !chosen || !knownTable || !targetId || input !== initialTable || preview?.key === key || autoReadKey.current === key) return;
     autoReadKey.current = key;
-    void readData(chosen, { where: "", select: "*" });
+    void readData(chosen, { where: "", select: "*", orderBy: "" });
     // Parent stores the qualified name after the first read.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialTable, input, visible, knownTable, targetId, key]);
@@ -472,13 +510,14 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
     const changing = chosen.schema !== schema || chosen.table !== table;
     if (changing) {
       setWhere("");
+      setOrderBy("");
       setColumns("*");
       setSelectedColumns([]);
       setFilterField("");
       setFilterValue("");
-      setCarets({ select: 0, where: 0 });
+      setCarets({ select: 0, where: 0, orderBy: 0 });
     }
-    void readData(chosen, changing ? { where: "", select: "*" } : undefined);
+    void readData(chosen, changing ? { where: "", select: "*", orderBy: "" } : undefined);
   }
   function captureSqlDataKey() {
     setScriptMenu(false);
@@ -581,9 +620,51 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
       return { saved: true };
     });
   }
+  async function deleteRows(rowIndexes: number[]) {
+    if (readonly || !currentPreview || !currentMetadata || !name || !targetId || !rowIndexes.length) return;
+    const visibleColumns = currentPreview.data.columns;
+    const primary = currentMetadata.filter((column) => column.primaryKey);
+    if (!primary.length || primary.some((column) => !visibleColumns.some((name) => name.toLowerCase() === column.name.toLowerCase()))) {
+      setDataError("Bảng không có đủ khóa chính trong kết quả để xóa dòng.");
+      return;
+    }
+    const confirmed = await new Promise<boolean>((resolve) => setDeleteRequest({
+      count: rowIndexes.length,
+      table: tableIdentity(name),
+      resolve,
+    }));
+    if (!confirmed) return;
+    await task.run(async () => {
+      const rows = rowIndexes.map((rowIndex) => ({
+        rowIndex,
+        mode: "delete",
+        columns: [],
+        values: [],
+        keyColumns: primary.map((column) => column.name),
+        keyValues: primary.map((column) => {
+          const index = visibleColumns.findIndex((name) => name.toLowerCase() === column.name.toLowerCase());
+          return currentPreview.data.rows[rowIndex]?.[index] ?? null;
+        }),
+      }));
+      await request("table.writeBatch", { ...payload, rows });
+      setStatus(`Đã xóa ${rows.length} dòng.`);
+      await readDataRequest();
+    });
+  }
   function selectColumns(names: string[]) {
     setSelectedColumns(names);
     setColumns(names.length ? names.map((name) => "[" + name.replaceAll("]", "]]" ) + "]").join(", ") : "*");
+  }
+  function acceptGoTo(value = goToField) {
+    const search = value.trim().toLowerCase();
+    const found = fieldNames.find((field) => field.toLowerCase() === search)
+      ?? fieldNames.find((field) => field.toLowerCase().startsWith(search));
+    if (!found) {
+      setStatus("Không tìm thấy trường trong kết quả hiện tại.");
+      return;
+    }
+    setGoToRequest({ name: found, sequence: (goToRequest?.sequence ?? 0) + 1 });
+    setGoToOpen(false);
   }
   const view = currentPreview?.data;
   const filterOptions = [
@@ -621,11 +702,14 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
         const next = targets.find((entry) => entry.id === id);
         if (next && next.id !== targetId) onTargetChange(next);
       }} />}
-    {targetId && <IconButton label="Tải lại danh sách bảng" onClick={() => {
-      tableCatalogCache.delete(targetId);
-      setQuickCatalog(undefined);
-      setCatalogRevision((version) => version + 1);
-    }}><RefreshCw size={15} /></IconButton>}
+    {target && <IconButton label={`Sao chép tên database ${target.database}`} onClick={() => {
+      void writeClipboard(target.database)
+        .then(() => setStatus(`Đã sao chép ${target.database}.`))
+        .catch((error: Error) => setStatus(error.message));
+    }}><Copy size={15} /></IconButton>}
+    {targetId && <IconButton label="Tải lại danh sách bảng" onClick={() => invalidateTableCatalog(targetId)}>
+      <RefreshCw size={15} />
+    </IconButton>}
     <div ref={scriptControls} className="relative">
       <Button aria-expanded={scriptMenu} aria-haspopup="menu" disabled={!canRead} onClick={() => setScriptMenu(!scriptMenu)}>Tập lệnh</Button>
       {scriptMenu && <div ref={scriptPopup} className="table-action-menu table-script-menu" role="menu" aria-label="Loại lệnh SQL">
@@ -642,6 +726,13 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
   return (
     <div className="table-inspection flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-hidden p-3"
       onKeyDown={event => {
+        if (visible && !event.defaultPrevented && (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "g") {
+          event.preventDefault();
+          event.stopPropagation();
+          setGoToField("");
+          setGoToOpen(true);
+          return;
+        }
         if (visible && !event.defaultPrevented && (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "s") {
           event.preventDefault();
           saveSlot?.querySelector("button")?.click();
@@ -667,7 +758,7 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
             onSubmit={() => { if (canRead) void readData(); }} />
           <label className="table-readonly"><input type="checkbox" checked={readonly} onChange={(event) => setReadonly(event.target.checked)} /> Readonly</label>
           <div className="table-query-actions">
-            <Button variant="primary" disabled={!canRead} onClick={() => void readData()}>
+            <Button variant="primary" className="table-run-button" disabled={!canRead} onClick={() => void readData()} title="F5">
               <Play size={14} />Chạy
             </Button>
             <span ref={setSaveSlot}>{(!currentPreview?.data || !currentMetadata) && <Button disabled>Lưu</Button>}</span>
@@ -676,18 +767,28 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
             {showQueryCancel && reading.current && <Button onClick={() => void reading.current?.cancel()}>Dừng</Button>}
           </span>
         </div>
-        <SuggestedInput label="WHERE" placeholder="Điều kiện WHERE (không bắt buộc)" value={where} multiline
-          options={clauseSuggestions(where, Math.min(carets.where, where.length), fieldNames, "where")}
-          onCaret={(position) => setCarets((old) => old.where === position ? old : { ...old, where: position })}
-          onChange={setWhere} disabled={false} className="table-query-where" />
+        <div className="table-query-clauses">
+          <SuggestedInput label="WHERE" placeholder="Điều kiện WHERE (không bắt buộc)" value={where} multiline
+            options={clauseSuggestions(where, Math.min(carets.where, where.length), fieldNames, "where")}
+            onCaret={(position) => setCarets((old) => old.where === position ? old : { ...old, where: position })}
+            onChange={setWhere} disabled={false} className="table-query-where" />
+          <SuggestedInput label="ORDER BY" placeholder="Trường sắp xếp, ví dụ: ngay_ct DESC" value={orderBy}
+            options={clauseSuggestions(orderBy, Math.min(carets.orderBy, orderBy.length), fieldNames, "orderBy")}
+            onCaret={(position) => setCarets((old) => old.orderBy === position ? old : { ...old, orderBy: position })}
+            onChange={setOrderBy} disabled={false} className="table-query-order"
+            onSubmit={() => { if (canRead) void readData(); }} />
+        </div>
       </div>
       <TableToolbarPortal slotId={toolbarSlotId}>{toolbarControls}</TableToolbarPortal>
-      {targetId && (!tables || !names.length) && <p className={catalogError ? "form-error" : "muted"} role={catalogError ? "alert" : "status"}>
-        {catalogError || (tables ? "Không tìm thấy bảng phù hợp." : "Đang tải danh sách bảng…")}
+      {targetId && !names.length && <p className="muted" role="status">
+        {tables ? "Không tìm thấy bảng phù hợp." : catalogError ? "Danh sách bảng chưa có dữ liệu." : "Đang tải danh sách bảng…"}
       </p>}
-      {task.error && <p className="form-error" role="alert">{task.error}</p>}
-      {dataError && <p className="form-error" role="alert">{dataError}</p>}
-      {status && <span className="muted" role="status">{status}</span>}
+      {visible && <WorkbenchNotice error={task.error || dataError || catalogError} status={status} onClose={() => {
+        task.clearError();
+        setDataError("");
+        setCatalogError("");
+        setStatus("");
+      }} />}
       <div className="table-inspection-body">
         <aside className="table-column-panel" aria-label="Các trường của bảng">
           <div className="table-column-panel-heading">
@@ -726,7 +827,9 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
         <section className="table-inspection-content">
           {currentPreview?.data && currentMetadata ? <TableDataGrid
             saveSlot={saveSlot}
+            focusColumn={goToRequest}
             table={currentPreview.data} metadata={currentMetadata} readonly={readonly} busy={task.busy || previewPending} onCommit={commitRows}
+            onDelete={deleteRows}
             emptyMessage={filterField && (filterOperator === "IS NULL" || filterOperator === "IS NOT NULL" || filterValue.trim())
               ? "Không tìm thấy dữ liệu phù hợp."
               : undefined} />
@@ -789,6 +892,18 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
             setScriptPreview({ title: "SQL · " + (scriptActionLabels[action] ?? action), script });
           });
         }} />}
+      {goToOpen && <Modal title="Đi đến trường" onClose={() => setGoToOpen(false)} className="table-goto-modal">
+        <div className="tool-body">
+          <SuggestedInput label="Tên trường" placeholder="Nhập hoặc chọn trường…" value={goToField} autoFocus disabled={!fieldNames.length}
+            options={fieldNames.filter((field) => field.toLowerCase().includes(goToField.trim().toLowerCase()))
+              .slice(0, 40).map((field) => ({ label: field, value: field }))}
+            onChange={setGoToField} onChoose={(value) => { setGoToField(value); acceptGoTo(value); }} onSubmit={() => acceptGoTo()} />
+          <div className="flex justify-end gap-2">
+            <Button onClick={() => setGoToOpen(false)}>Hủy</Button>
+            <Button variant="primary" disabled={!goToField.trim()} onClick={() => acceptGoTo()}>Nhận</Button>
+          </div>
+        </div>
+      </Modal>}
       {drop && (
         <Modal title="Xóa cột khỏi bảng" onClose={() => { if (!task.busy) setDrop(undefined); }}>
           <div className="tool-body">
@@ -809,11 +924,36 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
           </div>
         </Modal>
       )}
+      {deleteRequest && <Modal title="Xóa dữ liệu" className="table-delete-modal" onClose={() => {
+        const pending = deleteRequest;
+        setDeleteRequest(undefined);
+        pending.resolve(false);
+      }}>
+        <div className="tool-body">
+          <div className="table-delete-message">
+            <CircleAlert size={20} aria-hidden />
+            <div><strong>Xóa {deleteRequest.count} dòng khỏi {deleteRequest.table}?</strong>
+              <p>Dữ liệu đã xóa không thể khôi phục bằng thao tác hoàn tác.</p></div>
+          </div>
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button onClick={() => {
+              const pending = deleteRequest;
+              setDeleteRequest(undefined);
+              pending.resolve(false);
+            }}>Hủy</Button>
+            <Button className="table-drop-action" onClick={() => {
+              const pending = deleteRequest;
+              setDeleteRequest(undefined);
+              pending.resolve(true);
+            }}>Xóa dữ liệu</Button>
+          </div>
+        </div>
+      </Modal>}
     </div>
   );
 }
 
-type TableToolErrorBoundaryProps = { children: ReactNode };
+type TableToolErrorBoundaryProps = { children: ReactNode; resetKey?: string };
 type TableToolErrorBoundaryState = { error?: Error };
 
 export class TableToolErrorBoundary extends Component<TableToolErrorBoundaryProps, TableToolErrorBoundaryState> {
@@ -825,6 +965,10 @@ export class TableToolErrorBoundary extends Component<TableToolErrorBoundaryProp
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error("TableTool render failed", error, info);
+  }
+
+  componentDidUpdate(previous: TableToolErrorBoundaryProps) {
+    if (this.state.error && previous.resetKey !== this.props.resetKey) this.setState({ error: undefined });
   }
 
   render() {

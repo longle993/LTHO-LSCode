@@ -6,7 +6,7 @@ import TsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker"
 import HtmlWorker from "monaco-editor/esm/vs/language/html/html.worker?worker";
 import CssWorker from "monaco-editor/esm/vs/language/css/css.worker?worker";
 import { request } from "./bridge";
-import type { DocumentInfo, Target } from "./bridge";
+import type { DocumentInfo, Snippet, Target } from "./bridge";
 import { xmlLanguage } from "./xmlLanguage";
 
 type XmlProblem = { line: number; column: number; message: string };
@@ -51,6 +51,10 @@ const editorLanguage = (name: string) => {
 };
 const viewStates = new Map<string, monaco.editor.ICodeEditorViewState>();
 const modelSources = new Map<string, { path: string | null; initialVersion: number; validate: () => void }>();
+let userSqlSnippets: Snippet[] = [];
+export function setEditorSnippets(snippets: Snippet[]) {
+  userSqlSnippets = snippets.filter((snippet) => snippet.key.trim().startsWith("/") && snippet.body.length > 0);
+}
 export function xmlIncludeBuffers() {
   return Object.fromEntries(monaco.editor.getModels().flatMap((model) => {
     const source = modelSources.get(model.uri.toString());
@@ -158,24 +162,12 @@ export function markSqlErrors(
   );
 }
 const targetByModel = new Map<string, Target | undefined>();
-const fastSessionVariables = [
-  ["@@id", "Mã chứng từ (ví dụ PND)"],
-  ["@@unit", "Mã đơn vị hiện tại"],
-  ["@@userID", "ID người dùng"],
-  ["@@admin", "1 = admin, 0 = user"],
-  ["@@language", "Ngôn ngữ V hoặc E"],
-  ["@@action", "Thao tác New, Edit hoặc View"],
-  ["@@master", "Tên bảng master (cXX$000000)"],
-  ["@@prime$partition$current", "Bảng master kỳ hiện tại (ví dụ m74$202601)"],
-  ["@@prime$partition$previous", "Bảng master kỳ trước"],
-  ["@@inquiry$partition$current", "Bảng inquiry kỳ hiện tại"],
-  ["@@partition", "Thông tin partition"],
-  ["@@expression", "Biểu thức partition"],
-  ["@@sysDatabaseName", "Tên DB hệ thống"],
-];
+type CompletionSnippet = { key: string; body: string; description: string };
+let completionSnippets: Promise<CompletionSnippet[]> | undefined;
+const sqlCompletionSnippets = () => completionSnippets ??= request<CompletionSnippet[]>("snippet.completions", { language: "sql" });
 monaco.languages.registerCompletionItemProvider(xmlLanguage, {
   triggerCharacters: ["@"],
-  provideCompletionItems(model, position) {
+  async provideCompletionItems(model, position) {
     const line = model.getLineContent(position.lineNumber);
     const before = line.slice(0, position.column - 1);
     const prefix = before.match(/(?<![\w@#$])@@[\w$]*$/);
@@ -189,11 +181,12 @@ monaco.languages.registerCompletionItemProvider(xmlLanguage, {
       ?.reverse().find((candidate) => candidate.offset <= start);
     if (token?.language !== "sql" || !/^(identifier|predefined)\.sql$/.test(token.type)) return;
     const suffix = line.slice(position.column - 1).match(/^[\w$]*/)?.[0] ?? "";
+    const snippets = await sqlCompletionSnippets();
     return {
-      suggestions: fastSessionVariables.map(([label, detail]) => ({
-        label,
-        detail,
-        insertText: label,
+      suggestions: snippets.filter((snippet) => snippet.key.startsWith("@@") && !snippet.body.includes("{{")).map((snippet) => ({
+        label: snippet.key,
+        detail: snippet.description || "Biến session FAST",
+        insertText: snippet.body,
         kind: monaco.languages.CompletionItemKind.Variable,
         range: {
           startLineNumber: position.lineNumber, endLineNumber: position.lineNumber,
@@ -204,15 +197,45 @@ monaco.languages.registerCompletionItemProvider(xmlLanguage, {
   },
 });
 monaco.languages.registerCompletionItemProvider("sql", {
-  triggerCharacters: ["."],
+  triggerCharacters: [".", "/", "@", "#"],
   provideCompletionItems: async (model, position, _, token) => {
+    const beforeLine = model.getLineContent(position.lineNumber).slice(0, position.column - 1);
+    const quickKey = beforeLine.match(/(?:^|[\s(,;])(?<key>\/[^\s(,;]*)$/u)?.groups?.key;
+    if (quickKey) {
+      const startColumn = position.column - quickKey.length;
+      const search = quickKey.toLowerCase();
+      return {
+        suggestions: userSqlSnippets
+          .filter((snippet) => snippet.key.toLowerCase().startsWith(search))
+          .map((snippet, index) => ({
+            label: snippet.key,
+            filterText: snippet.key,
+            sortText: String(index).padStart(4, "0"),
+            insertText: userSqlSnippet(snippet),
+            insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+            detail: snippet.description || snippet.category || "Snippet người dùng",
+            documentation: { value: `**${snippet.key}**\n\n${snippet.body}` },
+            kind: monaco.languages.CompletionItemKind.Snippet,
+            range: {
+              startLineNumber: position.lineNumber,
+              endLineNumber: position.lineNumber,
+              startColumn,
+              endColumn: position.column,
+            },
+          })),
+      };
+    }
     const target = targetByModel.get(model.uri.toString());
     const word = model.getWordUntilPosition(position);
+    const localPrefix = beforeLine.match(/(?<![\p{L}\p{N}_@$#])(?:@{1,2}|#{1,2})[\p{L}\p{N}_$]*$/u)?.[0];
+    const localSuffix = localPrefix
+      ? model.getLineContent(position.lineNumber).slice(position.column - 1).match(/^[\p{L}\p{N}_$]*/u)?.[0] ?? ""
+      : "";
     const range = {
       startLineNumber: position.lineNumber,
       endLineNumber: position.lineNumber,
-      startColumn: word.startColumn,
-      endColumn: word.endColumn,
+      startColumn: localPrefix ? position.column - localPrefix.length : word.startColumn,
+      endColumn: localPrefix ? position.column + localSuffix.length : word.endColumn,
     };
     try {
       const values = await request<
@@ -223,7 +246,7 @@ monaco.languages.registerCompletionItemProvider("sql", {
           isSnippet: boolean;
         }[]
       >("sql.complete", {
-        targetId: target?.id,
+        targetId: localPrefix ? undefined : target?.id,
         text: model.getValue(),
         beforeCaret: model.getValueInRange({
           startLineNumber: 1,
@@ -263,6 +286,12 @@ function sqlSnippet(body: string) {
     /\{\{(?:[-|]|\d+)(?:-([^}]*))?\}\}/g,
     (_, label) => "${" + ++n + ":" + (label ?? "") + "}",
   );
+}
+function userSqlSnippet(snippet: Snippet) {
+  const position = Math.max(0, Math.min(snippet.position, snippet.body.length));
+  const marker = "\u0000LSCODE_CURSOR\u0000";
+  return sqlSnippet(snippet.body.slice(0, position) + marker + snippet.body.slice(position))
+    .replace(marker, "$0");
 }
 for (const lang of ["javascript", xmlLanguage, "html"])
   monaco.languages.registerCompletionItemProvider(lang, {

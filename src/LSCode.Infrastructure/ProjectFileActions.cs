@@ -51,8 +51,16 @@ internal static class ProjectFileActions
     }
 
     internal static void RemoveHistory(LegacyProject project, string path) =>
-        WriteHistory(project, ReadHistory(project).Where(file =>
-            !file.Equals(path, StringComparison.OrdinalIgnoreCase)));
+        RemoveHistory(project, [path]);
+
+    internal static void RemoveHistory(LegacyProject project, IEnumerable<string> paths)
+    {
+        var removed = paths.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (removed.Count == 0) return;
+        var files = ReadHistory(project);
+        var remaining = files.Where(file => !removed.Contains(file)).ToArray();
+        if (remaining.Length != files.Length) WriteHistory(project, remaining);
+    }
 
     private static void WriteHistory(LegacyProject project, IEnumerable<string> files)
     {
@@ -78,8 +86,7 @@ internal static class ProjectFileActions
     internal static async Task<string> RefreshConfigAsync(LegacyProject project, CancellationToken ct)
     {
         var root = Root(project);
-        var configured = project.Field("WebConfigPath");
-        var path = Path.GetFullPath(string.IsNullOrWhiteSpace(configured) ? "web.config" : configured, root);
+        var path = Path.Combine(root, "web.config");
         if (!IsInside(root, path) || !Path.GetFileName(path).Equals("web.config", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("web.config phải nằm trong thư mục dự án.");
         EnsureOrdinaryPath(root, path);

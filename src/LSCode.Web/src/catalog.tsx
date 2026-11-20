@@ -1,9 +1,10 @@
 import { readClipboard, writeClipboard } from "./bridge";
 import { useState, useEffect } from "react";
-import { Button, Select, DataGrid, IconButton } from "./ui";
+import { Button, ConfirmDialog, Select, DataGrid, IconButton, WorkbenchNotice } from "./ui";
 import { Plus, Trash2 } from "lucide-react";
 import { request } from "./bridge";
 import type { Target, Table } from "./bridge";
+import { invalidateTableCatalog } from "./features/TableTool";
 type Field = {
   originalName?: string;
   name: string;
@@ -103,6 +104,7 @@ export function CatalogTool({
   const [advanced, setAdvanced] = useState(-1),
     [references, setReferences] = useState<Table>(),
     [source, setSource] = useState<{ schema: string; table: string }>();
+  const [confirmation, setConfirmation] = useState<{ message: string; action: () => void }>();
   const dirty = fields.length > 0 || rows.length > 0;
   useEffect(() => {
     onDirtyChange?.(dirty);
@@ -120,6 +122,10 @@ export function CatalogTool({
     } finally {
       setBusy(false);
     }
+  }
+  function guardDraft(message: string, action: () => void) {
+    if (!dirty) action();
+    else setConfirmation({ message, action });
   }
   function update(i: number, patch: Partial<Field>) {
     setFields((old) => old.map((f, k) => (i === k ? { ...f, ...patch } : f)));
@@ -334,7 +340,7 @@ export function CatalogTool({
     setPreview(undefined);
     setNotice("Đã dán vào bản nháp, chưa ghi database.");
   }
-  return (
+  return <>
     <fieldset className="tool-body large catalog-fieldset" disabled={busy}>
       <p className="muted">
         {target
@@ -363,19 +369,14 @@ export function CatalogTool({
         />
         <Button
           disabled={!target || !table || busy}
-          onClick={() =>
-            void run(async () => {
-              if (!dirty || window.confirm("Bỏ bản nháp và mở bảng?"))
-                await load();
-            })
-          }
+          onClick={() => guardDraft("Bỏ bản nháp hiện tại và mở cấu trúc của bảng đã nhập?",
+            () => void run(async () => { await load(); }))}
         >
           Mở bảng
         </Button>
         <Button
           disabled={busy}
-          onClick={() => {
-            if (!dirty || window.confirm("Bỏ bản nháp?")) {
+          onClick={() => guardDraft("Bỏ bản nháp hiện tại và bắt đầu một bảng mới?", () => {
               setCreating(true);
               setFields([]);
               setRows([]);
@@ -385,17 +386,14 @@ export function CatalogTool({
               setPreview(undefined);
               setTable("");
               setSource(undefined);
-            }
-          }}
+          })}
         >
           Bảng mới
         </Button>
         <Button
           disabled={!target || !table || busy}
-          onClick={() =>
+          onClick={() => guardDraft("Bỏ bản nháp hiện tại để nhân bản cấu trúc bảng đã nhập?", () =>
             void run(async () => {
-              if (dirty && !window.confirm("Bỏ bản nháp để nhân bản cấu trúc?"))
-                return;
               const f = await request<Field[]>("catalog.duplicate", {
                 targetId: target?.id,
                 schema,
@@ -411,8 +409,7 @@ export function CatalogTool({
               setTable(table + "_copy");
               setPreview(undefined);
               setNotice("Đã tạo bản nháp cấu trúc, chưa ghi database.");
-            })
-          }
+            }))}
         >
           Nhân bản cấu trúc
         </Button>
@@ -444,13 +441,14 @@ export function CatalogTool({
           disabled={!preview || busy}
           onClick={() =>
             void run(async () => {
-              if (!preview) return;
+              if (!preview || !target) return;
               const token = preview.previewId;
               setPreview(undefined);
               await request("catalog.commit", {
-                targetId: target?.id,
+                targetId: target.id,
                 previewId: token,
               });
+              invalidateTableCatalog(target.id);
               setNotice("Đã lưu.");
               await load();
             })
@@ -733,12 +731,15 @@ export function CatalogTool({
           }
         />
       )}
-      <p className="form-error" role="alert">
-        {error}
-      </p>
-      {notice && <p className="muted">{notice}</p>}
     </fieldset>
-  );
+    <WorkbenchNotice error={error} status={notice} onClose={() => { setError(""); setNotice(""); }} />
+    {confirmation && <ConfirmDialog title="Bỏ bản nháp?" message={confirmation.message} confirmLabel="Bỏ thay đổi" danger
+      onClose={() => setConfirmation(undefined)} onConfirm={() => {
+        const action = confirmation.action;
+        setConfirmation(undefined);
+        action();
+      }} />}
+  </>;
 }
 function FieldAdvanced({
   field,

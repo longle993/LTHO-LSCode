@@ -1,5 +1,20 @@
 # Tạo danh mục — thiết kế bảng và nhập dữ liệu
 
+## Sinh source ERP trong WebView — 19/11/2026
+
+Lệnh **Tạo danh mục** có hai chế độ: **Sinh source ERP** và **Thiết kế bảng SQL**. Trong cây Chức năng Web, chuột phải một menu rồi chọn **Dùng làm mẫu tạo danh mục** để điền sẵn Main hoặc SysId của mẫu.
+
+1. Nhập Main, page ID hoặc SysId và chọn **Đọc mẫu**. LSCode dùng bộ dò controller của Menu ERP để tìm Main, Grid, Dir, Filter và các controller Grid detail được tham chiếu. Mẫu cần một controller chính và ít nhất một Grid.
+2. Nhập controller mới, tên Việt/Anh nếu cần và ánh xạ bảng/cột. Tên bảng mới giữ dạng tên trần hoặc `schema.bảng` theo khai báo gốc. Ô bảng để trống dùng tên gốc. Ánh xạ cột nhập mỗi dòng theo dạng `ma_cu = ma_moi`. Các nhãn `v/e` có sẵn trong thẻ `title` của controller chính có thể được thay khi sinh file.
+3. Chọn **Xem trước** và kiểm tra từng file. Tên Main và controller chính dùng ID mới. Controller detail được đặt tên với tiền tố controller mới và cập nhật tham chiếu giữa các file.
+4. Chọn **Xuất source**, rồi chọn thư mục cha. LSCode tạo thư mục con theo controller mới, giữ đường dẫn tương đối, encoding và BOM. File mẫu và database không bị sửa. Nếu thư mục đầu ra tồn tại hoặc file mẫu đã đổi sau preview, thao tác dừng.
+
+Ví dụ fixture dùng `Main/mau.aspx`, controller mới `CatalogDemo`, bảng mẫu `catalog_sample` và đích `catalog_demo`. Gói giữ các include dùng chung của dự án theo tham chiếu trong template. Cần kiểm tra nội dung và chạy thử trên môi trường ERP trước khi đưa gói vào source chạy thật. Với dự án dùng PageMetadata, đăng ký page/menu riêng khi triển khai.
+
+Phạm vi triển khai này là sinh source từ mẫu có sẵn. Các bước độc lập của Fcode như chọn cột tự động từ schema, thiết kế bố cục Grid/Dir/Filter, tự sinh Import và đăng ký menu được ghi thành phần mở rộng trong [kế hoạch](../../PLAN.md).
+
+Kiểm chứng 19/11/2026: build WebView, 166 kiểm tra .NET có SQL Server cục bộ, luồng đọc mẫu/xem trước/xuất qua fixture Chrome và 12 kiểm tra khởi chạy WebView2 trên bản Windows x64. Gói sinh đã được kiểm tra bằng fixture, chưa triển khai trên runtime ERP thật. Bản chạy nằm tại `artifacts/publish-webview-tao-danh-muc/LSCode.WebView.exe`.
+
 Yêu cầu thao tác bổ sung 05/11/2026: nhấn một lần vào ô được phép sửa để nhập liệu/chọn kiểu hoặc tick checkbox, không cần nhấn đúp. Các trường chỉ đọc và trường hệ thống vẫn khóa; thao tác sửa ô không tự lưu hay thực thi SQL. Xem [kế hoạch tinh chỉnh UI](../history/UI-DENSITY-AND-EDITOR.vi.md).
 
 Trạng thái: **đã bổ sung duplicate template và copy/paste nhiều dòng trong source**, dựa trên màn danh mục từ commit `13967fb`. Đã kiểm tra WPF ba theme và tích hợp SQL Server cục bộ bằng database thử nghiệm riêng; phạm vi kiểm chứng và giới hạn ở mục 12. Cập nhật ngày 05/11/2026.
@@ -293,3 +308,48 @@ Start-Process -FilePath .\src\LSCode.Shell\bin\Release\net10.0-windows\LSCode.ex
 Báo cáo `catalog-transfer-result.txt` và ảnh PNG được ghi trong `LSCODE_DATA_HOME`. Chạy smoke cần phiên Windows có WPF; không thay bằng probe trình duyệt. Sau khi thử xong có thể bỏ biến `LSCODE_CATALOG_LOCAL_SQL_TEST` khỏi session.
 
 Giới hạn có chủ ý: chỉ nhân bản trong cùng database; không kèm bản ghi, index phụ, trigger, quyền hoặc thuộc tính mở rộng tùy biến. DEFAULT biểu thức như GETDATE()/NEWID(), CHECK tùy biến, computed, UDT, khóa ngoại ghép/cascade và các thuộc tính nguồn chưa biểu diễn được đầy đủ sẽ chặn nhân bản với thông báo, không âm thầm bỏ. Các kiểu dữ liệu ngoài danh sách hỗ trợ được xem chỉ đọc. Kiểm tra khóa trùng cục bộ không thay thế ràng buộc/collation của SQL Server tại thời điểm Lưu. Cần nghiệm thu thêm trên schema ERP thật và quyền tài khoản thực tế.
+
+## Tạo từ mô tả
+
+Bấm **Sao chép prompt cho AI**, thay dòng `[Dán nội dung yêu cầu tại đây]` bằng yêu cầu nghiệp vụ rồi gửi cho AI. Dán văn bản AI trả về vào ô **Mô tả danh mục** và bấm **Tách trường**.
+
+Dán mô tả tiếng Việt theo một template ổn định. Dòng đầu là tên danh mục/bảng nghiệp vụ; mỗi dòng sau có dạng `Tên trường: kiểu, ràng buộc, mô tả`. LSCode đề xuất tên cột, kiểu dữ liệu, kích thước, mặc định, khóa chính và bắt buộc. Người dùng phải kiểm tra và có thể sửa mọi ô trước khi xem trước.
+
+Quy tắc mặc định:
+
+| Khai báo hoặc tên trường | Kiểu đề xuất |
+| --- | --- |
+| Trường bắt đầu bằng `Mã` | `char(16)` |
+| `kiểu chuỗi` khác | `nvarchar(128)` |
+| `kiểu số` hoặc `số nguyên` | `int` |
+| `kiểu số thập phân`, tiền, hệ số, phần trăm | `numeric(19,5)` |
+| `Trạng thái` | `char(1)`, mặc định `1`, bắt buộc |
+| `Hiệu lực từ kỳ/năm` | Hai trường `ky_hl int` và `nam_hl int` |
+
+`khóa chính` tự bật cả Khóa chính và Bắt buộc. `bắt buộc nhập` chỉ bật Bắt buộc. Kiểu dữ liệu được hiển thị bằng dropdown LSCode và khi đổi kiểu, kích thước chuyển về mặc định tương ứng để tránh giữ tham số không hợp lệ của kiểu cũ.
+
+Chọn mẫu danh mục ERP đang hoạt động và ánh xạ các cột mẫu sang cột đã duyệt. Xem trước SQL, nội dung các file và mã menu. Thao tác tạo yêu cầu kết nối App và Sys cùng máy chủ SQL để ghi bảng và menu trong một transaction. Source dùng mẫu ASPX hiện hữu và được ghi bằng thao tác không ghi đè.
+
+### Ví dụ kiểm tra
+
+Dán một tiêu đề theo sau bởi danh sách trường.
+
+```text
+Danh mục điểm đánh giá theo hệ số
+Hiệu lực từ kỳ/năm: kiểu số, khoá chính
+Mã điểm: kiểu chuỗi, khoá chính
+Tên điểm: kiểu chuỗi, bắt buộc nhập
+Tên khác: kiểu chuỗi
+Hệ số đánh giá (%): kiểu số thập phân
+Trạng thái: 1-Còn sử dụng, 0-Không còn sử dụng
+```
+
+Bản đề xuất có bảy trường: `ky_hl`, `nam_hl`, `ma_diem`, `ten_diem`, `ten_diem2`, `he_so_danh_gia`, `status`; ba trường đầu là khóa theo template trên. Chọn menu cha từ danh mục ERP hoặc để Menu gốc. Với mẫu chứa các cột tên khác với thiết kế, nhập ánh xạ mỗi dòng một cặp. Đối chiếu các file Dir và Grid trong phần xem trước để xác nhận mẫu đã có trường và quy tắc nhập cần thiết. Các danh sách chọn và quy tắc nhập trên giao diện ERP lấy từ mẫu.
+
+### Bố cục và trạng thái
+
+- Thanh **Tạo từ mô tả / Sinh source ERP / Thiết kế bảng SQL** nằm cố định dưới tiêu đề modal.
+- Chỉ vùng nội dung giữa cuộn; bảng duyệt cao 300 px, header dính và có cuộn ngang/dọc riêng.
+- Thanh **Xem trước / Tạo danh mục** và **Xem trước / Xuất source** cố định ở đáy.
+- Trạng thái và lỗi dùng toast nổi có thể đóng. Xác nhận bỏ bản nháp dùng dialog LSCode. Không gọi alert/confirm hoặc select hệ thống trong luồng này.
+- Kiểm chứng ngày 19/11/2026: TypeScript typecheck, Vite production build và Chrome fixture đạt ở desktop/375 px; đã kiểm tra quy tắc 7 trường, kiểu mặc định, dropdown top-layer, thanh cố định và không tràn viewport. Chưa tạo bảng/menu trên database ERP khách hàng thật trong lượt kiểm chứng này.

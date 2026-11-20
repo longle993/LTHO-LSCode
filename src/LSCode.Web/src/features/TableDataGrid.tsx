@@ -36,7 +36,9 @@ export function TableDataGrid({
   readonly,
   busy,
   onCommit,
+  onDelete,
   saveSlot,
+  focusColumn,
   emptyMessage = "Chưa có dữ liệu. Nhập ở dòng * rồi bấm Lưu để thêm.",
 }: {
   table: Table;
@@ -44,7 +46,9 @@ export function TableDataGrid({
   readonly: boolean;
   busy: boolean;
   onCommit: (rows: [number, (string | null)[]][]) => Promise<{ saved: true } | { saved: false; row: number } | undefined>;
+  onDelete: (rows: number[]) => Promise<void>;
   saveSlot: HTMLSpanElement | null;
+  focusColumn?: { name: string; sequence: number };
   emptyMessage?: string;
 }) {
   const [drafts, setDrafts] = useState<Record<string, (string | null)[]>>({});
@@ -84,6 +88,17 @@ export function TableDataGrid({
   const safeMetadata = Array.isArray(metadata) ? metadata : [];
   const columns = safeColumns.map((name) => safeMetadata.find((column) =>
     column.name.toLowerCase() === name.toLowerCase()));
+  useEffect(() => {
+    if (!focusColumn || !safeRows.length) return;
+    const column = safeColumns.findIndex((name) => name.toLowerCase() === focusColumn.name.toLowerCase());
+    if (column < 0) return;
+    setSelection((current) => {
+      const row = Math.max(0, Math.min(safeRows.length - 1,
+        current?.kind === "column" ? 0 : current?.endRow ?? 0));
+      return { row, column, endRow: row, endColumn: column, kind: "cell" };
+    });
+    requestAnimationFrame(() => grid.current?.focus({ preventScroll: true }));
+  }, [focusColumn?.sequence]);
   const keyVisible = safeMetadata.filter((column) => column.primaryKey)
     .every((column) => safeColumns.some((name) => name.toLowerCase() === column.name.toLowerCase()));
   const canUpdate = keyVisible && safeMetadata.some((column) => column.primaryKey);
@@ -210,7 +225,7 @@ export function TableDataGrid({
         </tbody>, [table, metadata, readonly, busy, drafts, editing, editStart, conflict]);
   return (
     <div ref={grid} id={gridId} className="table-data-grid data-grid data-grid-range" tabIndex={0}
-      aria-label="Dữ liệu bảng · Chọn ô và dùng phím mũi tên để di chuyển, nhấp đúp để sửa, Ctrl+C sao chép"
+      aria-label="Dữ liệu bảng · Chọn ô và dùng phím mũi tên để di chuyển, nhấp đúp để sửa, Ctrl+C sao chép, F8 xóa dòng"
       aria-busy={busy} data-loading={showLoading ? "true" : undefined}
       onPointerUp={() => { dragging.current = false; }}
       onPointerCancel={() => { dragging.current = false; }}
@@ -221,7 +236,12 @@ export function TableDataGrid({
           return;
         }
         if (event.target instanceof HTMLInputElement) return;
-        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c" && selection) {
+        if (event.key === "F8" && selection && safeRows.length) {
+          event.preventDefault();
+          const first = selection.kind === "column" ? 0 : Math.min(selection.row, selection.endRow);
+          const last = selection.kind === "column" ? safeRows.length - 1 : Math.max(selection.row, selection.endRow);
+          void onDelete(Array.from({ length: last - first + 1 }, (_, index) => first + index));
+        } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c" && selection) {
           event.preventDefault();
           void copySelection();
         } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a" && safeRows.length && safeColumns.length) {
@@ -230,6 +250,11 @@ export function TableDataGrid({
         } else if (event.key === "F2" && selection?.kind === "cell") {
           event.preventDefault();
           beginEdit(selection.endRow, selection.endColumn);
+        } else if (selection && (event.key === "Home" || event.key === "End") && safeColumns.length && safeRows.length) {
+          event.preventDefault();
+          const row = Math.max(0, Math.min(safeRows.length - 1, selection.kind === "column" ? 0 : selection.endRow));
+          const column = event.key === "Home" ? 0 : safeColumns.length - 1;
+          setSelection({ row, column, endRow: row, endColumn: column, kind: "cell" });
         } else if (selection?.kind === "cell" && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Tab"].includes(event.key)) {
           event.preventDefault();
           const rowDelta = event.key === "ArrowUp" ? -1 : event.key === "ArrowDown" ? 1 : 0;

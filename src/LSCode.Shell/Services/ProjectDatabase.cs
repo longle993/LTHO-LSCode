@@ -1,5 +1,6 @@
 ﻿using System.Data;
 using System.IO;
+using System.Collections.Concurrent;
 using LSCode.Core;
 using Microsoft.Data.SqlClient;
 
@@ -7,6 +8,12 @@ namespace LSCode.Shell.Services;
 
 public static class ProjectDatabase
 {
+    private sealed record CommandCacheEntry(DateTimeOffset ExpiresAt, List<CommandNode> Nodes);
+    private static readonly ConcurrentDictionary<string, CommandCacheEntry> CommandCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> CommandLocks = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly TimeSpan CommandCacheLifetime = TimeSpan.FromMinutes(5);
+    private const int CommandCacheLimit = 8;
+
     public static async Task<IReadOnlyList<SqlTarget>> ConfiguredTargetsAsync(LegacyProject project)
     {
         var connections = await ReadProjectConnectionsAsync(project);
@@ -21,7 +28,10 @@ public static class ProjectDatabase
 
     private static async Task<IReadOnlyList<ProjectDiscovery.ConfiguredConnection>> ReadProjectConnectionsAsync(LegacyProject project)
     {
-        var path = project.Field("WebConfigPath");
+        var source = project.SourcePath.Trim();
+        var path = string.IsNullOrWhiteSpace(source)
+            ? project.Field("WebConfigPath")
+            : Path.Combine(source, "web.config");
         var app = project.Field("AppConnectionString");
         var sys = project.Field("SysConnectionString");
         if (!string.IsNullOrWhiteSpace(path))
@@ -154,22 +164,55 @@ public static class ProjectDatabase
 
     public sealed record EmployeeFunctionTab(string SysId, string Caption);
 
-    public static async Task<List<CommandNode>> CommandsAsync(SqlTarget target, CancellationToken token, string? appDatabase = null)
+    public static async Task<List<CommandNode>> CommandsAsync(SqlTarget target, CancellationToken token, string? appDatabase = null,
+        string kind = "web", bool refresh = false, string context = "")
     {
+        kind = kind.Equals("mobile", StringComparison.OrdinalIgnoreCase) ? "mobile" : "web";
         appDatabase ??= System.Text.RegularExpressions.Regex.Replace(target.Database, @"_(?:Sys|S)$", "_A", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-        if (string.IsNullOrWhiteSpace(appDatabase) || appDatabase.Equals(target.Database, StringComparison.OrdinalIgnoreCase))
+        if (kind == "web" && (string.IsNullOrWhiteSpace(appDatabase) || appDatabase.Equals(target.Database, StringComparison.OrdinalIgnoreCase)))
             throw new InvalidOperationException("App database must be configured for menu loading.");
-        var columns = await ReadAsync(target, "SELECT name FROM sys.columns WHERE object_id=OBJECT_ID('dbo.wcommand')", token);
-        var names = columns.Rows.Cast<DataRow>().Select(r => Convert.ToString(r[0])!).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var cacheKey = CommandCacheKey(target, appDatabase, kind, context);
+        if (!refresh && TryGetCommands(cacheKey, out var cached)) return cached;
+
+        var gate = CommandLocks.GetOrAdd(cacheKey, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(token).ConfigureAwait(false);
+        try
+        {
+            if (!refresh && TryGetCommands(cacheKey, out cached)) return cached;
+            var loaded = kind == "mobile"
+                ? await MobileCommandsAsync(target, token).ConfigureAwait(false)
+                : await WebCommandsAsync(target, appDatabase!, token).ConfigureAwait(false);
+            CommandCache[cacheKey] = new(DateTimeOffset.UtcNow.Add(CommandCacheLifetime), CloneCommands(loaded));
+            TrimCommandCache();
+            return loaded;
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    public static void InvalidateCommands(SqlTarget target)
+    {
+        var prefix = target.Server.Trim().ToUpperInvariant() + "|" + target.Database.Trim().ToUpperInvariant() + "|";
+        foreach (var key in CommandCache.Keys.Where(key => key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
+            CommandCache.TryRemove(key, out _);
+    }
+
+    private static async Task<List<CommandNode>> WebCommandsAsync(SqlTarget target, string appDatabase, CancellationToken token)
+    {
+        using var connection = new SqlConnection(target.ConnectionString);
+        await connection.OpenAsync(token).ConfigureAwait(false);
+        using var columnsCommand = new SqlCommand("SELECT name FROM sys.columns WHERE object_id=OBJECT_ID('dbo.wcommand')", connection) { CommandTimeout = 0 };
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        using (var columnsReader = await columnsCommand.ExecuteReaderAsync(token).ConfigureAwait(false))
+            while (await columnsReader.ReadAsync(token).ConfigureAwait(false)) names.Add(columnsReader.GetString(0));
         foreach (var required in new[] { "wmenu_id", "wmenu_id0", "bar" })
             if (!names.Contains(required)) throw new InvalidOperationException("wcommand missing required column: " + required);
         string Column(string name) => names.Contains(name) ? "a." + Quote(name) : "CAST('' AS nvarchar(4000))";
-        var projection = "a.wmenu_id AS menu_id,a.wmenu_id0 AS menu_id0,RTRIM(a.bar) AS bar," + Column("link") + " AS link,CASE WHEN " + Column("icon") + "='' THEN " + Column("icon_url") + " ELSE '' END AS icon_url," + Column("icon") + " AS icon," + Column("status") + " AS status,RTRIM(" + Column("target") + ") AS target";
+        var commandId = names.Contains("menu_id") ? Column("menu_id") : "a.wmenu_id";
+        var projection = "a.wmenu_id AS menu_id,a.wmenu_id0 AS menu_id0,RTRIM(a.bar) AS bar," + Column("link") + " AS link,CASE WHEN " + Column("icon") + "='' THEN " + Column("icon_url") + " ELSE '' END AS icon_url," + Column("icon") + " AS icon," + Column("status") + " AS status,RTRIM(" + Column("target") + ") AS target," + commandId + " AS command_id," + Column("sysid") + " AS sysid";
         var app = Quote(appDatabase);
-        var commandId = names.Contains("menu_id") ? "a.menu_id" : "a.wmenu_id";
-        var metadata = await ReadAsync(target, "SELECT a.wmenu_id," + commandId + "," + Column("sysid") + " AS sysid FROM dbo.wcommand a", token);
-        var details = metadata.Rows.Cast<DataRow>().GroupBy(r => Convert.ToString(r[0])?.Trim() ?? "")
-            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
         var sql = $"""
             SET NOCOUNT ON;
             SELECT {projection} INTO #t FROM dbo.wcommand a;
@@ -184,8 +227,6 @@ public static class ProjectDatabase
             DELETE #t WHERE menu_id0<>'' AND menu_id0 NOT IN(SELECT menu_id FROM #t);
             SELECT * FROM #t ORDER BY menu_id;
             """;
-        using var connection = new SqlConnection(target.ConnectionString);
-        await connection.OpenAsync(token).ConfigureAwait(false);
         using var command = new SqlCommand(sql, connection) { CommandTimeout = 0 };
         using var reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);
         var entries = new List<CommandEntry>();
@@ -199,13 +240,78 @@ public static class ProjectDatabase
             while (await reader.ReadAsync(token).ConfigureAwait(false))
             {
                 if (entries.Count >= 10000) throw new InvalidOperationException("Menu exceeds 10000 rows.");
-                var id = Value("menu_id"); details.TryGetValue(id, out var detail);
-                entries.Add(new(id, Value("menu_id0"), Value("bar"), Value("link"),
-                    detail == null ? id : Convert.ToString(detail[1])?.Trim() ?? "",
-                    detail == null ? "" : Convert.ToString(detail[2])?.Trim() ?? ""));
+                var id = Value("menu_id");
+                entries.Add(new(id, Value("menu_id0"), Value("bar"), Value("link"), Value("command_id"), Value("sysid")));
             }
         } while (await reader.NextResultAsync(token).ConfigureAwait(false));
         return CommandHierarchy.Build(entries);
+    }
+
+    private static async Task<List<CommandNode>> MobileCommandsAsync(SqlTarget target, CancellationToken token)
+    {
+        const string sql = """
+            IF OBJECT_ID('dbo.dvcommand') IS NULL
+            BEGIN
+                RAISERROR(N'Không tìm thấy bảng dbo.dvcommand trong SYS.', 16, 1);
+                RETURN;
+            END;
+            SELECT * FROM dbo.dvcommand ORDER BY wmenu_id;
+            """;
+        using var connection = new SqlConnection(target.ConnectionString);
+        await connection.OpenAsync(token).ConfigureAwait(false);
+        using var command = new SqlCommand(sql, connection) { CommandTimeout = 0 };
+        using var reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);
+        var fields = Enumerable.Range(0, reader.FieldCount).Select(reader.GetName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var required in new[] { "wmenu_id", "wmenu_id0", "bar" })
+            if (!fields.Contains(required)) throw new InvalidOperationException("dvcommand missing required column: " + required);
+        string Value(string name) => fields.Contains(name) ? Convert.ToString(reader[name])?.Trim() ?? "" : "";
+        var entries = new List<CommandEntry>();
+        while (await reader.ReadAsync(token).ConfigureAwait(false))
+        {
+            if (entries.Count >= 10000) throw new InvalidOperationException("Mobile menu exceeds 10000 rows.");
+            var id = Value("wmenu_id");
+            var caption = Value("bar");
+            if (caption.Length == 0) caption = Value("bar2");
+            entries.Add(new(id, Value("wmenu_id0"), caption, "", id, Value("sysid")));
+        }
+        return CommandHierarchy.BuildAll(entries);
+    }
+
+    private static string CommandCacheKey(SqlTarget target, string appDatabase, string kind, string context)
+    {
+        var builder = new SqlConnectionStringBuilder(target.ConnectionString);
+        var identity = builder.IntegratedSecurity ? "INTEGRATED" : builder.UserID.Trim().ToUpperInvariant();
+        return string.Join("|", target.Server.Trim().ToUpperInvariant(), target.Database.Trim().ToUpperInvariant(),
+            appDatabase.Trim().ToUpperInvariant(), kind.ToUpperInvariant(), identity, context.Trim().ToUpperInvariant());
+    }
+
+    private static void TrimCommandCache()
+    {
+        var now = DateTimeOffset.UtcNow;
+        foreach (var expired in CommandCache.Where(entry => entry.Value.ExpiresAt <= now).Select(entry => entry.Key))
+            CommandCache.TryRemove(expired, out _);
+        foreach (var excess in CommandCache.OrderBy(entry => entry.Value.ExpiresAt).Take(Math.Max(0, CommandCache.Count - CommandCacheLimit)).Select(entry => entry.Key))
+            CommandCache.TryRemove(excess, out _);
+    }
+
+    private static bool TryGetCommands(string key, out List<CommandNode> nodes)
+    {
+        if (CommandCache.TryGetValue(key, out var entry) && entry.ExpiresAt > DateTimeOffset.UtcNow)
+        {
+            nodes = CloneCommands(entry.Nodes);
+            return true;
+        }
+        CommandCache.TryRemove(key, out _);
+        nodes = [];
+        return false;
+    }
+
+    private static List<CommandNode> CloneCommands(IEnumerable<CommandNode> nodes) => nodes.Select(CloneCommand).ToList();
+    private static CommandNode CloneCommand(CommandNode source)
+    {
+        var clone = new CommandNode(source.Entry);
+        clone.Children.AddRange(source.Children.Select(CloneCommand));
+        return clone;
     }
     public static string Quote(string identifier) => "[" + identifier.Replace("]", "]]", StringComparison.Ordinal) + "]";
 }

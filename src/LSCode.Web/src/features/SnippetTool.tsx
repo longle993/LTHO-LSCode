@@ -120,8 +120,9 @@ export function SnippetTool({ snippets, onSnippets, onInsert }: ToolProps) {
           <div>
             <div className="form-row">
               <label className="field">
-                Tên
+                Từ khóa nhanh
                 <input
+                  placeholder="Ví dụ: /1"
                   value={draft.key}
                   onChange={(e) => setDraft({ ...draft, key: e.target.value })}
                 />
