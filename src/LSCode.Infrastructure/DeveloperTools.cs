@@ -20,6 +20,7 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
     private readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(25) };
     private TranslationClient? translator;
     private SqlTraceSession? trace;
+    private SqlTraceStream? traceStream;
     private ProfilerSession? extendedTrace;
     private long lastExtendedSequence;
     private readonly SemaphoreSlim traceGate = new(1);
@@ -356,9 +357,20 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
             case "sourceCollection.content":
                 var contentFiles = p.GetProperty("files").Deserialize<SourceCollection.Match[]>(Json) ?? [];
                 return await SourceCollection.FindContentAsync(contentFiles, S("query"), ct);
+            case "project.standard.user":
+                return StandardProjectSync.FindFsdUser();
             case "project.standard.sync":
                 var standardUser = S("currentUser").Trim();
                 var syncRows = await StandardProjectSync.ReadAsync(standardUser, ct);
+                if (syncRows.Length == 0 && B("useFsdFallback"))
+                {
+                    var fsdUser = StandardProjectSync.FindFsdUser();
+                    if (fsdUser.Length > 0 && !fsdUser.Equals(standardUser, StringComparison.OrdinalIgnoreCase))
+                    {
+                        var fsdRows = await StandardProjectSync.ReadAsync(fsdUser, ct);
+                        if (fsdRows.Length > 0) (standardUser, syncRows) = (fsdUser, fsdRows);
+                    }
+                }
                 await persistenceGate.WaitAsync(ct);
                 try
                 {
@@ -374,7 +386,7 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                     if (selected is not null && matchingRows.Length == 0)
                         throw new InvalidOperationException("Không tìm thấy dự án này trong danh mục chuẩn của bạn.");
                     var plan = selected is null
-                        ? StandardProjectSync.Plan(saved, matchingRows, ct, skipSynced: true)
+                        ? StandardProjectSync.Plan(saved, matchingRows, ct, preserveInactive: true)
                         : StandardProjectSync.Plan([selected], matchingRows, ct);
                     if (selected is not null)
                     {
@@ -387,9 +399,12 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                     if (plan.Summary.Added > 0 || plan.Summary.Updated > 0)
                         ProjectStore.Save(plan.Projects);
                     var standardSettings = SettingsStore.Load();
-                    standardSettings.StandardCatalogUser = standardUser;
-                    SettingsStore.Save(standardSettings);
-                    return new { summary = new { plan.Summary.Added, plan.Summary.Updated, plan.Summary.Unchanged, plan.Summary.Skipped },
+                    if (syncRows.Length > 0)
+                    {
+                        standardSettings.StandardCatalogUser = standardUser;
+                        SettingsStore.Save(standardSettings);
+                    }
+                    return new { currentUser = standardUser, summary = new { plan.Summary.Added, plan.Summary.Updated, plan.Summary.Unchanged, plan.Summary.Skipped },
                         projects = plan.Projects.Select(Project).ToArray() };
                 }
                 finally { persistenceGate.Release(); }
@@ -676,7 +691,9 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
             case "xml.include":
                 var byPath = OpenBuffers();
                 return await Task.Run(() => XmlIncludes.Find(S("path"), S("text"), I("offset"),
-                    path => byPath.TryGetValue(path, out var buffer) ? buffer : File.Exists(path) ? File.ReadAllText(path) : null), ct);
+                    path => byPath.TryGetValue(path, out var buffer) ? buffer : File.Exists(path) ? File.ReadAllText(path) : null,
+                    S("contextPath"), p.TryGetProperty("contextText", out var includeContext) && includeContext.ValueKind == JsonValueKind.String
+                        ? includeContext.GetString() : null), ct);
             case "snippet.list": return ReadSnippets();
             case "snippet.completions":
                 var snippetFile = Path.Combine(AppContext.BaseDirectory, "Assets", S("language") == "javascript" ? "jssnippet.xml" : "sqlsnippet.xml");
@@ -699,13 +716,27 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
             case "diff.folder": return await Task.Run(() => FolderDiff.CompareAsync(S("left"), S("right"), ct), ct);
             case "translation.run": return await (translator ??= new(http)).TranslateAsync(S("text"), S("from", "en"), S("to", "vi"), ct);
             case "translation.browser": Process.Start(new ProcessStartInfo(TranslationClient.BrowserUrl(S("from", "auto"), S("to", "vi"), S("text"))) { UseShellExecute = true }); return true;
+            case "profiler.defaults":
+                var profilerTarget = Target(p);
+                var profilerConnection = new SqlConnectionStringBuilder(profilerTarget.ConnectionString);
+                var configuredProfiler = SettingsStore.Load().Profiler18Path;
+                return new
+                {
+                    filter = ProfilerTemplate.Default(profilerTarget.Database).DatabaseFilter,
+                    profilerPath = !string.IsNullOrWhiteSpace(configuredProfiler) ? configuredProfiler
+                        : File.Exists(SqlTraceSession.DefaultProfilerPath) ? SqlTraceSession.DefaultProfilerPath : "",
+                    authentication = UsesDedicatedProfilerLogin(profilerConnection.DataSource) ? "SQL Server · profile"
+                        : profilerConnection.IntegratedSecurity ? "Windows" : "SQL Server"
+                };
             case "profiler.start":
                 await traceGate.WaitAsync(ct);
                 try
                 {
-                    if (trace != null || extendedTrace != null) throw new InvalidOperationException("Profiler đang chạy. Dừng phiên hiện tại trước.");
+                    if (trace != null || traceStream != null || extendedTrace != null) throw new InvalidOperationException("Profiler đang chạy. Dừng phiên hiện tại trước.");
                     var t = Target(p);
-                    if (!B("useTargetCredentials")) {
+                    var engine = S("engine");
+                    var dedicatedLogin = engine == "auto" && UsesDedicatedProfilerLogin(t.Server);
+                    if (!B("useTargetCredentials") || dedicatedLogin) {
                         var auth = new SqlConnectionStringBuilder(t.ConnectionString) { IntegratedSecurity = false, Authentication = SqlAuthenticationMethod.NotSpecified, UserID = S("user", "profile"), Password = S("password", "fsd") };
                         t = t with { ConnectionString = auth.ConnectionString };
                     }
@@ -716,20 +747,31 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                     var template = ProfilerTemplate.Default(t.Database);
                     if (S("templatePath").Length > 0) template = template with { TraceTemplatePath = S("templatePath") };
                     if (S("filter").Length > 0) template = template with { DatabaseFilter = S("filter") };
-                    if (S("engine") == "extendedEvents")
+                    if (engine == "auto")
+                        engine = !string.IsNullOrWhiteSpace(SettingsStore.Load().Profiler18Path) || File.Exists(SqlTraceSession.DefaultProfilerPath)
+                            ? "ssms18" : dedicatedLogin || !B("useTargetCredentials") ? "sqlTrace" : "extendedEvents";
+                    if (engine == "sqlTrace")
+                    {
+                        traceStream = new(t, template.DatabaseFilter ?? t.Database);
+                        try { await traceStream.StartAsync(ct); }
+                        catch { await traceStream.DropAsync(); traceStream = null; throw; }
+                        return new { engine };
+                    }
+                    if (engine == "extendedEvents")
                     {
                         var prefix = template.DatabaseFilter ?? t.Database;
                         template = template with { DatabaseFilter = prefix.Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]") + "%" };
                         extendedTrace = new(t, template); lastExtendedSequence = 0;
                         try { await extendedTrace.StartAsync(ct); } catch { await extendedTrace.DropAsync(); extendedTrace = null; throw; }
-                        return true;
+                        return S("engine") == "auto" ? new { engine } : (object)true;
                     }
                     trace = new(t, template);
                     try { await trace.StartAsync(ct); } catch { await trace.DropAsync(); trace = null; throw; }
-                    return true;
+                    return S("engine") == "auto" ? new { engine } : (object)true;
                 }
                 finally { traceGate.Release(); }
             case "profiler.read":
+                if (traceStream is not null) return await traceStream.ReadAsync();
                 if (extendedTrace != null)
                 {
                     var captured = await extendedTrace.ReadAsync(ct);
@@ -819,12 +861,16 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
         if (existing.Any(item => item.Id == candidate.Id || Same(item.Field("StandardProjectCode") is { Length: > 0 } itemCode ? itemCode : item.Name, code)))
             throw new InvalidOperationException($"Profile dự án '{candidate.Name}' đã tồn tại.");
     }
+    private static bool UsesDedicatedProfilerLogin(string server) =>
+        server.Equals(@"172.168.5.14\SQL2014", StringComparison.OrdinalIgnoreCase);
+
     public async Task StopTraceAsync()
     {
         await traceGate.WaitAsync();
         try
         {
             if (trace != null) { await trace.DropAsync(); trace = null; }
+            if (traceStream != null) { await traceStream.DropAsync(); traceStream = null; }
             if (extendedTrace != null) { await extendedTrace.DropAsync(); extendedTrace = null; }
         }
         finally { traceGate.Release(); }

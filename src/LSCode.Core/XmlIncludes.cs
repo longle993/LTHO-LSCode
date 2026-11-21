@@ -5,7 +5,13 @@ using System.Xml;
 
 namespace LSCode.Core;
 
-public sealed record IncludeLocation(string Path, int Line, int Column);
+public sealed record IncludeLocation(
+    string Path,
+    int Line,
+    int Column,
+    string Name = "",
+    int Start = 0,
+    int Length = 0);
 
 public static class XmlIncludes
 {
@@ -91,7 +97,13 @@ public static class XmlIncludes
         }
     }
 
-    public static IncludeLocation? Find(string file, string text, int offset, Func<string, string?>? read = null)
+    public static IncludeLocation? Find(
+        string file,
+        string text,
+        int offset,
+        Func<string, string?>? read = null,
+        string? contextFile = null,
+        string? contextText = null)
     {
         file = Path.GetFullPath(file);
         text = WithoutComments(text);
@@ -104,31 +116,55 @@ public static class XmlIncludes
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
         }
         string? ResolveInclude(string owner, string name) => Resolve(owner, name, path => Load(path) is not null);
-        IncludeLocation? Location(string owner, string content, Match declaration)
+        IncludeLocation? Location(string owner, string content, Match declaration, string? referenceName = null)
         {
             if (declaration.Groups["path"].Success)
-                return ResolveInclude(owner, declaration.Groups["path"].Value) is { } target ? new(target, 1, 1) : null;
-            var before = content[..declaration.Index];
-            return new(owner, before.Count(c => c == '\n') + 1, declaration.Index - before.LastIndexOf('\n'));
+            {
+                if (ResolveInclude(owner, declaration.Groups["path"].Value) is not { } target || Load(target) is not { } targetText)
+                    return null;
+                var declaredName = declaration.Groups["name"].Value;
+                var externalName = !string.IsNullOrWhiteSpace(referenceName)
+                    ? referenceName
+                    : !string.IsNullOrWhiteSpace(declaredName)
+                        ? declaredName
+                        : Path.GetFileNameWithoutExtension(target);
+                return new(target, 1, 1, externalName, 0, targetText.Length);
+            }
+            var value = declaration.Groups["value"];
+            var start = value.Success ? value.Index : declaration.Index;
+            var length = value.Success ? value.Length : declaration.Length;
+            var before = content[..start];
+            var name = referenceName ?? declaration.Groups["name"].Value;
+            return new(owner, before.Count(c => c == '\n') + 1, start - before.LastIndexOf('\n'), name, start, length);
         }
         bool Contains(Match m) => offset >= m.Index && offset <= m.Index + m.Length;
         var direct = Declarations.Matches(text).Cast<Match>().FirstOrDefault(Contains);
         direct ??= Doctype.Matches(text).Cast<Match>().FirstOrDefault(Contains);
         var reference = References.Matches(text).Cast<Match>().FirstOrDefault(Contains);
         if (reference == null) return direct == null ? null : Location(file, text, direct);
-        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        IncludeLocation? Search(string owner, string content, int depth)
+        IncludeLocation? SearchFrom(string owner, string content)
         {
-            if (depth > 64 || !visited.Add(owner)) return null;
-            // Preserve newlines and offsets for navigation while ignoring commented declarations.
-            content = WithoutComments(content);
-            var declarations = Declarations.Matches(content).Cast<Match>().ToArray();
-            var match = declarations.FirstOrDefault(m => m.Groups["name"].Value == reference.Groups["name"].Value && m.Groups["parameter"].Success == (reference.Groups["kind"].Value == "%"));
-            if (match != null) return Location(owner, content, match);
-            foreach (var external in declarations.Where(m => m.Groups["path"].Success).Concat(Doctype.Matches(content).Cast<Match>()))
-                if (ResolveInclude(owner, external.Groups["path"].Value) is { } path && Load(path) is { } nested && Search(path, nested, depth + 1) is { } result) return result;
-            return null;
+            var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            IncludeLocation? Search(string currentOwner, string currentContent, int depth)
+            {
+                if (depth > 64 || !visited.Add(currentOwner)) return null;
+                // Preserve newlines and offsets for navigation while ignoring commented declarations.
+                currentContent = WithoutComments(currentContent);
+                var declarations = Declarations.Matches(currentContent).Cast<Match>().ToArray();
+                var match = declarations.FirstOrDefault(m => m.Groups["name"].Value == reference.Groups["name"].Value && m.Groups["parameter"].Success == (reference.Groups["kind"].Value == "%"));
+                if (match != null) return Location(currentOwner, currentContent, match, reference.Groups["name"].Value);
+                foreach (var external in declarations.Where(m => m.Groups["path"].Success).Concat(Doctype.Matches(currentContent).Cast<Match>()))
+                    if (ResolveInclude(currentOwner, external.Groups["path"].Value) is { } path && Load(path) is { } nested && Search(path, nested, depth + 1) is { } result) return result;
+                return null;
+            }
+            return Search(owner, content, 0);
         }
-        return Search(file, text, 0);
+        var found = SearchFrom(file, text);
+        if (found != null || string.IsNullOrWhiteSpace(contextFile) || contextText is null)
+            return found;
+        var root = Path.GetFullPath(contextFile);
+        return root.Equals(file, StringComparison.OrdinalIgnoreCase)
+            ? null
+            : SearchFrom(root, contextText);
     }
 }

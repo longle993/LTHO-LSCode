@@ -90,25 +90,30 @@ export function ProjectDialog({ projects, lastAccess, onProjects, onOpen, onClos
       setMode("edit");
     });
   }
-  async function syncStandard(user: string, project?: Project) {
+  async function syncStandard(user: string, project?: Project, useFsdFallback = false) {
     await task.run(async () => {
-      const current = operation<{ summary: SyncSummary; projects: Project[] }>("project.standard.sync",
-        { currentUser: user.trim(), projectId: project?.id });
+      const name = user.trim() || await request<string>("project.standard.user");
+      if (!name) { setMode("sync-user"); return; }
+      setCurrentUser(name);
+      const current = operation<{ currentUser: string; summary: SyncSummary; projects: Project[] }>("project.standard.sync",
+        { currentUser: name, projectId: project?.id, useFsdFallback });
       pending.current = current;
-      const result = await current.promise;
+      const result = await current.promise.finally(() => { pending.current = undefined; });
       onProjects(result.projects);
-      setCurrentUser(user.trim());
+      setCurrentUser(result.currentUser);
+      const { added, updated, unchanged, skipped } = result.summary;
       setSyncMessage(project
-        ? result.summary.updated ? `Đã cập nhật ${project.code}.` : `${project.code} đã có thông tin mới nhất.`
-        : `Đã đồng bộ ${result.summary.added + result.summary.updated} dự án, giữ nguyên ${result.summary.unchanged} dự án, bỏ qua ${result.summary.skipped} mục không hợp lệ.`);
+        ? updated ? `Đã cập nhật ${project.code}.` : `${project.code} đã có thông tin mới nhất.`
+        : added + updated + unchanged + skipped === 0
+          ? `Danh mục chuẩn không trả về dự án cho ${result.currentUser}. Bấm vào tên người dùng để kiểm tra hoặc đổi CurrUser.`
+          : `Đã thêm ${added} dự án, cập nhật ${updated}, giữ nguyên ${unchanged}, bỏ qua ${skipped} mục không hợp lệ.`);
       setMode("list");
     });
   }
   function startSync(project?: Project) {
     setSyncProject(project);
     setSyncMessage("");
-    if (currentUser.trim()) void syncStandard(currentUser, project);
-    else setMode("sync-user");
+    void syncStandard(currentUser, project, !project);
   }
   async function chooseImport() {
     await task.run(async () => {
@@ -163,6 +168,7 @@ export function ProjectDialog({ projects, lastAccess, onProjects, onOpen, onClos
       {mode === "list" && <>
         <div className="project-actions" aria-label="Thao tác dự án">
           <Button variant="primary" disabled={task.busy} onClick={() => startSync()}><RefreshCw size={15} /> Đồng bộ</Button>
+          {task.busy && pending.current && <Button onClick={() => void pending.current?.cancel()}>Dừng</Button>}
           <Button disabled={task.busy} onClick={() => { setEditing(undefined); setProfile(emptyProfile()); setMode("create"); }}><Plus size={15} /> Tạo profile</Button>
           <Button disabled={task.busy} onClick={() => void chooseImport()}><Upload size={15} /> Import XML</Button>
           <Button disabled={task.busy} onClick={() => void exportProjects()}><Download size={15} /> Export XML</Button>
@@ -195,7 +201,7 @@ export function ProjectDialog({ projects, lastAccess, onProjects, onOpen, onClos
       </>}
 
       {mode === "sync-user" && <form className="project-compact-form" onSubmit={event => { event.preventDefault(); void syncStandard(currentUser, syncProject); }}>
-        <label>Tên<input autoFocus required value={currentUser} onChange={event => setCurrentUser(event.target.value)} /></label>
+        <label>Người sử dụng<input autoFocus required value={currentUser} onChange={event => setCurrentUser(event.target.value)} /></label>
         <div className="form-actions"><Button variant="primary" disabled={task.busy || !currentUser.trim()}>Đồng bộ</Button>
           {task.busy && <Button type="button" onClick={() => void pending.current?.cancel()}>Dừng</Button>}</div>
       </form>}

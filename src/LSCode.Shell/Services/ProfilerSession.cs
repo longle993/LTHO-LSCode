@@ -45,7 +45,8 @@ public sealed class ProfilerSession(SqlTarget target, ProfilerTemplate template)
     public async Task StartAsync(CancellationToken token)
     {
         using var connection = new SqlConnection(ConnectionString); await connection.OpenAsync(token);
-        using var command = new SqlCommand(CreateSql(Name, target.Database, template), connection) { CommandTimeout = 0 };
+        var sql = "BEGIN TRY\n" + CreateSql(Name, target.Database, template) + "\nEND TRY\nBEGIN CATCH\nTHROW;\nEND CATCH;";
+        using var command = new SqlCommand(sql, connection) { CommandTimeout = 0 };
         await command.ExecuteNonQueryAsync(token);
     }
     public async Task<ProfilerBatch> ReadAsync(CancellationToken token)

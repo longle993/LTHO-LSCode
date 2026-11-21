@@ -4,15 +4,20 @@ import { Button, DataGrid } from "../ui";
 import { request, writeClipboard } from "../bridge";
 import type { Target } from "../bridge";
 import { useTask } from "./useTask";
+type ProfilerEngine = "ssms18" | "sqlTrace" | "extendedEvents";
 export function ProfilerTool({ target, visible, closing, onBusyChange }: {
   target?: Target;
   visible: boolean;
   closing: boolean;
   onBusyChange: (busy: boolean) => void;
 }) {
-  const [user, setUser] = useState("profile"),
-    [password, setPassword] = useState("fsd"),
-    [profilerPath, setProfilerPath] = useState("");
+  const [user, setUser] = useState(""),
+    [password, setPassword] = useState(""),
+    [profilerPath, setProfilerPath] = useState<string>(),
+    [defaultPath, setDefaultPath] = useState(""),
+    [authentication, setAuthentication] = useState(""),
+    [engine, setEngine] = useState<ProfilerEngine>(),
+    [captureTarget, setCaptureTarget] = useState<Target>();
   const [running, setRunning] = useState(false),
     [{ rows, offset }, setBuffer] = useState<{ rows: TraceEvent[]; offset: number }>({ rows: [], offset: 0 }),
     [gridVersion, setGridVersion] = useState(0),
@@ -23,19 +28,47 @@ export function ProfilerTool({ target, visible, closing, onBusyChange }: {
     [layout, setLayout] = useState(false);
   const task = useTask();
   useEffect(() => onBusyChange(task.busy), [task.busy, onBusyChange]);
-  const active = useRef(true);
-  const [pollError, setPollError] = useState("");
+  const autoStarted = useRef(false);
+  const canStart = useRef(true);
   useEffect(() => {
-    active.current = true;
-    void request<{ profiler18Path: string }>("settings.read")
-      .then((s) => {
-        if (active.current) setProfilerPath(s.profiler18Path ?? "");
-      })
-      .catch(() => {});
-    return () => {
-      active.current = false;
-    };
-  }, []);
+    canStart.current = !closing;
+    return () => { canStart.current = false; };
+  }, [closing]);
+  const currentTarget = captureTarget ?? target;
+  const [pollError, setPollError] = useState("");
+
+  async function startCapture(connection: Target, automatic = false) {
+    await task.run(async () => {
+      setCaptureTarget(connection);
+      setPollError("");
+      if (automatic) {
+        const defaults = await request<{ profilerPath: string; filter: string; authentication: string }>(
+          "profiler.defaults", { targetId: connection.id },
+        );
+        if (!canStart.current) return;
+        setDefaultPath(defaults.profilerPath);
+        setFilter(defaults.filter);
+        setAuthentication(defaults.authentication);
+      }
+      const overrideUser = !automatic && user.trim();
+      const result = await request<{ engine: ProfilerEngine }>("profiler.start", {
+        targetId: connection.id,
+        engine: "auto",
+        useTargetCredentials: !overrideUser,
+        ...(overrideUser ? { user: overrideUser, password } : {}),
+        ...(automatic ? {} : { filter: filter.trim(), profilerPath: profilerPath?.trim() }),
+      });
+      setEngine(result.engine);
+      setDropped(0);
+      setFollowLatest(true);
+      setRunning(true);
+    });
+  }
+  useEffect(() => {
+    if (!currentTarget || !visible || closing || autoStarted.current) return;
+    autoStarted.current = true;
+    void startCapture(currentTarget, true);
+  }, [currentTarget, visible, closing]);
   useEffect(() => {
     if (!running || closing) return;
     let current = true;
@@ -76,36 +109,40 @@ export function ProfilerTool({ target, visible, closing, onBusyChange }: {
   const sqlText = (followLatest ? rows.at(-1)?.text : selected) ?? "";
   return (
     <div className="tool-body profiler-body" ref={(element) => { if (element) element.inert = closing; }}>
-      <p className="muted">
-        {target
-          ? `${target.server} / ${target.database}`
+      <p className="muted" role="status">
+        {currentTarget
+          ? `${currentTarget.server} / ${currentTarget.database}${authentication ? ` · ${user.trim() ? "SQL Server" : authentication}` : ""}`
           : "Chọn kết nối SQL trước khi chạy Profiler."}{" "}
-        · {running ? "Đang thu thập" : "Đã dừng"} · {rows.length} sự kiện · Bỏ
+        · {running ? "Đang thu thập" : task.busy ? "Đang xử lý" : "Đã dừng"}
+        {engine && (engine === "extendedEvents" ? " · Extended Events" : " · SQL Trace")}
+        {" "}· {rows.length} sự kiện · Bỏ
         qua {dropped}
       </p>
       <div className="tool-toolbar">
         <input
-          aria-label="Profiler user"
+          aria-label="Người sử dụng Profiler"
+          placeholder="Dùng tài khoản kết nối"
           value={user}
-          disabled={running}
+          disabled={running || task.busy}
           onChange={(e) => setUser(e.target.value)}
         />
         <input
-          aria-label="Profiler password"
+          aria-label="Mật khẩu Profiler"
+          placeholder="Mật khẩu tài khoản tùy chọn"
           type="password"
           value={password}
-          disabled={running}
+          disabled={running || task.busy || !user.trim()}
           onChange={(e) => setPassword(e.target.value)}
         />
         <input
           aria-label="Đường dẫn Profiler"
-          placeholder="Đường dẫn Profiler.exe (trống: dùng Cài đặt)"
-          value={profilerPath}
-          disabled={running}
+          placeholder="PROFILER.EXE (trống: tự chọn)"
+          value={profilerPath ?? defaultPath}
+          disabled={running || task.busy}
           onChange={(e) => setProfilerPath(e.target.value)}
         />
         <Button
-          disabled={running}
+          disabled={running || task.busy}
           onClick={() =>
             void task.run(async () => {
               const path = await request<string | null>("file.pick");
@@ -117,28 +154,15 @@ export function ProfilerTool({ target, visible, closing, onBusyChange }: {
         </Button>
         <input
           aria-label="Bộ lọc database"
-          placeholder="Database prefix (trống: theo target)"
+          placeholder="Tiền tố database"
           value={filter}
-          disabled={running}
+          disabled={running || task.busy}
           onChange={(e) => setFilter(e.target.value)}
         />
         <Button
           variant="primary"
-          disabled={running || !target || task.busy}
-          onClick={() =>
-            void task.run(async () => {
-              await request("profiler.start", {
-                targetId: target?.id,
-                filter,
-                engine: "ssms18",
-                user,
-                password,
-                profilerPath,
-              });
-              setFollowLatest(true);
-              setRunning(true);
-            })
-          }
+          disabled={running || !currentTarget || task.busy}
+          onClick={() => { if (currentTarget) void startCapture(currentTarget); }}
         >
           <Play size={14} />
           Chạy

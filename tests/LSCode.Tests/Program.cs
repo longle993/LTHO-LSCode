@@ -122,14 +122,18 @@ try
     var includePart = Path.Combine(includeRoot, "Include", "XML", "part.xml");
     var includeDtd = Path.Combine(includeRoot, "defs.dtd");
     await File.WriteAllTextAsync(includePart, "<part/>");
-    await File.WriteAllTextAsync(includeDtd, "<!ENTITY Report.Part SYSTEM 'part'>\n<!ENTITY Local 'inline'>\n<!ENTITY % cycle SYSTEM 'defs.dtd'>");
+    const string includeDtdText = "<!ENTITY Report.Part SYSTEM 'part'>\n<!ENTITY Local 'inline'>\n<!ENTITY % cycle SYSTEM 'defs.dtd'>";
+    await File.WriteAllTextAsync(includeDtd, includeDtdText);
     var includeText = "<!DOCTYPE root [<!ENTITY % defs SYSTEM 'defs.dtd'>%defs;]><root>&Report.Part;</root>";
-    Assert(XmlIncludes.Find(includeMain, includeText, includeText.IndexOf("&Report.Part;") + 3)?.Path == includePart, "F12 dotted entity in nested DTD with legacy Include/XML fallback");
+    var externalEntity = XmlIncludes.Find(includeMain, includeText, includeText.IndexOf("&Report.Part;") + 3);
+    Assert(externalEntity is { Path: var externalPath, Name: "Report.Part", Start: 0, Length: 7 } && externalPath == includePart, "F12 dotted entity returns the exact external file range");
     Assert(XmlIncludes.Find(includeMain, includeText, includeText.IndexOf("defs.dtd") + 2)?.Path == includeDtd, "F12 on SYSTEM path");
     Assert(XmlIncludes.Find(includeMain, includeText, includeText.IndexOf("%defs;") + 2)?.Path == includeDtd, "F12 parameter entity reference");
     Assert(XmlIncludes.Find(includeMain, includeText + "&missing;", includeText.Length + 2) == null, "Cyclic includes terminate for unresolved entity");
     var inlineText = includeText + "&Local;";
-    Assert(XmlIncludes.Find(includeMain, inlineText, inlineText.Length - 3) is { Path: var inlinePath, Line: 2 } && inlinePath == includeDtd, "Inline entity navigates to declaration line");
+    var inlineEntity = XmlIncludes.Find(includeMain, inlineText, inlineText.Length - 3);
+    Assert(inlineEntity is { Path: var inlinePath, Line: 2, Name: "Local" } && inlinePath == includeDtd &&
+        includeDtdText.Substring(inlineEntity.Start, inlineEntity.Length) == "inline", "Inline entity returns only its declared value");
     var publicText = "<!DOCTYPE root PUBLIC 'public-id' 'defs.dtd'><root>&Report.Part;</root>";
     Assert(XmlIncludes.Find(includeMain, publicText, publicText.IndexOf("&Report.Part;") + 1)?.Path == includePart, "External PUBLIC DTD resolution");
     var commentText = "<!--\n<!ENTITY Local SYSTEM 'part'>\n-->\n<!ENTITY Local 'value'>\n&Local;";
@@ -138,6 +142,21 @@ try
     Assert(XmlIncludes.Find(includeMain, "<!ENTITY Missing SYSTEM 'missing.xml'>", 12) == null, "Missing include does not navigate to itself");
     Assert(XmlIncludes.Find(includeMain, includeText, includeText.IndexOf("&Report.Part;") + 1,
         p => p == includeDtd ? "<!ENTITY Report.Part 'unsaved'>" : File.Exists(p) ? File.ReadAllText(p) : null)?.Path == includeDtd, "Include resolution uses unsaved buffers");
+    var graphDtd = Path.Combine(includeRoot, "graph.dtd");
+    var graphTarget = Path.Combine(includeRoot, "Include", "XML", "UnitBeforeInsert.txt");
+    const string graphDtdText = "<!ENTITY UnitBeforeInsert SYSTEM 'UnitBeforeInsert'>\n<!ENTITY Job.Nested.Key.a '((ma_vv like rtrim(@ma_vv) + ''%''))'>";
+    const string graphTargetText = "if exists(select 1 where &Job.Nested.Key.a;)";
+    await File.WriteAllTextAsync(graphDtd, graphDtdText);
+    await File.WriteAllTextAsync(graphTarget, graphTargetText);
+    var graphMainText = "<!DOCTYPE root [<!ENTITY % graph SYSTEM 'graph.dtd'>%graph;]><root>&UnitBeforeInsert;</root>";
+    var firstPeek = XmlIncludes.Find(includeMain, graphMainText, graphMainText.IndexOf("&UnitBeforeInsert;", StringComparison.Ordinal) + 2);
+    Assert(firstPeek?.Path == graphTarget && firstPeek.Length == graphTargetText.Length, "First entity peek resolves an external body");
+    var nestedPeek = XmlIncludes.Find(graphTarget, graphTargetText,
+        graphTargetText.IndexOf("&Job.Nested.Key.a;", StringComparison.Ordinal) + 2,
+        contextFile: includeMain, contextText: graphMainText);
+    Assert(nestedPeek is { Path: var nestedPath, Name: "Job.Nested.Key.a" } && nestedPath == graphDtd &&
+        graphDtdText.Substring(nestedPeek.Start, nestedPeek.Length) == "((ma_vv like rtrim(@ma_vv) + ''%''))",
+        "Nested F12 keeps the root declaration graph and returns the child value only");
     Assert(XmlTools.Validate("<!DOCTYPE x [<!ENTITY a SYSTEM 'file:///secret'>]><x>&a;</x>") != null, "Block XML external entity");
     Assert(XmlTools.Format("<root><x><![CDATA[a < b]]></x></root>").Contains("<![CDATA[a < b]]>"), "Format preserves CDATA");
     Assert(XmlTools.Format("<root xml:space=\"preserve\">  <x/>  </root>").Contains("  <x"), "Preserve significant XML whitespace");
