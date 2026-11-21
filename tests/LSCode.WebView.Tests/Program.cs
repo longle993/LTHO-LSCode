@@ -206,16 +206,18 @@ var controllers = Path.Combine(root, "App_Data", "Controllers");
 var includeDirectory = Directory.CreateDirectory(Path.Combine(controllers, "Include", "XML")).FullName;
 var dirFile = Path.Combine(controllers, "Dir", "EmployeeStatus.xml");
 var includeFile = Path.Combine(includeDirectory, "EditLog.ent");
-await File.WriteAllTextAsync(includeFile, """
-    <!ENTITY ListWhenBeforeUpdateLog "exec FastBusiness$App$List$EditLog">
-    """);
+const string includeSource = "<!ENTITY ListWhenBeforeUpdateLog \"exec FastBusiness$App$List$EditLog\">";
+await File.WriteAllTextAsync(includeFile, includeSource);
 const string xmlWithInclude = """
     <!DOCTYPE dir [<!ENTITY % Log SYSTEM "EditLog">%Log;]>
     <dir><title v="Trạng thái nhân viên"/><command>&ListWhenBeforeUpdateLog;</command></dir>
     """;
+var includeLocation = XmlIncludes.Find(dirFile, xmlWithInclude,
+    xmlWithInclude.IndexOf("&ListWhenBeforeUpdateLog;", StringComparison.Ordinal) + 1);
 Check(XmlTools.InspectEditor(xmlWithInclude, dirFile).Diagnostic is null &&
     XmlControllerPreview.Read(xmlWithInclude, dirFile).Title == "Trạng thái nhân viên" &&
-    XmlIncludes.Find(dirFile, xmlWithInclude, xmlWithInclude.IndexOf("&ListWhenBeforeUpdateLog;", StringComparison.Ordinal) + 1)?.Path == includeFile,
+    includeLocation is { Path: var resolvedInclude, Name: "ListWhenBeforeUpdateLog" } && resolvedInclude == includeFile &&
+    includeSource.Substring(includeLocation.Start, includeLocation.Length) == "exec FastBusiness$App$List$EditLog",
     "XML diagnostics, preview and F12 resolve the same nested ERP entity through Include/XML");
 Check(XmlTools.InspectEditor(xmlWithInclude, dirFile, new Dictionary<string, string>
     { [includeFile] = "<!ENTITY ListWhenBeforeUpdateLog 'SQL đang sửa'>" }).Diagnostic is null &&
@@ -474,9 +476,29 @@ await using (var projectTools = new DeveloperTools())
         newStandardFolder, "", "", "", @"D:\StandardUpdates")]);
     var changedRow = standardRows[0] with { Title = "Danh mục đã sửa" };
     var syncedProfile = standardPlan.Projects.Single();
-    var initialSync = StandardProjectSync.Plan([syncedProfile], [changedRow], skipSynced: true);
-    Check(initialSync.Summary.Unchanged == 1 && initialSync.Projects.Single() == syncedProfile,
-        "Bulk sync preserves existing synchronized profile even when the standard catalog changes");
+    var initialSync = StandardProjectSync.Plan([syncedProfile], [changedRow], preserveInactive: true);
+    Check(initialSync.Summary.Updated == 1 && initialSync.Projects.Single().Id == syncedProfile.Id &&
+        initialSync.Projects.Single().Field("StandardProjectTitle") == changedRow.Title,
+        "Bulk sync refreshes existing active profile from the standard catalog");
+    var inactiveXml = LSCode.Core.XmlTools.Parse(syncedProfile.RawXml).Root!;
+    inactiveXml.SetElementValue("IsActive", "0");
+    var inactive = syncedProfile with { RawXml = inactiveXml.ToString(System.Xml.Linq.SaveOptions.DisableFormatting) };
+    var inactiveSync = StandardProjectSync.Plan([inactive], [changedRow], preserveInactive: true);
+    Check(inactiveSync.Summary.Unchanged == 1 && inactiveSync.Projects.Single() == inactive,
+        "Bulk sync preserves existing inactive profile");
+    var fsdConfig = Path.Combine(root, "fsd-fixture.db");
+    using (var fsdConnection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={fsdConfig}"))
+    {
+        fsdConnection.Open();
+        using var fsdCommand = fsdConnection.CreateCommand();
+        fsdCommand.CommandText = """
+            CREATE TABLE options (id TEXT, val TEXT, ma_phan_he TEXT);
+            INSERT INTO options VALUES ('CurrUser', 'ignored', 'XX'), (' curruser ', ' FixtureUser ', 'RE');
+            """;
+        fsdCommand.ExecuteNonQuery();
+    }
+    Check(StandardProjectSync.ReadFsdUser(fsdConfig) == "FixtureUser",
+        "FSD current user is read from the RE options in its SQLite config");
     var explicitSync = StandardProjectSync.Plan([syncedProfile], [changedRow]);
     Check(explicitSync.Summary.Updated == 1 && explicitSync.Projects.Single().Id == syncedProfile.Id &&
         explicitSync.Projects.Single().Field("StandardProjectTitle") == changedRow.Title,
@@ -1085,7 +1107,12 @@ if (args.Contains("--sql"))
             "Object definition search is opt-in");
         if (args.Contains("--profiler"))
         {
-            await Call("profiler.start", new { targetId = target.Id, useTargetCredentials = true, engine = args.Contains("--profiler-ssms18") ? "ssms18" : "extendedEvents" });
+            var defaults = JsonSerializer.SerializeToElement(await Call("profiler.defaults", new { targetId = target.Id }), Protocol.Json);
+            Check(defaults.GetProperty("filter").GetString() == database && defaults.GetProperty("authentication").GetString() == "Windows",
+                "Profiler defaults use the selected database and authentication");
+            var engine = args.Contains("--profiler-ssms18") ? "ssms18" :
+                args.Contains("--profiler-sql-trace") ? "sqlTrace" : "auto";
+            await Call("profiler.start", new { targetId = target.Id, useTargetCredentials = true, engine });
             try
             {
                 await Call("sql.execute", new { targetId = target.Id, sql = "SELECT N'LSCODE_WEBVIEW_TRACE_FIXTURE' AS marker" });

@@ -6,14 +6,41 @@ namespace LSCode.Infrastructure;
 
 internal interface IStandardCatalogConnectionProvider
 {
-    string GetConnectionString();
+    Task<SqlConnection> OpenAsync(CancellationToken token);
 }
 
 internal sealed class EmbeddedStandardCatalogConnectionProvider : IStandardCatalogConnectionProvider
 {
     private const string ResourceName = "LSCode.Infrastructure.StandardCatalogConnection";
 
-    public string GetConnectionString()
+    public async Task<SqlConnection> OpenAsync(CancellationToken token)
+    {
+        var configuration = ReadConfiguration();
+        try { return await ConnectAsync(configuration.ConnectionString, token).ConfigureAwait(false); }
+        catch (SqlException) when (!token.IsCancellationRequested &&
+            configuration.DataSource.StartsWith(@"172.168.5.14\", StringComparison.OrdinalIgnoreCase))
+        {
+            configuration.DataSource = "20.20.20.14" + configuration.DataSource["172.168.5.14".Length..];
+            return await ConnectAsync(configuration.ConnectionString, token).ConfigureAwait(false);
+        }
+    }
+
+    private static async Task<SqlConnection> ConnectAsync(string connectionString, CancellationToken token)
+    {
+        var connection = new SqlConnection(connectionString);
+        try
+        {
+            await connection.OpenAsync(token).ConfigureAwait(false);
+            return connection;
+        }
+        catch
+        {
+            await connection.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    private static SqlConnectionStringBuilder ReadConfiguration()
     {
         using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(ResourceName)
             ?? throw new InvalidOperationException("LSCode thiếu cấu hình kết nối danh mục chuẩn.");
@@ -40,6 +67,6 @@ internal sealed class EmbeddedStandardCatalogConnectionProvider : IStandardCatal
         connection.ApplicationName = "LS Code Standard Project Sync";
         if (!decoded.Contains("Encrypt=", StringComparison.OrdinalIgnoreCase))
             connection.Encrypt = SqlConnectionEncryptOption.Optional;
-        return connection.ConnectionString;
+        return connection;
     }
 }

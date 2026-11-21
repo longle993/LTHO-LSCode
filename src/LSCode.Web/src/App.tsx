@@ -93,6 +93,34 @@ function isEmployeeController(group: ControllerGroup) {
 }
 type Entry = { path: string; name: string; directory: boolean };
 type Hit = { path: string; line: number; column: number; preview: string };
+type IncludeLocation = {
+  path: string;
+  line: number;
+  column: number;
+  name: string;
+  start: number;
+  length: number;
+};
+type EntityPeek = {
+  id: string;
+  parentId?: string;
+  level: number;
+  source: DocumentInfo;
+  snippet: DocumentInfo;
+  location: IncludeLocation;
+  contextPath: string;
+  contextText: string;
+  fullFile: boolean;
+  compactHeight: number;
+  anchor: {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+    caretLeft: number;
+    caretSide: "top" | "bottom";
+  };
+};
 type EditorSearchHit = {
   line: number;
   column: number;
@@ -106,6 +134,62 @@ function formatQueryDuration(milliseconds: number) {
   const minutes = Math.floor(milliseconds / 60_000);
   const seconds = ((milliseconds % 60_000) / 1000).toFixed(1).padStart(4, "0");
   return `${minutes}:${seconds}`;
+}
+function entityPeekAnchor(current?: EditorHandle): EntityPeek["anchor"] {
+  const host = document.querySelector<HTMLElement>(".editors");
+  const dom = current?.getDomNode();
+  const position = current?.getPosition();
+  const visible = position ? current?.getScrolledVisiblePosition(position) : null;
+  if (!host || !dom || !visible)
+    return { left: 16, top: 24, width: 760, height: 280, caretLeft: 28, caretSide: "top" };
+  const hostRect = host.getBoundingClientRect();
+  const editorRect = dom.getBoundingClientRect();
+  const width = Math.max(300, Math.min(820, hostRect.width - 24));
+  const height = Math.max(160, Math.min(360, Math.floor(hostRect.height * 0.48), hostRect.height - 24));
+  const cursorLeft = editorRect.left - hostRect.left + visible.left;
+  const cursorTop = editorRect.top - hostRect.top + visible.top;
+  const left = Math.max(12, Math.min(cursorLeft - 26, hostRect.width - width - 12));
+  const below = cursorTop + visible.height + 10;
+  const showBelow = below + height <= hostRect.height - 12;
+  const top = showBelow
+    ? below
+    : Math.max(12, Math.min(cursorTop - height - 10, hostRect.height - height - 12));
+  return {
+    left,
+    top,
+    width,
+    height,
+    caretLeft: Math.max(18, Math.min(cursorLeft - left, width - 18)),
+    caretSide: showBelow ? "top" : "bottom",
+  };
+}
+function childEntityPeekAnchor(parent: EntityPeek, current?: EditorHandle): EntityPeek["anchor"] {
+  const base = entityPeekAnchor(current);
+  const host = document.querySelector<HTMLElement>(".editors");
+  const parentNode = host
+    ? [...host.querySelectorAll<HTMLElement>(".entity-peek")]
+        .find((node) => node.dataset.entityPeekId === parent.id)
+    : undefined;
+  if (!host || !parentNode)
+    return { ...base, left: base.left + 28, top: base.top + 48, caretLeft: 20, caretSide: "top" };
+  const hostRect = host.getBoundingClientRect();
+  const parentRect = parentNode.getBoundingClientRect();
+  const parentLeft = parentRect.left - hostRect.left;
+  const parentTop = parentRect.top - hostRect.top;
+  const width = Math.max(300, Math.min(base.width, parentRect.width - 24, hostRect.width - 24));
+  const left = Math.max(12, Math.min(parentLeft + 28, hostRect.width - width - 12));
+  const below = parentTop + parentRect.height + 12;
+  const fitsBelow = below + base.height <= hostRect.height - 12;
+  return {
+    ...base,
+    left,
+    top: fitsBelow
+      ? below
+      : Math.max(12, Math.min(parentTop + 44, hostRect.height - base.height - 12)),
+    width,
+    caretLeft: Math.max(18, Math.min(parentLeft + 46 - left, width - 18)),
+    caretSide: "top",
+  };
 }
 const initialSettings: Settings = {
   theme: "Light",
@@ -281,15 +365,35 @@ export default function App({
     new Promise<"save" | "discard" | "cancel">((resolve) =>
       setUnsavedPrompt({ names, resolve }),
     );
-  const [peek, setPeek] = useState<{
-    document: DocumentInfo;
-    line: number;
-    column: number;
-  }>();
+  const [peeks, setPeeks] = useState<EntityPeek[]>([]);
+  const peeksRef = useRef<EntityPeek[]>([]);
+  peeksRef.current = peeks;
   const resultsByTab = useRef(new Map<string, QueryResult>());
   const queryDurationByTab = useRef(new Map<string, number>());
   const [external, setExternal] = useState<Tab>();
   const primaryEditor = useRef<EditorHandle>();
+  const peekEditors = useRef(new Map<string, EditorHandle>());
+  const peekMountKeys = useRef(new Map<string, string>());
+  const commandEntityPeekId = useRef<string>();
+  useEffect(() => {
+    if (!peeks.length) return;
+    const insidePeek = (target: EventTarget | null) =>
+      target instanceof Element && Boolean(target.closest(".entity-peek"));
+    const blockWheel = (event: WheelEvent) => {
+      if (!insidePeek(event.target)) event.preventDefault();
+    };
+    const blockTouchMove = (event: TouchEvent) => {
+      if (!insidePeek(event.target)) event.preventDefault();
+    };
+    document.body.classList.add("entity-peek-scroll-locked");
+    window.addEventListener("wheel", blockWheel, { capture: true, passive: false });
+    window.addEventListener("touchmove", blockTouchMove, { capture: true, passive: false });
+    return () => {
+      document.body.classList.remove("entity-peek-scroll-locked");
+      window.removeEventListener("wheel", blockWheel, true);
+      window.removeEventListener("touchmove", blockTouchMove, true);
+    };
+  }, [peeks.length > 0]);
   const scriptToFocus = useRef<string>();
   const editor = useRef<EditorHandle>(),
     latest = useRef({ tabs, activeId, settings }),
@@ -323,6 +427,9 @@ export default function App({
   latest.current = { tabs, activeId, settings };
   const active = tabs.find((t) => t.id === activeId),
     target = active?.target ?? defaultTarget.current;
+  useEffect(() => {
+    if (!selectedTool && active && language(active.name) === "xml") setPanel(false);
+  }, [active?.id, active?.name, selectedTool]);
   const [editorSearchQuery, setEditorSearchQuery] = useState("");
   const editorSearch = useMemo(() => {
     const query = editorSearchQuery;
@@ -1118,6 +1225,143 @@ export default function App({
       setClosingProfiler(false);
     }
   }
+  function releaseEntityPeek(value: EntityPeek) {
+    disposeModel(value.snippet);
+    disposeModel(value.source);
+    peekEditors.current.delete(value.id);
+    peekMountKeys.current.delete(value.id);
+    void request("document.close", { id: value.source.id }).catch(() => {});
+  }
+  function replaceEntityPeeks(next: EntityPeek[]) {
+    peeksRef.current = next;
+    setPeeks(next);
+  }
+  function closeEntityPeek(id?: string) {
+    const current = peeksRef.current;
+    const index = id ? current.findIndex((entry) => entry.id === id) : current.length - 1;
+    if (index < 0) return;
+    const retained = current.slice(0, index);
+    const closing = current.slice(index);
+    replaceEntityPeeks(retained);
+    requestAnimationFrame(() => {
+      closing.forEach(releaseEntityPeek);
+      const parent = retained.at(-1);
+      if (parent) peekEditors.current.get(parent.id)?.focus();
+      else editor.current?.focus();
+    });
+  }
+  function includeBuffers(extra?: DocumentInfo) {
+    return Object.fromEntries([
+      ...tabs.filter((tab) => tab.path).map((tab) => [tab.path!, textOf(tab)] as const),
+      ...(extra?.path ? [[extra.path, extra.text] as const] : []),
+    ]);
+  }
+  async function findInclude(
+    path: string,
+    text: string,
+    offset: number,
+    contextPath: string,
+    contextText: string,
+    extra?: DocumentInfo,
+  ) {
+    return request<IncludeLocation | null>("xml.include", {
+      path,
+      text,
+      offset,
+      contextPath,
+      contextText,
+      buffers: includeBuffers(extra),
+    });
+  }
+  async function showEntityPeek(
+    found: IncludeLocation,
+    contextPath: string,
+    contextText: string,
+    anchor: EntityPeek["anchor"],
+    parent?: EntityPeek,
+  ) {
+    const opened = await request<DocumentInfo>("document.open", { path: found.path });
+    const buffer = tabs.find((tab) => tab.path?.toLowerCase() === found.path.toLowerCase());
+    const source = buffer ? { ...opened, text: textOf(buffer) } : opened;
+    const rangeStart = Number.isInteger(found.start)
+      ? Math.max(0, Math.min(found.start, source.text.length))
+      : 0;
+    const rangeLength = Number.isInteger(found.length)
+      ? Math.max(0, Math.min(found.length, source.text.length - rangeStart))
+      : source.text.length - rangeStart;
+    const location = {
+      ...found,
+      name: found.name || source.name,
+      start: rangeStart,
+      length: rangeLength,
+    };
+    const snippet: DocumentInfo = {
+      ...source,
+      id: "entity-peek-" + crypto.randomUUID(),
+      text: source.text.slice(rangeStart, rangeStart + rangeLength),
+      version: 1,
+    };
+    const id = "entity-peek-" + crypto.randomUUID();
+    const next: EntityPeek = {
+      id,
+      parentId: parent?.id,
+      level: parent ? parent.level + 1 : 0,
+      source,
+      snippet,
+      location,
+      contextPath,
+      contextText,
+      fullFile: false,
+      compactHeight: Math.min(
+        anchor.height,
+        Math.max(132, 94 + snippet.text.split(/\r\n|\r|\n/).length * Math.round((settings.editorFontSize ?? 14) * 1.65)),
+      ),
+      anchor,
+    };
+    const current = peeksRef.current;
+    const parentIndex = parent ? current.findIndex((entry) => entry.id === parent.id) : -1;
+    if (parent && parentIndex < 0) {
+      releaseEntityPeek(next);
+      return;
+    }
+    const retained = parent ? current.slice(0, parentIndex + 1) : [];
+    const discarded = parent ? current.slice(parentIndex + 1) : current;
+    replaceEntityPeeks([...retained, next]);
+    if (discarded.length)
+      requestAnimationFrame(() => discarded.forEach(releaseEntityPeek));
+  }
+  async function navigateFromEntityPeek(id: string, openInEditor: boolean) {
+    const current = peeksRef.current.find((entry) => entry.id === id);
+    const currentEditor = peekEditors.current.get(id);
+    if (!current || !currentEditor || !current.source.path) return;
+    const displayed = current.fullFile ? current.source : current.snippet;
+    const model = modelFor(displayed);
+    const localOffset = model.getOffsetAt(
+      currentEditor.getPosition() ?? { lineNumber: 1, column: 1 },
+    );
+    const offset = current.fullFile ? localOffset : current.location.start + localOffset;
+    const found = await findInclude(
+      current.source.path,
+      current.source.text,
+      offset,
+      current.contextPath,
+      current.contextText,
+      current.source,
+    );
+    if (!found) throw new Error("Không tìm thấy entity tại vị trí con trỏ.");
+    if (openInEditor) {
+      closeEntityPeek(peeksRef.current[0]?.id);
+      await open(found.path, found.line, found.column);
+    } else {
+      await showEntityPeek(
+        found,
+        current.contextPath,
+        current.contextText,
+        childEntityPeekAnchor(current, currentEditor),
+        current,
+      );
+    }
+  }
   const execute = async (id: string) => {
     if (selectedTool && /^(editor\.|sql\.|file\.save|xml\.include)/.test(id) && !(id === "sql.run" && tableTab)) return;
     switch (id) {
@@ -1141,7 +1385,7 @@ export default function App({
         else if (active) await closeTab(active);
         break;
       case "profiler":
-        setProfilerTab((existing) => existing ?? { target });
+        setProfilerTab((existing) => existing ?? { target: tableTab?.target ?? target });
         setSelectedTool("profiler");
         break;
       case "check-mail":
@@ -1266,35 +1510,40 @@ export default function App({
       }
       case "xml.include":
       case "xml.include.open": {
+        const focusedPeek = document.activeElement instanceof HTMLElement
+          ? document.activeElement.closest<HTMLElement>(".entity-peek")?.dataset.entityPeekId
+          : undefined;
+        const peekId = commandEntityPeekId.current ?? focusedPeek;
+        if (peekId && peeksRef.current.some((entry) => entry.id === peekId)) {
+          await navigateFromEntityPeek(peekId, id === "xml.include.open");
+          break;
+        }
         if (!active?.path)
           throw new Error("Lưu file trước khi điều hướng include.");
         const model = modelFor(active);
-        const found = await request<{
-          path: string;
-          line: number;
-          column: number;
-        } | null>("xml.include", {
-          path: active.path,
-          text: textOf(active),
-          offset: model.getOffsetAt(
+        const activeText = textOf(active);
+        const found = await findInclude(
+          active.path,
+          activeText,
+          model.getOffsetAt(
             editor.current?.getPosition() ?? { lineNumber: 1, column: 1 },
           ),
-          buffers: Object.fromEntries(
-            tabs.filter((t) => t.path).map((t) => [t.path!, textOf(t)]),
-          ),
-        });
+          active.path,
+          activeText,
+        );
         if (!found)
-          throw new Error("Không tìm thấy include tại vị trí con trỏ.");
+          throw new Error("Không tìm thấy entity tại vị trí con trỏ.");
         if (id === "xml.include") {
-          const d = await request<DocumentInfo>("document.open", {
-            path: found.path,
-          });
-          const buffer = tabs.find(
-            (t) => t.path?.toLowerCase() === found.path.toLowerCase(),
+          await showEntityPeek(
+            found,
+            active.path,
+            activeText,
+            entityPeekAnchor(editor.current),
           );
-          if (buffer) d.text = textOf(buffer);
-          setPeek({ document: d, line: found.line, column: found.column });
-        } else await open(found.path, found.line, found.column);
+        } else {
+          if (peeksRef.current.length) closeEntityPeek(peeksRef.current[0].id);
+          await open(found.path, found.line, found.column);
+        }
         break;
       }
       case "file.save":
@@ -1378,7 +1627,15 @@ export default function App({
       if (c && (c[0] === "window.new" || !document.querySelector("dialog[open]"))) {
         e.preventDefault();
         e.stopImmediatePropagation();
-        if (c[0] !== "window.new" || !e.repeat) void guard(() => executeRef.current(c[0]));
+        if (c[0] !== "window.new" || !e.repeat) {
+          commandEntityPeekId.current = e.target instanceof HTMLElement
+            ? e.target.closest<HTMLElement>(".entity-peek")?.dataset.entityPeekId
+            : undefined;
+          void guard(async () => {
+            try { await executeRef.current(c[0]); }
+            finally { commandEntityPeekId.current = undefined; }
+          });
+        }
       }
     };
     window.addEventListener("keydown", keys, true);
@@ -2811,6 +3068,102 @@ export default function App({
                 </div>
               </div>
             )}
+            {peeks.length > 0 && (
+              <>
+                <div className="entity-peek-scroll-lock" aria-hidden="true" />
+                {peeks.map((peek, index) => (
+                  <aside
+                    key={peek.id}
+                    data-entity-peek-id={peek.id}
+                    className={`entity-peek caret-${peek.anchor.caretSide} ${peek.parentId ? "entity-peek-child" : "entity-peek-root"}`}
+                    role="dialog"
+                    aria-modal="false"
+                    aria-label={`Xem nhanh entity ${peek.location.name}`}
+                    style={{
+                      left: peek.anchor.left,
+                      top: peek.fullFile || peek.anchor.caretSide === "top"
+                        ? peek.anchor.top
+                        : peek.anchor.top + peek.anchor.height - peek.compactHeight,
+                      width: peek.anchor.width,
+                      height: peek.fullFile ? peek.anchor.height : peek.compactHeight,
+                      zIndex: 24 + index,
+                    }}
+                  >
+                    <span
+                      className="entity-peek-caret"
+                      style={{ left: peek.anchor.caretLeft } as CSSProperties}
+                    />
+                    <header className="entity-peek-heading">
+                      <div className="entity-peek-identity">
+                        <strong>
+                          {peek.parentId && <span className="entity-peek-branch" aria-hidden="true">↳</span>}
+                          {peek.location.name || peek.source.name}
+                        </strong>
+                        <span title={peek.source.path ?? undefined}>{peek.source.path}</span>
+                      </div>
+                      <label className="entity-peek-full-file">
+                        <input
+                          type="checkbox"
+                          checked={peek.fullFile}
+                          onChange={(event) => {
+                            peekMountKeys.current.delete(peek.id);
+                            replaceEntityPeeks(peeksRef.current.map((current) =>
+                              current.id === peek.id
+                                ? { ...current, fullFile: event.target.checked }
+                                : current));
+                          }}
+                        />
+                        Hiện toàn bộ file
+                      </label>
+                      <Button
+                        variant="ghost"
+                        onClick={() => {
+                          const root = peeksRef.current[0];
+                          if (root) closeEntityPeek(root.id);
+                          if (peek.source.path)
+                            void guard(() => open(
+                              peek.source.path!,
+                              peek.location.line,
+                              peek.location.column,
+                            ));
+                        }}
+                      >
+                        Mở trong tab
+                      </Button>
+                      <IconButton label={`Đóng xem nhanh entity ${peek.location.name}`} onClick={() => closeEntityPeek(peek.id)}>
+                        <X size={15} />
+                      </IconButton>
+                    </header>
+                    <div className="entity-peek-editor">
+                      <CodeEditor
+                        viewId={`entity-peek-${peek.id}`}
+                        document={peek.fullFile ? peek.source : peek.snippet}
+                        theme={settings.theme}
+                        fontSize={settings.editorFontSize}
+                        readOnly
+                        onChange={() => {}}
+                        onCursor={() => {}}
+                        onMount={(instance) => {
+                          peekEditors.current.set(peek.id, instance);
+                          const key = `${peek.source.id}:${peek.fullFile ? "full" : "snippet"}`;
+                          if (peekMountKeys.current.get(peek.id) === key) return;
+                          peekMountKeys.current.set(peek.id, key);
+                          instance.setPosition(peek.fullFile
+                            ? { lineNumber: peek.location.line, column: peek.location.column }
+                            : { lineNumber: 1, column: 1 });
+                          instance.revealLineInCenter(peek.fullFile ? peek.location.line : 1);
+                          instance.focus();
+                        }}
+                      />
+                    </div>
+                    <footer className="entity-peek-hint">
+                      <span><kbd>F12</kbd> mở entity con</span>
+                      <span><kbd>Ctrl F12</kbd> mở entity trong tab</span>
+                    </footer>
+                  </aside>
+                ))}
+              </>
+            )}
           </div>
           {panel && <PanelResizeHandle />}
           <section id="results-panel" className={`bottom-panel ${panel ? "" : "collapsed"}`}>
@@ -3145,41 +3498,6 @@ export default function App({
                 {label}
               </Button>
             ))}
-          </div>
-        </Modal>
-      )}
-      {peek && (
-        <Modal
-          title={"Xem nhanh include · " + peek.document.name}
-          onClose={() => {
-            setPeek(undefined);
-            void request("document.close", { id: peek.document.id });
-          }}
-          wide
-        >
-          <div className="tool-body large">
-            <CodeEditor
-              document={peek.document}
-              theme={settings.theme}
-              fontSize={settings.editorFontSize}
-              readOnly
-              onChange={() => {}}
-              onCursor={() => {}}
-              onMount={(e) => {
-                e.setPosition({ lineNumber: peek.line, column: peek.column });
-                e.revealLineInCenter(peek.line);
-              }}
-            />
-            <Button
-              onClick={() => {
-                setPeek(undefined);
-                void guard(() =>
-                  open(peek.document.path!, peek.line, peek.column),
-                );
-              }}
-            >
-              Mở file trong editor
-            </Button>
           </div>
         </Modal>
       )}

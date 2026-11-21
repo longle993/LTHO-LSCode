@@ -14,6 +14,13 @@ await page.addInitScript(()=>{
   window.__traceBatch=[];
   const doc=(id,text='',name='fixture.xml',filePath='C:\\Fixture\\fixture.xml')=>({id,path:filePath,name,text,encoding:'utf-8',bom:false,newline:'CRLF',version:1});
   const projectRoot='C:\\Fixture';
+  const entityMainPath=projectRoot+'\\entity-main.xml';
+  const entityDtdPath=projectRoot+'\\graph.dtd';
+  const entityBodyPath=projectRoot+'\\Include\\XML\\UnitBeforeInsert.txt';
+  const entityChildValue="((ma_vv like rtrim(@ma_vv) + '%'))";
+  const entityDtdText="<!ENTITY UnitBeforeInsert SYSTEM 'UnitBeforeInsert'>\r\n<!ENTITY Job.Nested.Key.a \""+entityChildValue+"\">";
+  const entityBodyText='if exists(select 1 where &Job.Nested.Key.a;)';
+  const entityMainText="<!DOCTYPE root [<!ENTITY % graph SYSTEM 'graph.dtd'>%graph;]><root>&UnitBeforeInsert;</root>";
   const fixtureProject={id:'fixture',name:'Dự án thử UI',code:'Dự án thử UI',title:'Dự án thử UI',active:true,server:'.',database:'Fixture_App',sourcePath:projectRoot};
   const otherProject={id:'other',name:'Dự án lịch sử',code:'Dự án lịch sử',title:'Dự án lịch sử',active:true,server:'.',database:'Other_App',sourcePath:'C:\\Other'};
   const pastFile='C:\\Other\\Controller\\Main\\past.xml';
@@ -90,10 +97,23 @@ await page.addInitScript(()=>{
       case 'workspace.files':result=['C:\\Fixture\\fixture.xml','C:\\Fixture\\long.sql'];break;
       case 'workspace.search':result=[];break;
       case 'workspace.reveal':result=true;break;
-      case 'document.openMany':result=window.__bulkOpenCount
-        ? Array.from({length:window.__bulkOpenCount},(_,index)=>doc('open-'+(++serial),'<root>bulk-'+index+'</root>','bulk-'+index+'.xml',projectRoot+'\\bulk-'+index+'.xml'))
-        : [doc('open-'+(++serial),'<root>Tiếng Việt</root>')];break;
-      case 'document.open':result=doc('open-'+(++serial),request.payload.path?.endsWith('nhanvien.xml')?'<root>\r\n<fields/>\r\n<toolbar/>\r\n<command><text><![CDATA[SELECT 42 AS x]]></text></command>\r\n<query>SELECT 43 AS y</query>\r\n<script><![CDATA[const z = 1;]]></script>\r\n</root>':'<root>Tiếng Việt</root>',request.payload.path?.split(/[\\/]/).at(-1)??'fixture.xml',request.payload.path??'C:\\Fixture\\fixture.xml');break;
+      case 'document.openMany':{
+        const entityFixture=window.__entityFixture||new URLSearchParams(location.search).has('entityFixture');
+        result=window.__bulkOpenCount
+          ? Array.from({length:window.__bulkOpenCount},(_,index)=>doc('open-'+(++serial),'<root>bulk-'+index+'</root>','bulk-'+index+'.xml',projectRoot+'\\bulk-'+index+'.xml'))
+          : entityFixture
+            ? [doc('open-'+(++serial),entityMainText,'entity-main.xml',entityMainPath)]
+            : [doc('open-'+(++serial),'<root>Tiếng Việt</root>')];break;
+      }
+      case 'document.open':{
+        const requested=request.payload.path;
+        const entityFixture=window.__entityFixture||new URLSearchParams(location.search).has('entityFixture');
+        const filePath=requested??(entityFixture?entityMainPath:'C:\\Fixture\\fixture.xml');
+        const text=filePath===entityBodyPath?entityBodyText:filePath===entityDtdPath?entityDtdText:
+          entityFixture&&(filePath===entityMainPath||filePath.endsWith('fixture.xml'))?entityMainText:
+          filePath.endsWith('nhanvien.xml')?'<root>\r\n<fields/>\r\n<toolbar/>\r\n<command><text><![CDATA[SELECT 42 AS x]]></text></command>\r\n<query>SELECT 43 AS y</query>\r\n<script><![CDATA[const z = 1;]]></script>\r\n</root>':'<root>Tiếng Việt</root>';
+        result=doc('open-'+(++serial),text,filePath.split(/[\\/]/).at(-1),filePath);break;
+      }
       case 'workspace.duplicate':result=request.payload.path.replace(/(\.[^.]+)$/, '_copy$1');workspaceFiles.push(result);break;
       case 'workspace.rename':{
         const {path,name}=request.payload;
@@ -115,6 +135,15 @@ await page.addInitScript(()=>{
       case 'sql.complete':result=request.payload.text===''?['COUNT','AS','IS NOT NULL','AND','BETWEEN','DESC','ASC'].map(text=>({text,isSnippet:false})):[];break;
       case 'javascript.complete':result=[];break;
       case 'xml.validate':case 'xml.viewWidth':result=null;break;
+      case 'xml.include':{
+        if(request.payload.text.includes('&Job.Nested.Key.a;')){
+          window.__nestedEntityPayload=request.payload;
+          result={path:entityDtdPath,line:2,column:31,name:'Job.Nested.Key.a',start:entityDtdText.indexOf(entityChildValue),length:entityChildValue.length};
+        }else if(request.payload.text.includes('&UnitBeforeInsert;')){
+          result={path:entityBodyPath,line:1,column:1,name:'UnitBeforeInsert',start:0,length:entityBodyText.length};
+        }else result=null;
+        break;
+      }
       case 'xml.diagnostics':result={diagnostic:null,warnings:request.payload.text.includes('SELECT 42 AS x')?
         [{line:2,column:2,message:"Field 'missing' đã khai báo nhưng chưa có trong <views>."}]:[]};break;
       case 'xml.controllerPreview':result=window.__previewDir ? {
@@ -150,7 +179,9 @@ await page.addInitScript(()=>{
       case 'table.createScript':result='CREATE TABLE [dbo].[DanhMuc] ([code] INT);';break;
       case 'table.view':result={data:{columns:['code','label'],rows:request.payload.where?.includes("LIKE N'%ab%'")?[]:[['1','x'],['2','y']]},snapshotId:'fixture-preview'};break;
       case 'table.insertScript':result='INSERT INTO [dbo].[DanhMuc] ([code]) VALUES (1);';break;
-      case 'profiler.start':result=true;break;
+      case 'profiler.defaults':result={filter:'Fixture',profilerPath:'C:\\Fixture\\PROFILER.EXE',authentication:'Windows'};break;
+      case 'file.pick':result='C:\\CustomSSMS\\PROFILER.EXE';break;
+      case 'profiler.start':result={engine:'ssms18'};break;
       case 'profiler.read':result={events:window.__traceBatch.splice(0),dropped:0,truncated:false};break;
       case 'project.discover':result=[{name:'Project Fixture',folder:'C:\\Fixture\\Application',configPath:'C:\\Fixture\\Application\\web.config'}];break;
       case 'project.sync':result=true;break;
@@ -169,6 +200,70 @@ await page.addInitScript(()=>{
 });
 const out='artifacts/webview-ui';mkdirSync(out,{recursive:true});
 let checks=0;const check=(value,name)=>{if(!value)throw Error('FAIL '+name);checks++;console.log('PASS '+name);};
+async function testProfiler(){
+  await page.getByRole('button',{name:'SQL Profiler',exact:true}).click();
+  const profiler=page.getByRole('tabpanel',{name:'SQL Profiler'});
+  check(await profiler.isVisible() && await page.locator('.editor-toolbar').getByRole('tab',{name:'SQL Profiler'}).isVisible()
+    && !(await page.locator('dialog[open]').count()),'Profiler opens on the editor toolbar without a dialog');
+  await profiler.getByText(/Đang thu thập/).waitFor();
+  check(await profiler.getByRole('textbox',{name:'Đường dẫn Profiler'}).inputValue()==='C:\\Fixture\\PROFILER.EXE' &&
+    await profiler.getByRole('textbox',{name:'Bộ lọc database'}).inputValue()==='Fixture' &&
+    await profiler.locator('input[type=password]').inputValue()==='',
+    'Profiler prefills saved executable and database scope without exposing target credentials');
+  check(await profiler.getByRole('button',{name:/^(Profiler engine|Lưu trace|Mở trace)$/}).count()===0 &&
+    await profiler.getByRole('textbox',{name:'Đường dẫn template'}).count()===0,
+    'Profiler hides the engine selector, template field and trace file buttons');
+  const executions=await page.evaluate(()=>window.__nativeCalls.filter(c=>c.method==='sql.execute').length);
+  await page.keyboard.press('F5');
+  check(await page.evaluate(before=>window.__nativeCalls.filter(c=>c.method==='sql.execute').length===before,executions),'Profiler tab shortcuts do not run the hidden editor query');
+  await page.evaluate(()=>window.__traceBatch.push(...Array.from({length:60},(_,i)=>({time:String(i),event:'Event '+i,database:'Fixture_App',login:'profile',durationMs:1,reads:0,text:'SELECT '+i}))));
+  check(await page.evaluate(()=>window.__nativeCalls.filter(c=>c.method==='profiler.start').length===1 &&
+    window.__nativeCalls.some(c=>c.method==='profiler.start' && c.payload.engine==='auto' &&
+      c.payload.useTargetCredentials && c.payload.targetId && !Object.hasOwn(c.payload,'password'))),
+    'Opening Profiler automatically starts one trace with the current target');
+  await page.waitForFunction(()=>document.querySelector('.trace-sql')?.value==='SELECT 59');
+  check(await profiler.locator('.trace-sql').evaluate(element=>element.clientHeight>=110),'Profiler SQL area has room for more lines');
+  const traceGrid=profiler.locator('.data-grid');
+  check(await traceGrid.evaluate(el=>el.scrollTop>0),'Profiler follows the newest live event');
+  await traceGrid.evaluate(el=>el.scrollTop=0);
+  const firstTraceCell=traceGrid.locator('[data-grid-row="0"][data-grid-column="1"]');
+  const lastTraceCell=traceGrid.locator('[data-grid-row="1"][data-grid-column="2"]');
+  await firstTraceCell.waitFor();
+  const from=await firstTraceCell.boundingBox(),to=await lastTraceCell.boundingBox();
+  await page.mouse.move(from.x+from.width/2,from.y+from.height/2);
+  await page.mouse.down();await page.mouse.move(to.x+to.width/2,to.y+to.height/2,{steps:8});await page.mouse.up();
+  await page.keyboard.press('Control+c');
+  await page.waitForFunction(()=>window.__nativeCalls.some(c=>c.method==='clipboard.write'&&c.payload.text==='Event 0\tFixture_App\r\nEvent 1\tFixture_App'));
+  check(await traceGrid.locator('td.grid-selected').count()===4&&!(await traceGrid.getByRole('button',{name:/Sao chép/}).count()),'Profiler drag copies a rectangular TSV range without copy buttons');
+  await page.evaluate(()=>window.__traceBatch.push({time:'60',event:'Event 60',database:'Fixture_App',login:'profile',durationMs:1,reads:0,text:'SELECT 60'}));
+  await profiler.getByText(/61 sự kiện/).waitFor();
+  check(await profiler.locator('.trace-sql').inputValue()==='SELECT 0'&&await traceGrid.locator('td.grid-selected').count()===4,'Profiler preserves the selected row and range while live events arrive');
+  await profiler.getByRole('button',{name:'Sao chép SQL',exact:true}).click();
+  await page.waitForFunction(()=>window.__nativeCalls.some(c=>c.method==='clipboard.write'&&c.payload.text==='SELECT 0'));
+  await profiler.locator('.trace-sql').focus();
+  await profiler.locator('.trace-sql').evaluate(el=>el.setSelectionRange(0,6));
+  await page.keyboard.press('Control+c');
+  await page.waitForFunction(()=>window.__nativeCalls.some(c=>c.method==='clipboard.write'&&c.payload.text==='SELECT'));
+  check(true,'Profiler copies full SQL by button and selected text with Ctrl+C');
+  await profiler.getByRole('button',{name:'Theo dõi cuối lưới'}).click();
+  await page.waitForFunction(()=>document.querySelector('.trace-sql')?.value==='SELECT 60');
+  await profiler.getByRole('button',{name:'Dừng',exact:true}).click();
+  await profiler.getByText(/Đã dừng/).waitFor();
+  await page.evaluate(()=>window.__traceBatch.push({time:'61',event:'Event 61',database:'Fixture_App',login:'profile',durationMs:1,reads:0,text:'SELECT 61'}));
+  await profiler.getByRole('button',{name:'Chạy',exact:true}).click();
+  await profiler.getByText(/62 sự kiện/).waitFor();
+  check(await profiler.locator('.data-grid tbody tr').count()>1 &&
+    await profiler.locator('.trace-sql').inputValue()==='SELECT 61' &&
+    await page.evaluate(()=>window.__nativeCalls.filter(c=>c.method==='profiler.start').length===2),
+    'Profiler stop and restart appends events without clearing captured data');
+  await page.screenshot({path:out+'/profiler-tab-dark.png'});
+  const stopsBeforeSwitch=await page.evaluate(()=>window.__nativeCalls.filter(c=>c.method==='profiler.stop').length);
+  await page.locator('.document-tabs').getByRole('tab').first().click();
+  check(!(await profiler.isVisible())&&await page.evaluate(before=>window.__nativeCalls.filter(c=>c.method==='profiler.stop').length===before,stopsBeforeSwitch),'Switching editor tabs keeps the Profiler session running');
+  await page.getByRole('button',{name:'Đóng SQL Profiler'}).click();
+  await page.getByRole('tab',{name:'SQL Profiler'}).waitFor({state:'detached'});
+  check(await page.evaluate(()=>window.__nativeCalls.some(c=>c.method==='profiler.stop')),'Closing the Profiler tab stops the session');
+}
 async function testMenuEditor(functionRow){
   await page.evaluate(()=>{window.__holdMenuResources=true;});
   await functionRow.focus();await functionRow.press('F3');
@@ -255,7 +350,9 @@ async function testTableRefreshAndNotice(){
   await notice.waitFor({state:'detached'});
 }
 try{
-  await page.goto(process.env.LSCODE_UI_URL??'http://127.0.0.1:4173');await page.getByRole('dialog',{name:'Dự án của bạn'}).waitFor();check(true,'Project picker opens before workbench');
+  const testUrl=new URL(process.env.LSCODE_UI_URL??'http://127.0.0.1:4173');
+  if(process.argv.includes('--entity-peek-regression'))testUrl.searchParams.set('entityFixture','1');
+  await page.goto(testUrl.toString());await page.getByRole('dialog',{name:'Dự án của bạn'}).waitFor();check(true,'Project picker opens before workbench');
   if(process.argv.includes('--catalog-source-regression')){
     await page.locator('.project-row').filter({hasText:'Dự án thử UI'}).click();
     await page.locator('dialog').waitFor({state:'detached'});
@@ -320,6 +417,113 @@ Trạng thái: 1-Còn sử dụng, 0-Không còn sử dụng`);
     await discard.getByRole('button',{name:'Bỏ thay đổi'}).click();
     check(await catalog.getByRole('button',{name:'Thiết kế bảng SQL'}).getAttribute('aria-pressed')==='true',
       'Create catalog keeps the SQL designer available');
+    check(errors.length===0,'No uncaught browser errors');
+  } else if(process.argv.includes('--entity-peek-regression')){
+    await page.evaluate(()=>{window.__entityFixture=true;});
+    await page.locator('.project-row').filter({hasText:'Dự án thử UI'}).click();
+    await page.locator('dialog').waitFor({state:'detached'});
+    await page.getByRole('button',{name:'Mở file',exact:true}).first().click();
+    await page.waitForFunction(()=>window.__nativeCalls.some(call=>call.method==='document.openMany'));
+    const mainEditor=page.locator('.editor-group.focused .monaco-editor');
+    await mainEditor.waitFor();
+    await page.waitForFunction(()=>document.querySelector('.editor-group.focused .view-lines')?.textContent.includes('UnitBeforeInsert'));
+    await mainEditor.click({position:{x:180,y:35}});
+    await page.keyboard.press('Control+f');
+    await page.keyboard.insertText('&UnitBeforeInsert;');
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('F12');
+    await page.waitForFunction(()=>window.__nativeCalls.some(call=>call.method==='xml.include'));
+    check(true,'F12 requests entity resolution from the active XML editor');
+    check(await page.evaluate(()=>window.__nativeCalls.findLast(call=>call.method==='xml.include')?.payload.text.includes('&UnitBeforeInsert;')),
+      'Entity resolution receives the active XML buffer');
+    const peeks=page.locator('.entity-peek');
+    const rootPeek=peeks.first();
+    await rootPeek.waitFor();
+    check(await page.locator('dialog[open]').count()===0 &&
+      await rootPeek.getByText('UnitBeforeInsert',{exact:true}).isVisible() &&
+      await rootPeek.getByText(/UnitBeforeInsert\.txt/).isVisible(),
+      'F12 opens an anchored entity callout with its source path instead of a modal');
+    check(await page.evaluate(()=>{
+      const background=document.querySelector('.editor-group.focused .monaco-editor');
+      const heading=document.querySelector('.entity-peek-heading');
+      const backgroundBlocked=background&&!background.dispatchEvent(new WheelEvent('wheel',{deltaY:160,bubbles:true,cancelable:true}));
+      const insideAllowed=heading&&heading.dispatchEvent(new WheelEvent('wheel',{deltaY:160,bubbles:true,cancelable:true}));
+      return document.body.classList.contains('entity-peek-scroll-locked')&&
+        Boolean(document.querySelector('.entity-peek-scroll-lock'))&&backgroundBlocked&&insideAllowed;
+    }),'Entity callout locks background scrolling while keeping its own content scrollable');
+    check(await rootPeek.locator('.view-lines').textContent().then(text=>
+      text.includes('&Job.Nested.Key.a;')&&!text.includes('<!ENTITY')),
+      'Entity callout renders only the resolved entity body');
+    const rootPeekEditor=rootPeek.locator('.monaco-editor');
+    await rootPeekEditor.click({position:{x:220,y:35}});
+    await page.keyboard.press('Control+Home');
+    for(let index=0;index<'if exists(select 1 where &J'.length;index++)await page.keyboard.press('ArrowRight');
+    check(await page.evaluate(()=>document.activeElement instanceof HTMLElement&&Boolean(document.activeElement.closest('.entity-peek'))),
+      'The nested entity editor keeps keyboard focus');
+    await page.keyboard.press('F12');
+    await page.waitForFunction(()=>window.__nativeCalls.filter(call=>call.method==='xml.include').length>=2);
+    check(await page.evaluate(()=>window.__nativeCalls.filter(call=>call.method==='xml.include').at(-1)?.payload.text.includes('&Job.Nested.Key.a;')),
+      'F12 in the callout resolves against the displayed entity source');
+    await page.waitForFunction(()=>document.querySelectorAll('.entity-peek').length===2);
+    const childPeek=peeks.nth(1);
+    await childPeek.locator('.entity-peek-identity strong').filter({hasText:'Job.Nested.Key.a'}).waitFor();
+    await page.waitForFunction(value=>[...document.querySelectorAll('.entity-peek')].at(-1)?.querySelector('.view-lines')?.textContent.replace(/\s/g,' ').includes(value),
+      "((ma_vv like rtrim(@ma_vv) + '%'))");
+    check(await rootPeek.getByText('UnitBeforeInsert',{exact:true}).isVisible() &&
+      await childPeek.locator('.view-lines').textContent().then(text=>
+        text.replace(/\s/g,' ').includes("((ma_vv like rtrim(@ma_vv) + '%'))")&&!text.includes('<!ENTITY')),
+      'F12 inside a callout keeps its parent and opens the nested entity in a child callout');
+    check(await page.evaluate(({path,text})=>window.__nestedEntityPayload?.contextPath===path&&
+      window.__nestedEntityPayload?.contextText===text,{path:'C:\\Fixture\\entity-main.xml',text:"<!DOCTYPE root [<!ENTITY % graph SYSTEM 'graph.dtd'>%graph;]><root>&UnitBeforeInsert;</root>"}),
+      'Nested F12 retains the declaration graph of the root XML');
+    await page.locator('.editors').screenshot({path:out+'/entity-peek-tree.png',animations:'disabled'});
+    await childPeek.getByLabel('Hiện toàn bộ file').check();
+    await page.waitForFunction(()=>[...document.querySelectorAll('.entity-peek')].at(-1)?.querySelector('.view-lines')?.textContent.replace(/\s/g,' ').includes('<!ENTITY UnitBeforeInsert'));
+    check(true,'The explicit option switches the callout to the entire source file');
+    await childPeek.screenshot({path:out+'/entity-peek.png',animations:'disabled'});
+    await childPeek.getByRole('button',{name:'Đóng xem nhanh entity Job.Nested.Key.a',exact:true}).click();
+    await page.waitForFunction(()=>document.querySelectorAll('.entity-peek').length===1);
+    check(await rootPeek.getByText('UnitBeforeInsert',{exact:true}).isVisible(),
+      'Closing a child callout keeps its parent open');
+    await rootPeekEditor.click({position:{x:220,y:35}});
+    await page.keyboard.press('Control+Home');
+    for(let index=0;index<'if exists(select 1 where &J'.length;index++)await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('F12');
+    await page.waitForFunction(()=>document.querySelectorAll('.entity-peek').length===2);
+    await rootPeek.getByRole('button',{name:'Đóng xem nhanh entity UnitBeforeInsert',exact:true}).click();
+    await page.waitForFunction(()=>document.querySelectorAll('.entity-peek').length===0);
+    check(await page.evaluate(()=>!document.body.classList.contains('entity-peek-scroll-locked')),
+      'Closing a parent callout closes its descendant branch and releases the scroll lock');
+    check(errors.length===0,'No uncaught browser errors');
+  } else if(process.argv.includes('--xml-panel-regression')){
+    await page.locator('.project-row').filter({hasText:'Dự án thử UI'}).click();
+    await page.locator('dialog').waitFor({state:'detached'});
+    await page.getByRole('button',{name:'Kết quả',exact:true}).click();
+    await page.getByRole('button',{name:'Mở file',exact:true}).first().click();
+    const xmlTab=page.getByRole('tab',{name:'fixture.xml',exact:true});
+    await xmlTab.waitFor();
+    check(await page.locator('#results-panel').evaluate(element=>element.classList.contains('collapsed')),
+      'Opening XML temporarily collapses the bottom panel');
+    await page.getByRole('button',{name:'Kết quả',exact:true}).click();
+    await page.getByRole('button',{name:'File mới',exact:true}).click();
+    await xmlTab.click();
+    check(await page.locator('#results-panel').evaluate(element=>element.classList.contains('collapsed')),
+      'Returning to an existing XML tab collapses the bottom panel again');
+    check(errors.length===0,'No uncaught browser errors');
+  } else if(process.argv.includes('--profiler-regression')){
+    await page.locator('.project-row').filter({hasText:'Dự án thử UI'}).click();
+    await page.locator('dialog').waitFor({state:'detached'});
+    await page.getByRole('button',{name:'SQL mới',exact:true}).click();
+    await testProfiler();
+    await page.getByRole('button',{name:'Cài đặt',exact:true}).click();
+    await page.getByRole('button',{name:'Chọn PROFILER.EXE',exact:true}).click();
+    await page.waitForFunction(expected => Array.from(document.querySelectorAll('dialog input'))
+      .some(input => input.value === expected), 'C:\\CustomSSMS\\PROFILER.EXE');
+    check(await page.getByLabel('SQL Profiler (PROFILER.EXE)').inputValue()==='C:\\CustomSSMS\\PROFILER.EXE',
+      'Settings still allows selecting another PROFILER.EXE');
+    await page.getByRole('button',{name:'Lưu cài đặt',exact:true}).click();
+    await page.waitForFunction(()=>window.__nativeCalls.some(c=>c.method==='settings.save' &&
+      c.payload.settings.profiler18Path==='C:\\CustomSSMS\\PROFILER.EXE'));
     check(errors.length===0,'No uncaught browser errors');
   } else if(process.argv.includes('--menu-regression')){
     await page.locator('.project-row').filter({hasText:'Dự án thử UI'}).click();
@@ -406,53 +610,7 @@ Trạng thái: 1-Còn sử dụng, 0-Không còn sử dụng`);
     await page.keyboard.press('Control+Shift+p');await page.getByRole('textbox',{name:'Tìm lệnh hoặc file'}).fill(title);await page.getByRole('dialog').getByRole('button',{name:title,exact:true}).click();await page.locator('dialog[open]').waitFor();check(await page.locator('dialog[open]').isVisible(),'Tool opens: '+title);if(title==='Danh mục'){await page.getByRole('textbox',{name:'Tên bảng',exact:true}).fill('catalog_fixture');await page.getByRole('button',{name:'Mở bảng',exact:true}).click();await page.getByRole('button',{name:'Dữ liệu',exact:true}).click();await page.getByRole('button',{name:'Chọn dòng 1',exact:true}).click();await page.getByRole('button',{name:'Sao chép dòng chọn',exact:true}).click();await page.getByRole('button',{name:'Dán nhiều dòng',exact:true}).click();await page.getByRole('textbox',{name:'Dòng 1 label',exact:true}).waitFor();check(await page.getByRole('textbox',{name:'Dòng 1 label',exact:true}).inputValue()===':null','Catalog copy/paste preserves SQL NULL through native clipboard boundary');}await page.getByRole('button',{name:'Đóng',exact:true}).click();
   }
 
-  await page.getByRole('button',{name:'SQL Profiler',exact:true}).click();
-  const profiler=page.getByRole('tabpanel',{name:'SQL Profiler'});
-  check(await profiler.isVisible() && await page.locator('.editor-toolbar').getByRole('tab',{name:'SQL Profiler'}).isVisible()
-    && !(await page.locator('dialog[open]').count()),'Profiler opens on the editor toolbar without a dialog');
-  check(await profiler.getByRole('textbox',{name:'Profiler user'}).inputValue()==='profile'&&await profiler.locator('input[type=password]').inputValue()==='fsd','Profiler defaults to dedicated SQL login');
-  check(await profiler.getByRole('button',{name:/^(Profiler engine|Lưu trace|Mở trace)$/}).count()===0 &&
-    await profiler.getByRole('textbox',{name:'Đường dẫn template'}).count()===0,
-    'Profiler hides the engine selector, template field and trace file buttons');
-  const executions=await page.evaluate(()=>window.__nativeCalls.filter(c=>c.method==='sql.execute').length);
-  await page.keyboard.press('F5');
-  check(await page.evaluate(before=>window.__nativeCalls.filter(c=>c.method==='sql.execute').length===before,executions),'Profiler tab shortcuts do not run the hidden editor query');
-  await page.evaluate(()=>window.__traceBatch.push(...Array.from({length:60},(_,i)=>({time:String(i),event:'Event '+i,database:'Fixture_App',login:'profile',durationMs:1,reads:0,text:'SELECT '+i}))));
-  await profiler.getByRole('button',{name:'Chạy',exact:true}).click();
-  await page.waitForFunction(()=>window.__nativeCalls.some(c=>c.method==='profiler.start' &&
-    c.payload.engine==='ssms18' && !Object.hasOwn(c.payload,'templatePath')));
-  await page.waitForFunction(()=>document.querySelector('.trace-sql')?.value==='SELECT 59');
-  check(await profiler.locator('.trace-sql').evaluate(element=>element.clientHeight>=110),'Profiler SQL area has room for more lines');
-  const traceGrid=profiler.locator('.data-grid');
-  check(await traceGrid.evaluate(el=>el.scrollTop>0),'Profiler follows the newest live event');
-  await traceGrid.evaluate(el=>el.scrollTop=0);
-  const firstTraceCell=traceGrid.locator('[data-grid-row="0"][data-grid-column="1"]');
-  const lastTraceCell=traceGrid.locator('[data-grid-row="1"][data-grid-column="2"]');
-  await firstTraceCell.waitFor();
-  const from=await firstTraceCell.boundingBox(),to=await lastTraceCell.boundingBox();
-  await page.mouse.move(from.x+from.width/2,from.y+from.height/2);
-  await page.mouse.down();await page.mouse.move(to.x+to.width/2,to.y+to.height/2,{steps:8});await page.mouse.up();
-  await page.keyboard.press('Control+c');
-  await page.waitForFunction(()=>window.__nativeCalls.some(c=>c.method==='clipboard.write'&&c.payload.text==='Event 0\tFixture_App\r\nEvent 1\tFixture_App'));
-  check(await traceGrid.locator('td.grid-selected').count()===4&&!(await traceGrid.getByRole('button',{name:/Sao chép/}).count()),'Profiler drag copies a rectangular TSV range without copy buttons');
-  await page.evaluate(()=>window.__traceBatch.push({time:'60',event:'Event 60',database:'Fixture_App',login:'profile',durationMs:1,reads:0,text:'SELECT 60'}));
-  await profiler.getByText(/61 sự kiện/).waitFor();
-  check(await profiler.locator('.trace-sql').inputValue()==='SELECT 0'&&await traceGrid.locator('td.grid-selected').count()===4,'Profiler preserves the selected row and range while live events arrive');
-  await profiler.getByRole('button',{name:'Sao chép SQL',exact:true}).click();
-  await page.waitForFunction(()=>window.__nativeCalls.some(c=>c.method==='clipboard.write'&&c.payload.text==='SELECT 0'));
-  await profiler.locator('.trace-sql').focus();
-  await profiler.locator('.trace-sql').evaluate(el=>el.setSelectionRange(0,6));
-  await page.keyboard.press('Control+c');
-  await page.waitForFunction(()=>window.__nativeCalls.some(c=>c.method==='clipboard.write'&&c.payload.text==='SELECT'));
-  check(true,'Profiler copies full SQL by button and selected text with Ctrl+C');
-  await profiler.getByRole('button',{name:'Theo dõi cuối lưới'}).click();
-  await page.waitForFunction(()=>document.querySelector('.trace-sql')?.value==='SELECT 60');
-  await page.screenshot({path:out+'/profiler-tab-dark.png'});
-  await page.locator('.document-tabs').getByRole('tab').first().click();
-  check(!(await profiler.isVisible())&&await page.evaluate(()=>!window.__nativeCalls.some(c=>c.method==='profiler.stop')),'Switching editor tabs keeps the Profiler session running');
-  await page.getByRole('button',{name:'Đóng SQL Profiler'}).click();
-  await page.getByRole('tab',{name:'SQL Profiler'}).waitFor({state:'detached'});
-  check(await page.evaluate(()=>window.__nativeCalls.some(c=>c.method==='profiler.stop')),'Closing the Profiler tab stops the session');
+  await testProfiler();
 
   await page.keyboard.press('F5');await page.waitForTimeout(150);await page.locator('.data-grid').first().evaluate(e=>e.scrollTop=0);await page.waitForTimeout(80);
   const cell=page.locator('.data-grid tbody tr').filter({has:page.locator('td[title="Tiếng Việt 0"]')}).locator('td[title="Tiếng Việt 0"]');
@@ -570,7 +728,14 @@ Trạng thái: 1-Còn sử dụng, 0-Không còn sử dụng`);
     'Real folder tree keeps the colored categories');
   check(await fileTree.locator('.category-heading').first().evaluate(element => getComputedStyle(element).borderTopWidth==='2px'),
     'The category color stripe sits above the folder heading');
-  await dirFile.click();await gridFile.click();
+  await page.getByRole('button',{name:'Kết quả',exact:true}).click();
+  await dirFile.click();
+  await page.waitForFunction(()=>document.querySelector('#results-panel')?.classList.contains('collapsed'));
+  await page.getByRole('button',{name:'Kết quả',exact:true}).click();
+  await page.waitForFunction(()=>!document.querySelector('#results-panel')?.classList.contains('collapsed'));
+  await gridFile.click();
+  await page.waitForFunction(()=>document.querySelector('#results-panel')?.classList.contains('collapsed'));
+  check(true,'Opening or selecting an XML file temporarily collapses the bottom panel');
   check(await page.locator('.monaco-editor .view-lines').first().evaluate(lines=>getComputedStyle(lines).fontSize==='18px'),
     'Editor font size applies to Monaco');
   await sidebar.screenshot({path:out+'/workspace-tree-design.png'});

@@ -10,6 +10,7 @@
     <ProjectReference Include="../LSCode.Core/LSCode.Core.csproj" />
     <ProjectReference Include="../DynamicTemplateStudio.Infrastructure/DynamicTemplateStudio.Infrastructure.csproj" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="6.1.3" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.13" />
     <PackageReference Include="Microsoft.SqlServer.TransactSql.ScriptDom" Version="180.117.0" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" />
   </ItemGroup>

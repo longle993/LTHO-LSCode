@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import { Button, Modal, Select } from "../ui";
+import { request } from "../bridge";
 import type { Settings } from "../bridge";
 import { keyboardGesture, shortcutGroupFor, shortcutGroups } from "../commands";
 import { useTask } from "./useTask";
@@ -121,7 +122,7 @@ export function SettingsDialog({
               />
             </label>
             <label>
-              SSMS 18 Profiler executable
+              SQL Profiler (PROFILER.EXE)
               <input
                 value={draft.profiler18Path}
                 onChange={(e) =>
@@ -129,6 +130,10 @@ export function SettingsDialog({
                 }
               />
             </label>
+            <Button type="button" disabled={task.busy} onClick={() => void task.run(async () => {
+              const path = await request<string | null>("file.pick");
+              if (path) setDraft(old => ({ ...old, profiler18Path: path }));
+            })}>Chọn PROFILER.EXE</Button>
             <p className="muted">
               Giữ dữ liệu tại %LocalAppData%\LSCode hoặc LSCODE_DATA_HOME.
               WebView không lưu mật khẩu trong trình duyệt.

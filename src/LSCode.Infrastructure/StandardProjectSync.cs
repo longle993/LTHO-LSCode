@@ -1,9 +1,12 @@
+using System.ComponentModel;
 using System.Data;
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Xml.Linq;
 using LSCode.Core;
 using Microsoft.Data.SqlClient;
+using Microsoft.Data.Sqlite;
 
 namespace LSCode.Infrastructure;
 
@@ -19,12 +22,50 @@ public static class StandardProjectSync
 {
     private static readonly IStandardCatalogConnectionProvider ConnectionProvider = new EmbeddedStandardCatalogConnectionProvider();
 
+    internal static string FindFsdUser()
+    {
+        using var current = Process.GetCurrentProcess();
+        var users = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var process in Process.GetProcessesByName("FSDStudio"))
+        {
+            using (process)
+            {
+                try
+                {
+                    if (process.SessionId != current.SessionId || process.MainModule?.FileName is not { } executable)
+                        continue;
+                    var user = ReadFsdUser(Path.Combine(Path.GetDirectoryName(executable)!, "config.db"));
+                    if (user.Length > 0) users.Add(user);
+                }
+                catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or NotSupportedException) { }
+            }
+        }
+        return users.Count == 1 ? users.Single() : "";
+    }
+
+    public static string ReadFsdUser(string databasePath)
+    {
+        if (!File.Exists(databasePath)) return "";
+        try
+        {
+            using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+            {
+                DataSource = databasePath, Mode = SqliteOpenMode.ReadOnly, Pooling = false, DefaultTimeout = 1
+            }.ConnectionString);
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT val FROM options WHERE ma_phan_he = 'RE' AND lower(trim(id)) = 'curruser' LIMIT 1";
+            var user = (command.ExecuteScalar() as string)?.Trim() ?? "";
+            return user.Equals("FAST", StringComparison.OrdinalIgnoreCase) ? "" : user;
+        }
+        catch (SqliteException) { return ""; }
+    }
+
     public static async Task<StandardProjectRow[]> ReadAsync(string currentUser, CancellationToken token)
     {
         currentUser = currentUser.Trim();
         if (currentUser.Length == 0) throw new ArgumentException("Nhập tên người dùng.");
-        await using var connection = new SqlConnection(ConnectionProvider.GetConnectionString());
-        await connection.OpenAsync(token).ConfigureAwait(false);
+        await using var connection = await ConnectionProvider.OpenAsync(token).ConfigureAwait(false);
         await using var command = new SqlCommand("dbo.ns_getListDept", connection)
         {
             CommandType = CommandType.StoredProcedure,
@@ -45,14 +86,14 @@ public static class StandardProjectSync
                 foreach (var name in names) if (fields.TryGetValue(name, out var value)) return value;
                 throw new InvalidDataException($"ns_getListDept thiếu cột {string.Join("/", names)}.");
             }
-            rows.Add(new(Read("ma_da"), Read("ten_da"), Read("server", "ten_server"), Read("db_sys"),
+            rows.Add(new(Read("ma_da"), Read("ten_da"), Read("ten_server", "server"), Read("db_sys"),
                 Read("dir_pro_web"), Read("dir_src_web"), Read("dir_pro_app"), Read("dir_src_app"), Read("dir_update"), fields));
         }
         return rows.ToArray();
     }
 
     public static StandardProjectPlan Plan(IEnumerable<LegacyProject> saved, IEnumerable<StandardProjectRow> source,
-        CancellationToken token = default, bool skipSynced = false)
+        CancellationToken token = default, bool preserveInactive = false)
     {
         var projects = saved.ToList();
         var rows = source.ToArray();
@@ -76,7 +117,7 @@ public static class StandardProjectSync
             }
             var index = byCode.TryGetValue(code, out var foundIndex) ? foundIndex : -1;
             var previous = index >= 0 ? projects[index] : null;
-            if (skipSynced && !string.IsNullOrWhiteSpace(previous?.Field("StandardProjectCode")))
+            if (preserveInactive && (previous?.Field("IsActive") is "0" or "False" or "false"))
             {
                 previews.Add(new(code, row.Title, "", "unchanged", null));
                 continue;
@@ -109,7 +150,7 @@ public static class StandardProjectSync
             Set(xml, "User", Value(row, "xuser"));
             Set(xml, "Authentication", "sql");
             Set(xml, "Notes", Value(row, "ghi_chu"));
-            Set(xml, "IsActive", Value(row, "status") is "0" or "False" or "false" ? "0" : "1");
+            if (previous is null) Set(xml, "IsActive", "1");
             Set(xml, "HomeUpdateCode", Value(row, "ma_da_tmp", "ma_da_update"));
             Set(xml, "ProgramPath", First(Value(row, "web_host1"), Value(row, "web_host2"), row.WebProgramPath, row.AppProgramPath));
             // A catalog can contain thousands of UNC roots. Probing every share here can
