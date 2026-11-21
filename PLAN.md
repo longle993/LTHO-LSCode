@@ -8,6 +8,21 @@
 - [x] Build frontend và Desktop Release. Chạy 154 kiểm tra Core và 11 kiểm tra Chrome trên bản production, gồm phân trang và tìm kiếm ở chiều rộng 375 px. Probe màn chung ghi ba điểm ngoài hai khu vực thay đổi: nút **Mở thư mục** xuống dòng và nút tìm lệnh có vùng bấm dưới 24 px ở 375 px, nút **Chức năng** xuống dòng ở 1.440 px.
 - [ ] Đo thời gian và bộ nhớ trên dữ liệu ERP thực tế. Nhánh đọc SQL Server 2008 chưa được chạy trên máy chủ phiên bản đó.
 
+## Tự chạy SQL Profiler — 20/11/2026
+
+- [x] Đối chiếu thao tác mở Profiler từ editor của FSD Studio và xác định thông tin lấy từ kết nối hiện tại.
+- [x] Điền bộ lọc database, nạp cấu hình SSMS, tự khởi động và giữ luồng chọn `PROFILER.EXE`.
+- [x] Kiểm tra chọn executable và tự chạy trên giao diện bằng fixture. Thu sự kiện thật và xác nhận dọn phiên Extended Events trên SQL Server LocalDB. Chạy smoke WebView2 và publish Windows x64.
+- [x] Xử lý máy chủ SQL2014 từ chối Extended Events của tài khoản dự án. Kiểm tra SQL Trace tích hợp bằng truy vấn fixture trên LocalDB và xác nhận mở, đọc, đóng phiên đã lọc trên máy chủ tương ứng.
+- [x] Giữ dữ liệu đã thu khi Dừng rồi Chạy lại và kiểm tra sự kiện của phiên mới được nối vào lưới.
+- [x] Tự thu gọn panel dưới khi mở hoặc chọn tab XML, giữ nguyên dữ liệu và cho phép mở lại.
+
+## Đồng bộ dự án theo FSD Studio — 20/11/2026
+
+- [x] Đối chiếu nút đồng bộ, nguồn `CurrUser` và danh mục QLYC với bản FSD Studio trên máy.
+- [x] Bổ sung đọc `CurrUser` từ cấu hình FSD Studio, thử điểm kết nối dự phòng và làm mới profile đang sử dụng.
+- [x] Kiểm tra đọc danh mục thật và lập kế hoạch trong bộ nhớ. Kiểm tra UI bằng fixture, chạy smoke WebView2 và publish Windows x64.
+
 ## Tạo danh mục ERP từ khảo sát Create List — 19/11/2026
 
 - [x] Đọc luồng cấu hình, các bước master/detail và điểm xuất source của Fcode.
@@ -160,6 +175,17 @@ Chi tiết và tiêu chí: [ERP-MENU-PERFORMANCE-MOBILE](docs/specifications/ERP
 - [x] Hiển thị danh sách dự án trước khi tải snippet. Khi chọn dự án, bắt đầu mở dự án đồng thời với đọc bản nháp.
 - [x] Ghi thời gian mở dự án bằng `startup.project` bên cạnh số đo danh sách dự án `startup.picker`.
 - [ ] Đo thời gian mở nguội và mở lại trên máy người dùng.
+
+## Xem nhanh entity XML bằng F12 — 20/11/2026
+
+- [x] Mở callout tại vùng editor, hiện tên và đường dẫn entity thay cho modal toàn màn hình.
+- [x] Trả về phạm vi `Start/Length` của giá trị entity; entity `SYSTEM` dùng đúng nội dung file đích.
+- [x] Giữ ngữ cảnh khai báo của XML gốc để F12 tiếp trong entity con vẫn dò được DTD cha.
+- [x] Dùng chuỗi callout cha–con: F12 trong callout giữ tổ tiên, mở popup con mới; đóng lá giữ cha, đóng cha dọn toàn bộ hậu duệ.
+- [x] Bổ sung tùy chọn **Hiện toàn bộ file**, nút mở trong tab và giữ Ctrl+F12.
+- [x] Khóa cuộn và tương tác chuột của màn hình nền trong khi callout mở; vẫn cho cuộn editor bên trong callout.
+- [x] Kiểm chứng bằng 156 Core checks, 105 WebView checks, TypeScript/Vite production build và 14 bước regression trình duyệt chuyên biệt, gồm mở nhánh con, đóng lá và đóng cả nhánh từ cha.
+- [ ] Nghiệm thu thêm trên bộ entity FAST ERP thật có chuỗi lồng sâu và file nguồn rất dài.
 
 ## Kế hoạch Check Mail
 

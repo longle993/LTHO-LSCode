@@ -1,5 +1,13 @@
 # Mục tiêu LSCode
 
+Mở **SQL Profiler** sẽ tự lấy server và database từ tab hiện tại hoặc dự án, điền bộ lọc và bắt đầu thu sự kiện. Dùng đường dẫn `PROFILER.EXE` đã chọn hoặc bản SSMS mặc định khi có. Khi thiếu SSMS, dùng SQL Trace tích hợp cho máy chủ SQL2014 có tài khoản Profiler riêng hoặc khi người dùng nhập tài khoản thu riêng. Các kết nối dự án còn lại dùng Extended Events. Người dùng vẫn có thể chọn `PROFILER.EXE` trong Cài đặt hoặc ngay trong tab Profiler.
+
+Sau khi Dừng rồi Chạy lại, SQL Profiler tiếp tục nối sự kiện mới vào lưới hiện có. Dữ liệu đã thu chỉ được xóa khi người dùng bấm **Xóa**.
+
+Khi mở hoặc chuyển sang file `.xml`, panel Kết quả/Thông báo/Vấn đề tự thu gọn để dành chiều cao cho editor. Dữ liệu trong panel được giữ nguyên và người dùng có thể mở lại ngay từ thanh panel.
+
+Trong **Dự án của bạn**, nút **Đồng bộ** đọc danh mục QLYC bằng `ns_getListDept`. Khi chưa có tên LSCode hoặc danh mục trả rỗng cho tên đã lưu, dùng `CurrUser` của FSD Studio nếu xác định được trong phiên Windows hiện tại. Đồng bộ thêm mã dự án mới, cập nhật profile đang sử dụng, giữ profile ngừng dùng và giải thích kết quả rỗng.
+
 Trong tab SQL, gõ `@` để gợi ý tham số của `CREATE/ALTER PROC` và biến khai báo trong tài liệu. Gõ `#` để gợi ý bảng tạm từ `CREATE TABLE` và `SELECT INTO`. Gợi ý lọc theo tiền tố và thay cả ký tự `@` hoặc `#` khi chèn.
 
 Nâng cấp đã triển khai: [Generate Update và SQL không giới hạn timeout](docs/guides/ADVANCE-NOTE.vi.md#đặc-tả-nâng-cấp--17112026). Nghiệm thu: nhấp đúp ERP lấy source vào cây dưới danh sách yêu cầu, lọc `.f` cho Dir/Filter/Grid, tìm và thêm File Path; SQL Object nhận tên table/store/function để sinh DROP + CREATE; Ctrl+D tại Cấu trúc và dữ liệu lưu `bảng: WHERE` vào SQL Data để sinh INSERT; xuất gói Generate Update và giữ khả năng hủy SQL chủ động.
@@ -64,6 +72,8 @@ Thống kê mở ở bộ phận **LTHO** và chỉ hiển thị người có b�
 Ctrl+G trong XML ERP hiển thị TAG và DETAIL với màu nhận diện cho từng nhóm. Nhóm fields có Start tại field đầu tiên và End tại field cuối cùng. Nhóm views liệt kê các view theo `id`. Nhóm command liệt kê sự kiện theo thứ tự nguồn, script chỉ liệt kê tên hàm JavaScript, và css có End/Start. Không đưa `items` hoặc `text` vào danh sách điều hướng. Chọn một mục để nhảy tới vị trí tương ứng trong buffer đang sửa.
 
 Danh sách Ctrl+G lấy trực tiếp từ buffer đang sửa và hỗ trợ tìm nhanh, mũi tên, Enter, Esc; không đọc lại nội dung cũ từ đĩa.
+
+F12 tại tham chiếu entity XML mở một callout neo gần vị trí con trỏ, không che toàn bộ editor bằng modal. Callout ghi tên entity và đường dẫn nguồn, mặc định chỉ hiển thị đúng giá trị hoặc nội dung file mà entity tham chiếu. F12 tiếp tục hoạt động trong callout, kể cả khi khai báo entity con chỉ có ở DTD của file XML gốc; mỗi lần điều hướng mở thêm một callout con lệch theo tầng và giữ nguyên chuỗi callout cha. Đóng callout lá chỉ đóng callout đó, còn đóng một callout cha đóng toàn bộ nhánh hậu duệ. Tùy chọn **Hiện toàn bộ file** chuyển sang nội dung nguồn đầy đủ; **Mở trong tab** và Ctrl+F12 giữ luồng điều hướng toàn file. Khi còn ít nhất một callout, nền ứng dụng không cuộn hoặc nhận thao tác chuột; nội dung trong các callout vẫn cuộn bình thường.
 
 Ctrl+Alt+C mở ô lệnh độc lập. Nhập `@@` rồi Enter mở QLYC. Người dùng chọn kết nối, người xử lý và khoảng ngày; nút **View All** mở bảng **Request Processing Statistics** chỉ đọc theo năm, gồm số yêu cầu và số lượng theo tháng/tổng/trung bình. Ưu tiên cấu hình `Qlcv` tương thích FCode nếu có, đồng thời cho phép dùng kết nối LSCode để tính năng không phụ thuộc ứng dụng FCode. Không nhúng tài khoản, mật khẩu hay danh sách nhân viên/phòng ban cá nhân vào mã nguồn.
 

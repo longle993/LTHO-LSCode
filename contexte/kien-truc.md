@@ -61,6 +61,14 @@ Modal Ctrl+G dùng hai cột TAG và DETAIL theo bố cục tham chiếu FCodeVi
 
 `RequestTracking.cs` ưu tiên đọc kết nối QLYC tương thích từ `HKCU\\Software\\FCoder\\Qlcv` ở cả Registry 32/64-bit và giải mã theo định dạng FCode cũ. Nếu không có, giao diện dùng một target SQL đã đăng ký trong LSCode. Truy vấn dùng `CommandTimeout = 0` qua `ProjectDatabase`, tham số hóa người dùng/ngày/năm, dùng `RAISERROR + RETURN` để tương thích SQL Server FAST cũ và không chứa dữ liệu nhân viên cụ thể. Phạm vi kiểm chứng ngày 18/11/2026: frontend build, Infrastructure/Desktop build, 155 WebView checks có SQL fixture, 146 Core checks và 12 smoke WebView2; chưa kiểm chứng cơ sở dữ liệu QLYC thật trên máy không có cấu hình Registry.
 
+### Callout entity F12
+
+Từ 20/11/2026, `XmlIncludes.Find` trả thêm tên và phạm vi `Start/Length`. Với entity nội tuyến, phạm vi là riêng nội dung trong dấu nháy; với entity `SYSTEM` hoặc DOCTYPE, phạm vi là file đích. Chỉ số được tính trên bản đã che comment nhưng giữ nguyên độ dài và xuống dòng, nên vẫn ánh xạ đúng về buffer gốc, kể cả buffer chưa lưu.
+
+WebView mở file nguồn để giữ encoding/nội dung đầy đủ nhưng dựng một model Monaco chỉ chứa phạm vi cần xem. Offset trong model rút gọn được cộng lại với `Start` trước khi gọi F12 lần nữa. Request lồng nhau gửi thêm `contextPath/contextText` của XML gốc; Core thử đồ thị khai báo của file hiện hành trước rồi mới dò từ gốc. Cách này xử lý trường hợp file `.txt` con chứa `&Job.Nested.Key.a;` trong khi khai báo của entity đó nằm ở DTD cha.
+
+Callout trong `.editors` được quản lý thành một chuỗi có `id`, `parentId` và `level`; mỗi node giữ model/editor Monaco riêng. F12 từ một node giữ chuỗi tổ tiên, giải phóng nhánh hậu duệ cũ của node đó nếu có, rồi nối thêm callout con lệch theo tầng. Đóng một node giải phóng document/model của node đó và mọi hậu duệ; đóng lá không ảnh hưởng cha. Từng callout hiện đường dẫn, có checkbox toàn file và giữ Ctrl+F12/mở tab. Khi chuỗi chưa rỗng, một lớp chắn fixed chặn con trỏ trên toàn nền và listener `wheel`/`touchmove` ở capture phase hủy cuộn ngoài `.entity-peek`; cuộn bên trong Monaco của các callout vẫn được giữ. Phạm vi kiểm chứng: fixture Core cho entity nội tuyến, file ngoài và đồ thị cha; 105 WebView checks; production build; regression Playwright 14 bước cho callout, khóa cuộn, F12 lồng thành nhánh cha–con, vòng đời đóng nhánh và toàn file. Chưa kiểm chứng trực quan trên source FAST ERP thực tế có nhiều mức lồng.
+
 ## Workspace Main, nguồn snippet và điều hướng bảng
 
 `ProjectConventions.ResolveMenuFile` ưu tiên đường dẫn chính xác dưới root/Main. Với link có thư mục ảo không tồn tại, nó fallback theo đúng tên file trong `Main`, giới hạn 1.000 kết quả và vẫn từ chối đoạn `..`; `project.controller` đưa file ASPX đã tìm thấy vào đầu danh sách để `ControllerExplorer` dựng node Main cùng source controller.
@@ -70,3 +78,19 @@ Modal Ctrl+G dùng hai cột TAG và DETAIL theo bố cục tham chiếu FCodeVi
 Table Tool giữ điều hướng ô trong `TableDataGrid`: Home/End đổi cột trong dòng hiện hành, còn Ctrl+G do `TableTool` sở hữu để mở modal gợi ý metadata và gửi yêu cầu focus cột xuống lưới. F5 vẫn đi qua command `sql.run`; `App` định tuyến sang nút Chạy của tab bảng đang chọn thay vì chạy nhầm editor SQL.
 
 Phạm vi kiểm chứng ngày 18/11/2026: TypeScript typecheck/production build, 153 Core checks, 158 WebView checks gồm fixture SQL cho link Main có thư mục ảo, build Desktop không warning và publish Windows x64 self-contained. Chưa smoke bằng menu ERP thật có nhiều file ASPX trùng tên trong các nhánh Main.
+
+## Đồng bộ danh mục chuẩn QLYC
+
+Đối chiếu ngày 20/11/2026 với `GetConnectionQLYC`, `GetProjectToSync` và `Reg.GetRegValue` của FSD Studio cài trên máy. Bản này dùng `FSG_A` và đọc `CurrUser` từ nhóm `RE` của bảng `options` trong SQLite `config.db`. LSCode tìm cấu hình cạnh FSD Studio đang chạy trong cùng phiên, mở SQLite ở chế độ chỉ đọc và tiếp tục cho phép nhập tên thủ công.
+
+LSCode gọi `dbo.ns_getListDept` qua tham số `@Name`. Nút Đồng bộ thử lại bằng tên phát hiện được nếu danh mục trả rỗng cho tên đã lưu. Profile khớp theo mã dự án được cập nhật tại chỗ nếu còn hoạt động. Mã mới được thêm vào catalog LSCode, profile ngừng dùng được giữ nguyên. Kết nối SQL dùng điểm chính trước và thử điểm dự phòng nếu mở kết nối đầu thất bại.
+
+Phạm vi kiểm chứng ngày 20/11/2026 gồm truy vấn thật qua điểm chính, lập kế hoạch trong bộ nhớ, đọc SQLite fixture, giao diện với bridge giả lập và smoke WebView2. Điểm dự phòng hết thời gian chờ khi kiểm tra kết nối từ máy này.
+
+## Khởi động SQL Profiler
+
+`profiler.defaults` trả về tiền tố database, kiểu xác thực và đường dẫn executable từ cấu hình hoặc SSMS mặc định. `profiler.start` với `engine: "auto"` ưu tiên SQL Trace qua SSMS. Khi thiếu SSMS, tài khoản Profiler riêng dùng bộ thu [SQL Trace tích hợp](../src/LSCode.Infrastructure/SqlTraceStream.cs). Kết nối dự án còn lại dùng Extended Events. Tab giữ kết nối tại lúc bắt đầu thu và chỉ dừng khi người dùng bấm Dừng hoặc đóng tab. Thông tin xác thực mặc định được dùng ở lớp native, và mặc định tài khoản riêng của máy chủ SQL2014 chỉ áp dụng đúng instance tương ứng.
+
+Đối chiếu ngày 20/11/2026 với `ucQuery.btnProfile_Click` của FSD Studio, `ProfilerTool`, `DeveloperTools` và `SqlTraceSession`. Đã kiểm tra tự chạy và chọn executable bằng fixture giao diện, thu và dọn phiên thật bằng Extended Events trên LocalDB, chạy smoke và publish. Chưa chạy SQL Trace bằng SSMS trên máy này.
+
+Bổ sung ngày 20/11/2026 sau khi tái hiện lỗi quyền Extended Events. Bộ thu tích hợp dùng SQL Trace qua kết nối `master`, lọc tiền tố database trên server và xác nhận lại trước khi gửi sự kiện vào lưới. Đã thu câu SQL mẫu và dọn phiên trên LocalDB, đồng thời xác nhận mở, đọc và đóng phiên có lọc trên máy chủ SQL2014. Tài khoản thu riêng có quyền trace cấp máy chủ và có thể thiếu quyền truy vấn trực tiếp vào database dự án.

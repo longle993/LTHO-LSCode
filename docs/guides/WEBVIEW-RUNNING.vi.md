@@ -82,7 +82,7 @@ dotnet build LSCode.sln -c Release -m:1 -p:UseSharedCompilation=false
 dotnet run --project tests/LSCode.WebView.Tests/LSCode.WebView.Tests.csproj -c Release -- --sql --profiler
 ```
 
-SQL integration chỉ tạo database tên ngẫu nhiên `LSCodeWebViewTest_<GUID>` trên **instance cục bộ `.`**, sau đó xóa đúng database do chính phép thử tạo. Không chạy phép thử ghi trên database khách hàng. Lựa chọn `--profiler` dùng Extended Events; thêm `--profiler-ssms18` nếu muốn kiểm tra nhánh SSMS 18 trên server tương thích.
+SQL integration tạo database tên ngẫu nhiên `LSCodeWebViewTest_<GUID>` trên instance kiểm thử, mặc định là `.`, sau đó xóa đúng database do chính phép thử tạo. Dùng instance cục bộ hoặc LocalDB cho phép thử này. Lựa chọn `--profiler` dùng cùng cách tự chọn bộ thu với tab Profiler. Thêm `--profiler-ssms18` để kiểm tra riêng nhánh SSMS 18 trên server tương thích.
 
 Để chạy kiểm tra tương tác UI bằng fixture transport:
 
@@ -133,7 +133,7 @@ Một số adapter thuần .NET vẫn dùng `Compile Link` tới file dịch v�
 | F21–F22 | DB objects có trang/tìm tên-nội dung/script; table browser cấu trúc/dữ liệu, chọn cột/WHERE/ORDER BY, giới hạn 1000 | SQL adapters và kiểm tra read-only query; chưa chạy mọi loại object/encrypted module trên ERP thật |
 | F23–F24 | Tạo bảng/add fields, PK/UNIQUE/identity/default/FK/collation, SQL preview, nhập draft, duplicate template, copy/paste fields và dòng chọn | SQL cục bộ: 4 audit fields, Unicode/NULL token, rollback batch, schema conflict, không copy dữ liệu, giữ UNIQUE/FK/scale/DEFAULT NULL, datetime2(7), rowversion |
 | F25–F26 | Snippet CRUD/import/export/caret, SQL/JS hints và placeholders, text/folder compare, beautify SQL | Thuật toán/snippet fixtures đã kiểm tra; UI các công cụ mở và thao tác được |
-| F27 | Giao diện SQL Profiler dùng SSMS 18 Trace và mẫu TDF đi kèm. Có chạy, dừng, xóa, lọc và đổi bố cục. | Extended Events dùng qua bộ kiểm thử tích hợp. SSMS 18 phụ thuộc trace definition tương thích. |
+| F27 | SQL Profiler tự chạy khi mở tab có kết nối. Lấy server và tiền tố database từ tab, ưu tiên `PROFILER.EXE` đã lưu hoặc SSMS mặc định. Có thể chọn lại executable trong Cài đặt hoặc tab Profiler. | Khi thiếu SSMS, kết nối có tài khoản Profiler riêng dùng SQL Trace tích hợp và các kết nối còn lại dùng Extended Events. SQL Trace qua SSMS vẫn cần thư viện và trace definition tương thích. |
 | F28–F29 | Dịch thủ công/đổi chiều/copy/chèn/browser fallback; Crystal launcher và cấu hình executable | Adapter và tests provider hiện hữu; chưa gọi Google/Crystal thật trong lượt này |
 | F30–F31 | Light/Dark/High Contrast, cửa sổ native resize/maximize, loading/error/empty, Settings/AppData/DPAPI | Build/smoke Windows và kiểm tra UI nhiều độ rộng/theme; chưa nghiệm thu cấu hình nhiều màn hình/DPI như một bài kiểm thử hệ thống riêng |
 | F32 | Giữ agent contracts | Không tạo AI provider/chat giả; agent adapter vốn chưa có không được tính là đã chuyển |
