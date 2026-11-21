@@ -10,6 +10,7 @@
 | [sources/](sources/README.md) | Đầu vào, khảo sát Fcode và tài liệu gốc Dynamic Template Studio. |
 | [livrables/](livrables/README.md) | Sản phẩm bàn giao được duy trì cùng repo. |
 | [src/](src/) | Mã Web, host Desktop, Contracts, Domain, Application, Infrastructure, Core, Shell, TraceHost và Dynamic Template Studio. Tra điểm vào theo [bản đồ kiến trúc](contexte/kien-truc.md). |
+| [SqlTraceStream.cs](src/LSCode.Infrastructure/SqlTraceStream.cs) | Bộ thu SQL Trace tích hợp cho Profiler khi thiếu SSMS. |
 | [tests/](tests/) | Hai console runner .NET cho Core và WebView, cùng phạm vi tích hợp SQL được mô tả ở hướng dẫn WebView. |
 | [scripts/](scripts/) | Preview WebView, kiểm tra tương tác và đóng gói Inno Setup. Các entry point build và dọn ở gốc repo. |
 | [samples/](samples/) · [assets/](assets/) | Dữ liệu demo và tài nguyên phân phối. |
