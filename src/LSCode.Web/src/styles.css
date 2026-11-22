@@ -707,6 +707,21 @@ button.function-menu-id:focus-visible {
 .side-form input {
   @apply [font-size:12px];
 }
+.workspace-search-input {
+  position: relative;
+  min-width: 0;
+}
+.workspace-search-input input {
+  width: 100%;
+  padding-right: 36px;
+}
+.workspace-search-input input::-webkit-search-cancel-button { display: none; }
+.workspace-search-input > .icon-button {
+  position: absolute;
+  right: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+}
 .menu-kind-tabs {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3010,6 +3025,7 @@ button.function-menu-id:focus-visible {
   min-height: 0;
   min-width: 0;
   gap: 8px;
+  container-type: inline-size;
 }
 .table-column-panel {
   display: flex;
@@ -3067,6 +3083,7 @@ button.function-menu-id:focus-visible {
 .table-column-empty { padding: 14px 10px; }
 .table-inspection-content {
   display: flex;
+  flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
   min-width: 0;
@@ -3091,7 +3108,28 @@ button.function-menu-id:focus-visible {
   background: color-mix(in srgb, var(--surface) 58%, transparent);
   pointer-events: none;
 }
-.table-data-grid table { min-width: 100%; }
+.table-data-grid table { min-width: 100%; table-layout: fixed; }
+.table-data-grid td[data-table-cell] { scroll-margin-top: 32px; }
+.table-data-grid .table-grid-spacer > td { padding: 0; border: 0; }
+.table-data-grid .table-data-row td:has(> input) { padding-block: 0; }
+.table-pagination,
+.table-pagination nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.table-pagination {
+  flex: none;
+  justify-content: space-between;
+  border-top: 1px solid var(--border);
+  padding: 2px 8px;
+  min-width: 0;
+}
+.table-pagination > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .table-data-grid td,
 .table-data-grid th { user-select: none; }
 .table-data-grid th { cursor: pointer; }
@@ -3215,9 +3253,14 @@ button.function-menu-id:focus-visible {
 .table-context-submenu .button { justify-content: flex-start; text-align: left; }
 .table-column-context-menu kbd { margin-left: auto; color: var(--muted); font-size: 10px; }
 @media (max-width: 900px) {
+  .table-inspection { overflow-y: auto; }
+  .table-inspection-body { min-height: 210px; }
   .table-column-panel { flex-basis: 190px; }
   .table-query-row > .relative { min-width: 130px; }
   .table-query-clauses { grid-template-columns: 1fr; }
+}
+@container (max-width: 480px) {
+  .table-column-panel { flex-basis: min(37%, 150px); }
 }
 .standard-project-sync {
   padding: 12px;

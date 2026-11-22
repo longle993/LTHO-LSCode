@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "../ui";
 import { KeyRound } from "lucide-react";
@@ -15,6 +15,8 @@ export type TableColumn = {
   generated: number;
   writable: boolean;
 };
+
+const rowHeight = 32;
 
 function isUniqueKey(column?: TableColumn) {
   return !!column && (column.primaryKey || /(?:^|, )(PK|UQ) ·/.test(column.key));
@@ -39,6 +41,8 @@ export function TableDataGrid({
   onDelete,
   saveSlot,
   focusColumn,
+  rowOffset,
+  onPendingChange,
   emptyMessage = "Chưa có dữ liệu. Nhập ở dòng * rồi bấm Lưu để thêm.",
 }: {
   table: Table;
@@ -49,6 +53,8 @@ export function TableDataGrid({
   onDelete: (rows: number[]) => Promise<void>;
   saveSlot: HTMLSpanElement | null;
   focusColumn?: { name: string; sequence: number };
+  rowOffset: number;
+  onPendingChange: (dirty: boolean) => void;
   emptyMessage?: string;
 }) {
   const [drafts, setDrafts] = useState<Record<string, (string | null)[]>>({});
@@ -62,13 +68,37 @@ export function TableDataGrid({
   const [editing, setEditing] = useState<{ row: number; column: number }>();
   const [copyError, setCopyError] = useState("");
   const grid = useRef<HTMLDivElement>(null);
+  const body = useRef<HTMLTableSectionElement>(null);
+  const [viewport, setViewport] = useState({ top: 0, height: 320 });
   const gridId = useId();
   const saving = useRef(false);
   const [conflict, setConflict] = useState<number>();
   const [editStart, setEditStart] = useState<string | null>();
   const dragging = useRef(false);
   const [showLoading, setShowLoading] = useState(false);
-  useEffect(() => { setDrafts({}); setSelection(undefined); setEditing(undefined); setConflict(undefined); }, [table]);
+  const measure = () => {
+    const element = grid.current;
+    const rows = body.current;
+    const header = rows?.previousElementSibling;
+    if (!element || !rows || !header) return;
+    const top = Math.max(0, element.getBoundingClientRect().top + header.clientHeight - rows.getBoundingClientRect().top);
+    const height = element.clientHeight;
+    setViewport(previous => previous.top === top && previous.height === height ? previous : { top, height });
+  };
+  useLayoutEffect(() => {
+    setDrafts({});
+    setSelection(undefined);
+    setEditing(undefined);
+    setConflict(undefined);
+    if (grid.current) grid.current.scrollTop = 0;
+    measure();
+  }, [table]);
+  useLayoutEffect(() => {
+    if (!grid.current) return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(grid.current);
+    return () => observer.disconnect();
+  }, []);
   useEffect(() => {
     if (!busy) {
       setShowLoading(false);
@@ -77,21 +107,38 @@ export function TableDataGrid({
     const timer = window.setTimeout(() => setShowLoading(true), 250);
     return () => window.clearTimeout(timer);
   }, [busy]);
-  useEffect(() => {
-    if (dragging.current || !selection || selection.kind !== "cell") return;
-    grid.current?.querySelector<HTMLElement>(`[data-table-cell="${selection.endRow}:${selection.endColumn}"]`)
-      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
-  }, [selection]);
-
-  const safeColumns = Array.isArray(table.columns) ? table.columns : [];
-  const safeRows = Array.isArray(table.rows) ? table.rows.filter((row): row is (string | null)[] => Array.isArray(row)) : [];
-  const safeMetadata = Array.isArray(metadata) ? metadata : [];
-  const columns = safeColumns.map((name) => safeMetadata.find((column) =>
-    column.name.toLowerCase() === name.toLowerCase()));
+  const safeColumns = table.columns;
+  const safeRows = table.rows;
+  const safeMetadata = metadata;
+  const columns = useMemo(() => {
+    const byName = new Map(metadata.map(column => [column.name.toLowerCase(), column]));
+    return safeColumns.map(name => byName.get(name.toLowerCase()));
+  }, [metadata, safeColumns]);
+  const widths = useMemo(() => safeColumns.map((name, index) => {
+    const length = safeRows.slice(0, 8).reduce((max, row) => Math.max(max, row[index]?.length ?? 0), name.length + 4);
+    return Math.min(320, Math.max(116, length * 7 + 24));
+  }), [safeColumns, safeRows]);
+  const first = Math.min(Math.max(0, safeRows.length - 1), Math.max(0, Math.floor(viewport.top / rowHeight) - 5));
+  const last = Math.min(safeRows.length, Math.ceil((viewport.top + viewport.height) / rowHeight) + 5);
+  const keyboardScroll = useRef(false);
+  useLayoutEffect(() => {
+    if (!keyboardScroll.current || !selection || selection.kind !== "cell") return;
+    const element = grid.current;
+    const cell = element?.querySelector<HTMLElement>(`[data-table-cell="${selection.endRow}:${selection.endColumn}"]`);
+    if (!cell && element && body.current) {
+      const bodyTop = body.current.getBoundingClientRect().top - element.getBoundingClientRect().top;
+      element.scrollTop += bodyTop - rowHeight + selection.endRow * rowHeight;
+      measure();
+      return;
+    }
+    keyboardScroll.current = false;
+    cell?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [selection, first, last]);
   useEffect(() => {
     if (!focusColumn || !safeRows.length) return;
     const column = safeColumns.findIndex((name) => name.toLowerCase() === focusColumn.name.toLowerCase());
     if (column < 0) return;
+    keyboardScroll.current = true;
     setSelection((current) => {
       const row = Math.max(0, Math.min(safeRows.length - 1,
         current?.kind === "column" ? 0 : current?.endRow ?? 0));
@@ -119,6 +166,11 @@ export function TableDataGrid({
   }
   const pending = Object.entries(drafts).filter(([index, values]) =>
     values.some((value, column) => value !== (Number(index) < 0 ? "" : safeRows[Number(index)]?.[column])));
+  const dirty = pending.length > 0;
+  useLayoutEffect(() => {
+    onPendingChange(dirty);
+    return () => onPendingChange(false);
+  }, [dirty, onPendingChange]);
   async function save() {
     if (readonly || busy || saving.current || !pending.length) return;
     saving.current = true;
@@ -151,8 +203,11 @@ export function TableDataGrid({
   }
   const range = (start: number, end: number) =>
     `:nth-child(n+${Math.min(start, end)}):nth-child(-n+${Math.max(start, end)})`;
-  const selectionRule = selection && `#${CSS.escape(gridId)} tbody > tr:not(.table-new-row)${
-    selection.kind === "column" ? "" : range(selection.row + 1, selection.endRow + 1)
+  const rowStart = selection ? Math.max(first, Math.min(selection.row, selection.endRow)) : first;
+  const rowEnd = selection ? Math.min(last - 1, Math.max(selection.row, selection.endRow)) : last - 1;
+  const rowIndex = (index: number) => index - first + (first ? 2 : 1);
+  const selectionRule = selection && (selection.kind === "column" || rowStart <= rowEnd) && `#${CSS.escape(gridId)} tbody > .table-data-row${
+    selection.kind === "column" ? "" : range(rowIndex(rowStart), rowIndex(rowEnd))
   } > td${
     selection.kind === "row" ? "" : range(selection.column + 2, selection.endColumn + 2)
   }:not(:has(input)) { background: color-mix(in srgb, var(--primary) 13%, var(--surface)); outline: 1px solid var(--primary); outline-offset: -1px; }`;
@@ -171,9 +226,11 @@ export function TableDataGrid({
     } catch (error) { setCopyError((error as Error).message); }
   }
   const gridBody = useMemo(() =>
-        <tbody>
-          {safeRows.map((row, rowIndex) => (
-            <tr key={rowIndex}>
+        <tbody ref={body}>
+          {first > 0 && <tr className="table-grid-spacer" aria-hidden><td colSpan={safeColumns.length + 1} style={{ height: first * rowHeight }} /></tr>}
+          {safeRows.slice(first, last).map((row, index) => {
+            const rowIndex = first + index;
+            return <tr key={rowIndex} className="table-data-row">
               <td className="row-number" title="Chọn dòng · Ctrl+C sao chép"
                 onPointerDown={(event) => {
                   if (event.button !== 0) return;
@@ -185,12 +242,12 @@ export function TableDataGrid({
                     : { row: rowIndex, column: 0, endRow: rowIndex, endColumn: 0, kind: "row" });
                 }}
                 onPointerEnter={event => dragging.current && event.buttons === 1 && setSelection(old =>
-                  old?.kind === "row" && old.endRow !== rowIndex ? { ...old, endRow: rowIndex } : old)}>{rowIndex + 1}</td>
+                  old?.kind === "row" && old.endRow !== rowIndex ? { ...old, endRow: rowIndex } : old)}>{rowOffset + rowIndex + 1}</td>
               {row.map((original, columnIndex) => {
                 const value = drafts[rowIndex] ? drafts[rowIndex][columnIndex] : original;
                 const column = columns[columnIndex];
                 const isEditing = editing?.row === rowIndex && editing.column === columnIndex;
-                return <td key={columnIndex} title={value ?? "NULL"} data-table-cell={`${rowIndex}:${columnIndex}`}
+                return <td key={columnIndex} title={value == null ? "NULL" : value.length > 480 ? value.slice(0, 480) + "…" : value} data-table-cell={`${rowIndex}:${columnIndex}`}
                   aria-invalid={conflict === rowIndex && isUniqueKey(column) || undefined}
                   className={column?.key ? "table-key-column" : undefined}
                   onPointerDown={event => {
@@ -207,7 +264,7 @@ export function TableDataGrid({
                       ? { ...old, endRow: rowIndex, endColumn: columnIndex } : old)}
                   onDoubleClick={() => beginEdit(rowIndex, columnIndex)}>
                   {isEditing ? <input data-edit-cell={`${rowIndex}:${columnIndex}`}
-                    aria-label={`${safeColumns[columnIndex]} dòng ${rowIndex + 1}`}
+                    aria-label={`${safeColumns[columnIndex]} dòng ${rowOffset + rowIndex + 1}`}
                     value={value ?? ""} disabled={busy || readonly}
                     onChange={event => edit(rowIndex, columnIndex, event.target.value)}
                     onBlur={() => setEditing(undefined)}
@@ -217,16 +274,18 @@ export function TableDataGrid({
                       if (event.key === "Escape") edit(rowIndex, columnIndex, editStart ?? null);
                       setEditing(undefined);
                       grid.current?.focus({ preventScroll: true });
-                    }} /> : value == null ? <span className="muted">NULL</span> : displayCell(value, column)}
+                    }} /> : value == null ? <span className="muted">NULL</span> : displayCell(value.length > 480 ? value.slice(0, 480) + "…" : value, column)}
                 </td>;
               })}
-            </tr>
-          ))}
-        </tbody>, [table, metadata, readonly, busy, drafts, editing, editStart, conflict]);
+            </tr>;
+          })}
+          {last < safeRows.length && <tr className="table-grid-spacer" aria-hidden><td colSpan={safeColumns.length + 1} style={{ height: (safeRows.length - last) * rowHeight }} /></tr>}
+        </tbody>, [table, metadata, readonly, busy, drafts, editing, editStart, conflict, first, last, rowOffset]);
   return (
     <div ref={grid} id={gridId} className="table-data-grid data-grid data-grid-range" tabIndex={0}
       aria-label="Dữ liệu bảng · Chọn ô và dùng phím mũi tên để di chuyển, nhấp đúp để sửa, Ctrl+C sao chép, F8 xóa dòng"
       aria-busy={busy} data-loading={showLoading ? "true" : undefined}
+      onScroll={measure}
       onPointerUp={() => { dragging.current = false; }}
       onPointerCancel={() => { dragging.current = false; }}
       onKeyDown={(event) => {
@@ -252,11 +311,13 @@ export function TableDataGrid({
           beginEdit(selection.endRow, selection.endColumn);
         } else if (selection && (event.key === "Home" || event.key === "End") && safeColumns.length && safeRows.length) {
           event.preventDefault();
+          keyboardScroll.current = true;
           const row = Math.max(0, Math.min(safeRows.length - 1, selection.kind === "column" ? 0 : selection.endRow));
           const column = event.key === "Home" ? 0 : safeColumns.length - 1;
           setSelection({ row, column, endRow: row, endColumn: column, kind: "cell" });
         } else if (selection?.kind === "cell" && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Tab"].includes(event.key)) {
           event.preventDefault();
+          keyboardScroll.current = true;
           const rowDelta = event.key === "ArrowUp" ? -1 : event.key === "ArrowDown" ? 1 : 0;
           const columnDelta = event.key === "ArrowLeft" || (event.key === "Tab" && event.shiftKey) ? -1
             : event.key === "ArrowRight" || event.key === "Tab" ? 1 : 0;
@@ -284,7 +345,9 @@ export function TableDataGrid({
           Bảng không có đủ khóa chính trong kết quả hiện tại; chỉ có thể thêm dòng mới.
         </p>
       )}
-      <table>
+      <table style={{ width: 52 + widths.reduce((sum, width) => sum + width, 0) }}>
+        <colgroup><col style={{ width: 52 }} />{widths.map((width, index) =>
+          <col key={index} style={index === widths.length - 1 ? undefined : { width }} />)}</colgroup>
         <thead>
           <tr>
             <th className="row-number"

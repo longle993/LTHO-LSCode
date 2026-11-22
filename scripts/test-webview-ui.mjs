@@ -88,7 +88,10 @@ await page.addInitScript(()=>{
         result=[...entries.values()].sort((a,b)=>Number(b.directory)-Number(a.directory)||a.name.localeCompare(b.name));break;
       }
       case 'workspace.files':result=['C:\\Fixture\\fixture.xml','C:\\Fixture\\long.sql'];break;
-      case 'workspace.search':result=[];break;
+      case 'workspace.search':
+        result=request.payload.query==='needle' && request.payload.firstPerFile
+          ? [{path:projectRoot+'\\fixture.xml',line:2,column:3,preview:'<root>needle</root>'}] : [];
+        break;
       case 'workspace.reveal':result=true;break;
       case 'document.openMany':result=window.__bulkOpenCount
         ? Array.from({length:window.__bulkOpenCount},(_,index)=>doc('open-'+(++serial),'<root>bulk-'+index+'</root>','bulk-'+index+'.xml',projectRoot+'\\bulk-'+index+'.xml'))
@@ -148,7 +151,16 @@ await page.addInitScript(()=>{
       case 'table.writeBatch':result={conflict:request.payload.rows.some(row=>row.values.includes('duplicate-fixture'))?0:null};break;
       case 'table.dropColumns':window.__columnDropped=true;result=true;break;
       case 'table.createScript':result='CREATE TABLE [dbo].[DanhMuc] ([code] INT);';break;
-      case 'table.view':result={data:{columns:['code','label'],rows:request.payload.where?.includes("LIKE N'%ab%'")?[]:[['1','x'],['2','y']]},snapshotId:'fixture-preview'};break;
+      case 'table.view': {
+        const offset=request.payload.offset??0;
+        if(window.__pagedTable && request.payload.table==='BangMoiFixture'){
+          const rows=Array.from({length:Math.min(200,1201-offset)},(_,index)=>[String(offset+index+1),'Dòng mẫu']);
+          result={data:{columns:['code','label'],rows},snapshotId:'fixture-page-'+offset,hasMore:offset+rows.length<1201};
+        } else {
+          result={data:{columns:['code','label'],rows:request.payload.where?.includes("LIKE N'%ab%'")?[]:[['1','x'],['2','y']]},snapshotId:'fixture-preview'};
+        }
+        break;
+      }
       case 'table.insertScript':result='INSERT INTO [dbo].[DanhMuc] ([code]) VALUES (1);';break;
       case 'profiler.start':result=true;break;
       case 'profiler.read':result={events:window.__traceBatch.splice(0),dropped:0,truncated:false};break;
@@ -237,6 +249,42 @@ async function testTableRefreshAndNotice(){
     window.__nativeCalls.some(c=>c.method==='table.metadata' && c.payload.table==='BangMoiFixture')),
     'A new table appears after running SQL and keeps its first data snapshot');
 
+  await page.evaluate(()=>{window.__pagedTable=true;});
+  await tablePanel.getByRole('button',{name:'Chạy',exact:true}).click();
+  const grid=tablePanel.locator('.table-data-grid');
+  const next=tablePanel.getByRole('button',{name:'Trang sau',exact:true});
+  const previous=tablePanel.getByRole('button',{name:'Trang trước',exact:true});
+  await tablePanel.getByText('Dòng 1–200',{exact:true}).waitFor();
+  check(await grid.locator('.table-data-row').count()<60,'Table inspection mounts only the visible row window');
+  await grid.evaluate(element=>{element.scrollTop=element.scrollHeight;});
+  await grid.locator('td[title="200"]').waitFor();
+  await page.screenshot({path:out+'/table-paged.png',animations:'disabled'});
+  for(let index=1;index<=6;index++){
+    await next.click();
+    await tablePanel.getByText('Trang '+(index+1),{exact:true}).waitFor();
+  }
+  await grid.locator('td[title="1201"]').waitFor();
+  check(await next.isDisabled(),'Table inspection reaches the last row beyond 1000');
+  await previous.click();
+  await grid.locator('td[title="1001"]').waitFor();
+  await grid.locator('[data-table-cell="0:1"]').dblclick();
+  await grid.locator('[data-edit-cell="0:1"]').fill('Bản sửa đang chờ');
+  check(await next.isDisabled() && await previous.isDisabled(),'Paging protects unsaved cell edits');
+  await grid.locator('[data-edit-cell="0:1"]').press('Escape');
+  await next.click();
+  await grid.locator('td[title="1201"]').waitFor();
+  await page.getByRole('button',{name:'Ẩn không gian dự án',exact:true}).click();
+  await page.setViewportSize({width:375,height:600});
+  const pagination=tablePanel.getByRole('navigation',{name:'Phân trang dữ liệu bảng'});
+  await pagination.scrollIntoViewIfNeeded();
+  check(await pagination.evaluate(element=>{
+    const {left,right,top,bottom}=element.getBoundingClientRect();
+    const grid=element.closest('.table-inspection-content').querySelector('.table-data-grid');
+    return left>=0 && right<=innerWidth && top>=0 && bottom<=innerHeight && grid.clientHeight>=120;
+  }),'Paging controls fit within a narrow workbench');
+  await page.screenshot({path:out+'/table-paged-narrow.png',animations:'disabled'});
+  await page.setViewportSize({width:1440,height:1000});
+
   await sqlDocument.click();
   const workbenchTop=await page.locator('.workbench').evaluate(el=>el.getBoundingClientRect().top);
   await page.evaluate(()=>{window.__failSql=true;});
@@ -253,6 +301,20 @@ async function testTableRefreshAndNotice(){
   }),'The error notice fits within a 375px workbench');
   await notice.getByRole('button',{name:'Đóng thông báo'}).click();
   await notice.waitFor({state:'detached'});
+  await page.setViewportSize({width:1440,height:1000});
+  await page.keyboard.press('Control+Shift+f');
+  const search=page.getByRole('searchbox',{name:'Nội dung tìm'});
+  await search.fill('needle');
+  const searchResults=page.locator('#project-sidebar');
+  await searchResults.getByText('1 tệp khớp',{exact:true}).waitFor();
+  check(await searchResults.getByRole('button',{name:/fixture\.xml:2/}).count()===1,
+    'Sidebar search runs on input and lists the file containing the typed content');
+  await page.screenshot({path:out+'/workspace-content-search.png',animations:'disabled'});
+  await page.setViewportSize({width:375,height:600});
+  check(await search.evaluate(element=>element.getBoundingClientRect().right<=innerWidth),
+    'Live content search fits in the sidebar at 375px');
+  await searchResults.getByRole('button',{name:'Xóa nội dung tìm',exact:true}).click();
+  await searchResults.getByText('Nhập nội dung cần tìm.',{exact:true}).waitFor();
 }
 try{
   await page.goto(process.env.LSCODE_UI_URL??'http://127.0.0.1:4173');await page.getByRole('dialog',{name:'Dự án của bạn'}).waitFor();check(true,'Project picker opens before workbench');
@@ -728,8 +790,7 @@ Trạng thái: 1-Còn sử dụng, 0-Không còn sử dụng`);
   await page.keyboard.press('Control+Shift+f');
   await page.getByRole('button',{name:'Phạm vi tìm kiếm',exact:true}).click();
   await page.getByRole('option',{name:/Controllers.*Dir$/}).click();
-  await page.getByRole('textbox',{name:'Nội dung tìm'}).fill('controller');
-  await page.getByRole('button',{name:'Tìm',exact:true}).click();
+  await page.getByRole('searchbox',{name:'Nội dung tìm'}).fill('controller');
   await page.waitForFunction(path=>window.__nativeCalls.some(call=>call.method==='workspace.search'&&call.payload.path===path),dirPath);
   check(true,'Folder search starts at the selected controller directory');
   await page.evaluate(()=>{window.__holdTableCatalog=true;});

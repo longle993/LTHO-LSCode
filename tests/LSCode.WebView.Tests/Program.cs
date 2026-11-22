@@ -173,6 +173,10 @@ var erpFile=Path.Combine(root,"controller.f");await File.WriteAllTextAsync(erpFi
 Check((await workspace.FilesAsync(root,default)).Contains(erpFile),"Quick open includes ERP .f files");
 var erpHits=(List<LSCode.Core.SearchHit>)await workspace.SearchAsync(root,"ERP_NEEDLE",false,false,[],default);
 Check(erpHits.Count==1&&erpHits[0].Path==erpFile,"Workspace search includes ERP .f content");
+var matchByContent = (List<LSCode.Core.SearchHit>)await workspace.SearchAsync(root, "ERP_NEEDLE", false, false,
+    new() { [erpFile] = "first\nerp_needle\nERP_NEEDLE", [copy] = "ERP_NEEDLE" }, default, firstPerFile: true);
+Check(matchByContent.Count == 2 && matchByContent.Single(hit => hit.Path == erpFile).Line == 2 &&
+    matchByContent.Any(hit => hit.Path == copy), "File search returns each matching file once at its first content match");
 var readOnlyPath = Path.Combine(root, "readonly.sql"); await File.WriteAllTextAsync(readOnlyPath, "SELECT 1");
 var readOnly = await workspace.OpenAsync(readOnlyPath, default); File.SetAttributes(readOnlyPath, FileAttributes.ReadOnly);
 try
@@ -873,6 +877,38 @@ if (args.Contains("--sql"))
         }), Protocol.Json);
         Check(expressionPreview.GetProperty("data").GetProperty("rows")[0][0].GetString() == "3",
             "Table viewer executes SELECT expressions with WHERE and ORDER BY syntax");
+        await Call("sql.execute", new
+        {
+            targetId = target.Id, sql = """
+                CREATE TABLE dbo.paged_fixture (id int NOT NULL PRIMARY KEY, label nvarchar(max), payload varbinary(max), detail xml);
+                WITH digits(n) AS (SELECT n FROM (VALUES (0),(1),(2),(3),(4),(5),(6),(7),(8),(9)) AS d(n))
+                INSERT dbo.paged_fixture (id, label, payload, detail)
+                SELECT n, N'Mẫu', 0x0123, N'<r>ok</r>'
+                FROM (SELECT 1+a.n+10*b.n+100*c.n+1000*d.n AS n FROM digits a CROSS JOIN digits b CROSS JOIN digits c CROSS JOIN digits d) ids
+                WHERE n<=1201;
+                UPDATE dbo.paged_fixture SET label=REPLICATE(CONVERT(nvarchar(max), N'X'), 300000) WHERE id BETWEEN 1 AND 4;
+                """,
+        });
+        async Task<JsonElement> ReadFixturePage(int offset, string select, string where = "") =>
+            JsonSerializer.SerializeToElement(await Call("table.view", new
+            {
+                targetId = target.Id, table = "paged_fixture", offset, select, where, scope = "paging-fixture",
+            }), Protocol.Json);
+        var largePage = await ReadFixturePage(0, "id, label", "id <= 4");
+        var largeRows = largePage.GetProperty("data").GetProperty("rows");
+        var nextLargePage = await ReadFixturePage(largeRows.GetArrayLength(), "id, label", "id <= 4");
+        Check(largePage.GetProperty("hasMore").GetBoolean() && largeRows.GetArrayLength() == 2 &&
+            largeRows[0][1].GetString()!.Length == 300000 &&
+            nextLargePage.GetProperty("data").GetProperty("rows")[0][0].GetString() == "3",
+            "Table viewer bounds large pages and resumes without dropping the complete text values");
+        var pagePastThousand = await ReadFixturePage(1000, "id, payload, detail");
+        var pageEnd = await ReadFixturePage(1200, "id, payload, detail");
+        Check(pagePastThousand.GetProperty("hasMore").GetBoolean() &&
+            pagePastThousand.GetProperty("data").GetProperty("rows")[0][0].GetString() == "1001" &&
+            !pageEnd.GetProperty("hasMore").GetBoolean() &&
+            pageEnd.GetProperty("data").GetProperty("rows")[0].EnumerateArray().Select(cell => cell.GetString())
+                .SequenceEqual(new[] { "1201", "0x0123", "<r>ok</r>" }),
+            "Table viewer reaches rows past 1000 in key order and retains binary and XML values");
         await Reject<ArgumentException>(async () => await Call("table.view", new
         {
             targetId = target.Id, schema = "dbo", table = "viewer_fixture",

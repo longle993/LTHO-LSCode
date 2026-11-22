@@ -16,12 +16,30 @@ public static class DocumentStore
     public static async Task<FileSnapshot> OpenAsync(string path, CancellationToken ct = default)
     {
         path = System.IO.Path.GetFullPath(path);
-        if (new FileInfo(path).Length > MaximumFileBytes) throw new IOException("File vượt giới hạn editor 16 MB.");
-        var bytes = await File.ReadAllBytesAsync(path, ct);
+        var bytes = await ReadBytesAsync(path, ct);
         var (encoding, skip) = DetectEncoding(bytes);
+        var text = DecodeText(bytes, encoding, skip);
+        return new(path, text, encoding, skip > 0, Convert.ToHexString(SHA256.HashData(bytes)));
+    }
+
+    internal static async Task<string> ReadTextAsync(string path, CancellationToken ct)
+    {
+        var bytes = await ReadBytesAsync(path, ct);
+        var (encoding, skip) = DetectEncoding(bytes);
+        return DecodeText(bytes, encoding, skip);
+    }
+
+    private static Task<byte[]> ReadBytesAsync(string path, CancellationToken ct)
+    {
+        if (new FileInfo(path).Length > MaximumFileBytes) throw new IOException("File vượt giới hạn editor 16 MB.");
+        return File.ReadAllBytesAsync(path, ct);
+    }
+
+    private static string DecodeText(byte[] bytes, Encoding encoding, int skip)
+    {
         var text = encoding.GetString(bytes, skip, bytes.Length - skip);
         if (text.Contains('\0')) throw new IOException("File binary hoặc encoding không được hỗ trợ.");
-        return new(path, text, encoding, skip > 0, Convert.ToHexString(SHA256.HashData(bytes)));
+        return text;
     }
 
     public static async Task<FileSnapshot> SaveAsync(string path, string text, FileSnapshot? expected, CancellationToken ct = default, bool overwriteReadOnly = false)

@@ -575,16 +575,18 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                 var select = S("select").Trim();
                 if (select.Length == 0)
                     select = columns.Length == 0 ? "*" : string.Join(",", columns.Select(ProjectDatabase.Quote));
-                var readSql = "SELECT TOP (1000) " + select + " FROM " + qualified
-                    + (S("where").Length > 0 ? " WHERE " + S("where") : "") + (S("orderBy").Length > 0 ? " ORDER BY " + S("orderBy") : "");
+                var readSql = "SELECT " + select + "\nFROM " + qualified
+                    + (S("where").Length > 0 ? "\nWHERE " + S("where") : "") + (S("orderBy").Length > 0 ? "\nORDER BY " + S("orderBy") : "");
                 var readTarget = Target(p);
-                var data = await ProjectDatabase.ReadAsync(readTarget, ReadOnlyQuery.Validate(readSql), ct).ConfigureAwait(false);
+                var offset = p.TryGetProperty("offset", out var offsetElement) ? offsetElement.GetInt64() : 0;
+                if (offset < 0) throw new ArgumentOutOfRangeException(nameof(offset));
+                var (data, hasMore) = await TableInspection.ReadPageAsync(readTarget, qualified, readSql, offset, ct).ConfigureAwait(false);
                 if (method == "table.read") return Table(data);
                 var preview = TableInspection.Preview(data);
                 ct.ThrowIfCancellationRequested();
                 var snapshotId = Guid.NewGuid().ToString("N");
                 tableSnapshots[S("scope")] = new(snapshotId, readTarget, qualified, data);
-                return new { data = preview, snapshotId };
+                return new { data = preview, snapshotId, hasMore };
             case "project.commands": return await ProjectDatabase.CommandsAsync(Target(p), ct, S("appDatabase"), S("kind"), B("refresh"), S("context"));
             case "catalogDescription.preview":
             case "catalogDescription.apply":

@@ -226,6 +226,10 @@ export default function App({
     [regex, setRegex] = useState(false),
     [matchCase, setMatchCase] = useState(false),
     [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState("");
+  const [searchStopped, setSearchStopped] = useState(false);
+  const submitSearch = useRef<() => void>();
+  const stopSearch = useRef<() => void>();
   const [objects, setObjects] = useState<Table>(),
     [objectQuery, setObjectQuery] = useState(""),
     [objectOffset, setObjectOffset] = useState(0),
@@ -294,7 +298,6 @@ export default function App({
   const editor = useRef<EditorHandle>(),
     latest = useRef({ tabs, activeId, settings }),
     runRef = useRef<ReturnType<typeof operation<QueryResult>>>(),
-    searchRef = useRef<ReturnType<typeof operation<Hit[]>>>(),
     menuLast = useRef("");
   const toolDirty = useRef(false),
     untitledCounter = useRef(0);
@@ -431,11 +434,59 @@ export default function App({
   }, [side, nav, target?.id, objectQuery, contentSearch]);
   useEffect(() => {
     controllerCache.current.clear();
-    void searchRef.current?.cancel().catch(() => {});
-    searchRef.current = undefined;
-    setHits([]);
-    setSearching(false);
   }, [workspace]);
+  useEffect(() => {
+    setHits([]);
+    setSearchError("");
+    setSearchStopped(false);
+    setSearching(false);
+    if (!side || nav !== "search" || !searchRoot || !search.trim()) return;
+    setSearching(true);
+    let pending: ReturnType<typeof operation<Hit[]>> | undefined;
+    const find = () => {
+      window.clearTimeout(timer);
+      if (pending) return;
+      setSearching(true);
+      setSearchError("");
+      setSearchStopped(false);
+      const op = operation<Hit[]>("workspace.search", {
+        path: searchRoot, query: search, regex, matchCase, firstPerFile: true,
+        buffers: Object.fromEntries(latest.current.tabs.flatMap(tab => {
+          if (!tab.path || !pathIsWithin(tab.path, searchRoot)) return [];
+          const text = textOf(tab);
+          return text === tab.saved ? [] : [[tab.path, text]];
+        })),
+      });
+      pending = op;
+      void op.promise.then(found => {
+        if (pending === op) setHits(found);
+      }).catch((error: Error & { code?: string }) => {
+        if (pending === op && error.code !== "cancelled") setSearchError(error.message);
+      }).finally(() => {
+        if (pending === op) {
+          pending = undefined;
+          setSearching(false);
+        }
+      });
+    };
+    const timer = window.setTimeout(find, 250);
+    const cancel = () => {
+      window.clearTimeout(timer);
+      void pending?.cancel().catch(() => {});
+      pending = undefined;
+    };
+    submitSearch.current = find;
+    stopSearch.current = () => {
+      cancel();
+      setSearching(false);
+      setSearchStopped(true);
+    };
+    return () => {
+      submitSearch.current = undefined;
+      stopSearch.current = undefined;
+      cancel();
+    };
+  }, [side, nav, searchRoot, search, regex, matchCase]);
   useEffect(() => {
     document
       .querySelector('.sidebar [aria-current="page"]')
@@ -1384,29 +1435,6 @@ export default function App({
     window.addEventListener("keydown", keys, true);
     return () => window.removeEventListener("keydown", keys, true);
   }, [guard, tableTab?.id]);
-  async function find() {
-    if (!workspace) return;
-    await searchRef.current?.cancel();
-    setSearching(true);
-    const op = operation<Hit[]>("workspace.search", {
-      path: searchRoot,
-      query: search,
-      regex,
-      matchCase,
-      buffers: Object.fromEntries(
-        tabs.filter((t) => t.path && pathIsWithin(t.path, searchRoot)).map((t) => [t.path!, textOf(t)]),
-      ),
-    });
-    searchRef.current = op;
-    try {
-      const found = await op.promise;
-      if (searchRef.current === op) setHits(found);
-    } catch (e) {
-      if (searchRef.current === op) setError((e as Error).message);
-    } finally {
-      if (searchRef.current === op) setSearching(false);
-    }
-  }
   function dbQueryKey() {
     return JSON.stringify([target?.id, objectQuery.trim(), contentSearch]);
   }
@@ -2123,27 +2151,25 @@ export default function App({
                   className="side-form"
                   onSubmit={(e) => {
                     e.preventDefault();
-                    void guard(find);
+                    submitSearch.current?.();
                   }}
                 >
-                  <input
-                    aria-label="Nội dung tìm"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Tìm trong dự án"
-                  />
+                  <div className="workspace-search-input">
+                    <input
+                      aria-label="Nội dung tìm"
+                      type="search"
+                      autoFocus
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      placeholder="Tìm theo nội dung tệp"
+                    />
+                    {search && <IconButton label="Xóa nội dung tìm" type="button" onClick={() => setSearch("")}><X size={14} /></IconButton>}
+                  </div>
                   <Select label="Phạm vi tìm kiếm" value={searchRoot === workspace ? "" : searchRoot}
                     options={[{ value: "", label: "Toàn dự án" }, ...searchFolders.map((folder) => ({
                       value: folder, label: folder.slice(workspace.length).replace(/^[\\/]+/, "") || folder,
                     }))]}
-                    onChange={(folder) => {
-                      const previous = searchRef.current;
-                      searchRef.current = undefined;
-                      void previous?.cancel().catch(() => {});
-                      setSearching(false);
-                      setHits([]);
-                      setSearchFolder(folder);
-                    }} />
+                    onChange={setSearchFolder} />
                   <div className="inline-checks">
                     <label>
                       <input
@@ -2161,13 +2187,13 @@ export default function App({
                       />
                       Regex
                     </label>
-                    <Button disabled={!workspace || searching} type="submit">
+                    <Button disabled={!workspace || !search.trim()} type="submit">
                       Tìm
                     </Button>
                     {searching && (
                       <Button
                         type="button"
-                        onClick={() => void searchRef.current?.cancel()}
+                        onClick={() => stopSearch.current?.()}
                       >
                         Dừng
                       </Button>
@@ -2175,21 +2201,24 @@ export default function App({
                   </div>
                 </form>
                 <div className="side-content">
-                  <div className="section-label">
+                  <div className="section-label" role={searchError ? "alert" : "status"}>
                     {searching
                       ? "Đang tìm…"
-                      : `${hits.length} kết quả${hits.length === 2000 ? " · Giới hạn 2000" : ""}`}
+                      : searchError || (searchStopped ? "Đã dừng tìm kiếm." : !search.trim() ? "Nhập nội dung cần tìm."
+                        : hits.length ? `${hits.length === 2000 ? "Ít nhất " : ""}${hits.length} tệp khớp`
+                          : "Không tìm thấy tệp khớp.")}
                   </div>
-                  {hits.map((h, i) => (
+                  {hits.map((h) => (
                     <button
-                      key={i}
+                      key={h.path}
                       className="search-hit"
+                      title={h.path}
                       onClick={() =>
                         void guard(() => open(h.path, h.line, h.column))
                       }
                     >
                       <strong>
-                        {h.path.split(/[\\/]/).at(-1)}:{h.line}
+                        {h.path.slice(workspace.replace(/[\\/]+$/, "").length + 1)}:{h.line}
                       </strong>
                       <span>{h.preview}</span>
                     </button>

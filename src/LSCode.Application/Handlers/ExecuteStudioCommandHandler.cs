@@ -80,7 +80,8 @@ internal sealed class ExecuteStudioCommandHandler(
                 var buffers = payload.TryGetProperty("buffers", out var bufferElement)
                     ? bufferElement.Deserialize<Dictionary<string, string>>(Json) ?? []
                     : [];
-                return await documents.SearchAsync(Text("path"), Text("query"), Flag("regex"), Flag("matchCase"), buffers, cancellationToken);
+                return await documents.SearchAsync(Text("path"), Text("query"), Flag("regex"), Flag("matchCase"), buffers,
+                    cancellationToken, Flag("firstPerFile"));
             case "recovery.load":
                 return await documents.RecoverAsync(cancellationToken);
             case "recovery.save":

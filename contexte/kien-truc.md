@@ -17,6 +17,8 @@ Chi tiết luồng request ở [Clean Architecture và MediatR](../docs/architec
 
 ## Toolbar editor WebView
 
+Từ 22/11/2026, `table.view` phân trang bằng OFFSET/FETCH và giữ snapshot của trang đang xem theo scope. Trên SQL Server 2008, reader đọc tuần tự và bỏ qua các dòng của trang trước. Khi SELECT chỉ gồm các cột và ORDER BY để trống, LSCode ưu tiên khóa chính hoặc chỉ mục duy nhất không lọc. Mỗi trang có tối đa 200 dòng và giới hạn dung lượng ước tính trước khi gửi qua bridge. Lưới React chỉ dựng hàng gần vùng cuộn. Thanh Tìm kiếm gửi `workspace.search` với `firstPerFile` sau 250 ms, hủy request cũ và nhận vị trí khớp đầu tiên của từng tệp.
+
 Generate Update (tên cũ: Advance Note) được mô tả trong [đặc tả và hướng dẫn](../docs/guides/ADVANCE-NOTE.vi.md). Infrastructure hiện sao chép source theo đường dẫn tương đối và xuất script App/Sys UTF-16. SQL Object lưu tên object rồi đọc metadata của target App/Sys để sinh DROP + CREATE cho table/store/function. SQL Data lưu `bảng: WHERE`, đọc các dòng phù hợp và dùng metadata bảng để sinh INSERT; Ctrl+D ở Table Tool đưa khóa này vào yêu cầu đang chọn. Nội dung SQL thô của XML cũ vẫn được xuất theo chế độ tương thích. ID bridge `advance-note` và phần tử XML `advanceNotes` được giữ để không làm mất dữ liệu cũ.
 
 Từ 19/11/2026, tab Bảng làm mới cache danh mục theo target sau khi tab SQL chạy xong hoặc Thiết kế danh mục lưu thành công. Việc cập nhật tên bảng trên tab giữ nguyên phiên đọc theo `scope`. Chỉ lệnh `table.insertScript` trong màn Cấu trúc và dữ liệu dùng định dạng ngày rút gọn theo kiểu cột. Generate Update dùng giá trị ISO đầy đủ để giữ độ chính xác khi triển khai.
