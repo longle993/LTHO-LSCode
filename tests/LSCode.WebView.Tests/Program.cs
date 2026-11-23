@@ -8,6 +8,7 @@ using LSCode.Application;
 using LSCode.Shell.Services;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.SqlServer.TransactSql.ScriptDom;
 using System.Text.RegularExpressions;
 
 var root = Path.Combine(Path.GetTempPath(), "LSCode-WebView-checks-" + Guid.NewGuid().ToString("N"));
@@ -37,6 +38,44 @@ Check(debugScript.Contains("USE [db]]name];\r\nGO\r\nDECLARE @id int = 7;") &&
 try { debugScriptMethod.Invoke(null, ["server", "db", "  "]); throw new Exception("FAIL Empty debug script"); }
 catch (System.Reflection.TargetInvocationException ex) when (ex.InnerException is ArgumentException)
 { Check(true, "SSDT handoff rejects an empty SQL script"); }
+var profilerEngineMethod = typeof(DeveloperTools).GetMethod("AutomaticProfilerEngine",
+    System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
+string AutomaticProfilerEngine(bool profilerAvailable, bool dedicatedLogin, bool useTargetCredentials, int serverMajorVersion) =>
+    (string)profilerEngineMethod.Invoke(null, [profilerAvailable, dedicatedLogin, useTargetCredentials, serverMajorVersion])!;
+Check(AutomaticProfilerEngine(false, false, true, 10) == "sqlTrace" &&
+    AutomaticProfilerEngine(false, false, true, 11) == "extendedEvents" &&
+    AutomaticProfilerEngine(true, false, true, 10) == "ssms18",
+    "Profiler auto mode routes SQL Server 2008 to SQL Trace");
+var dedicatedProfilerMethod = typeof(DeveloperTools).GetMethod("UsesDedicatedProfilerLogin",
+    System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
+bool UsesDedicatedProfilerLogin(string server) => (bool)dedicatedProfilerMethod.Invoke(null, [server])!;
+Check(UsesDedicatedProfilerLogin(@"172.168.5.14\SQL2008") &&
+    UsesDedicatedProfilerLogin(@"172.168.5.14\SQL2014") &&
+    !UsesDedicatedProfilerLogin(@"172.168.5.14\SQL2022"),
+    "SQL2008 and SQL2014 known instances use the dedicated Profiler login");
+var traceStreamType = typeof(DeveloperTools).Assembly.GetType("LSCode.Infrastructure.SqlTraceStream")!;
+string TraceBatch(string name) => (string)traceStreamType.GetField(name,
+    System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!.GetRawConstantValue()!;
+var configureTraceSql = TraceBatch("ConfigureSql");
+var dropTraceSql = TraceBatch("DropSql");
+IList<ParseError> ParseSql2008(string sql)
+{
+    var parser = new TSql100Parser(false);
+    using var reader = new StringReader(sql);
+    parser.Parse(reader, out var errors);
+    return errors;
+}
+Check(ParseSql2008(configureTraceSql).Count == 0 && ParseSql2008(dropTraceSql).Count == 0 &&
+    !Regex.IsMatch(configureTraceSql + dropTraceSql, @"\bTHROW\b", RegexOptions.IgnoreCase) &&
+    Regex.Matches(configureTraceSql, @"\bRAISERROR\b", RegexOptions.IgnoreCase).Count == 3 &&
+    Regex.Matches(dropTraceSql, @"\bRAISERROR\b", RegexOptions.IgnoreCase).Count == 2,
+    "SQL Trace setup and cleanup batches parse with the SQL Server 2008 grammar");
+var startBatchMethod = typeof(ProfilerSession).GetMethod("StartBatchSql",
+    System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
+var extendedStartSql = (string)startBatchMethod.Invoke(null,
+    ["LSCode_fixture", "Fixture_A", ProfilerTemplate.Default("Fixture_A")])!;
+Check(!Regex.IsMatch(extendedStartSql, @"\bTHROW\b", RegexOptions.IgnoreCase),
+    "Extended Events startup no longer injects the SQL Server 2012 THROW keyword");
 await using (var provider = new ServiceCollection().AddLSCodeInfrastructure().BuildServiceProvider())
     Check(provider.GetRequiredService<IDeveloperTools>() is DeveloperTools, "Profiler resolves through its single DI registration");
 checks++;
@@ -445,6 +484,45 @@ await using (var projectTools = new DeveloperTools())
     Check(modernFiles.GetProperty("files").EnumerateArray().Select(item => item.GetString())
         .SequenceEqual([Path.Combine(modernDir, "Item.f")]),
         "Controller explorer loads PageMetadata controller files without Main or ASPX");
+    var diagnosticRoot = Directory.CreateDirectory(Path.Combine(root, "controller-diagnostics")).FullName;
+    var diagnosticDirectory = Directory.CreateDirectory(Path.Combine(diagnosticRoot, "App_Data", "Controllers", "Dir")).FullName;
+    var invalidController = Path.Combine(diagnosticDirectory, "Invalid.xml");
+    var bufferedController = Path.Combine(diagnosticDirectory, "Buffered.f");
+    var validController = Path.Combine(diagnosticDirectory, "Valid.xml");
+    var missingController = Path.Combine(diagnosticDirectory, "Missing.xml");
+    var ignoredText = Path.Combine(diagnosticDirectory, "Ignored.txt");
+    var outsideController = Path.Combine(root, "OutsideDiagnostics.xml");
+    await File.WriteAllTextAsync(invalidController, "<dir>\n  &MissingControllerEntity;\n</dir>");
+    await File.WriteAllTextAsync(bufferedController, "<dir>&DiskEntityIsMissing;</dir>");
+    await File.WriteAllTextAsync(validController, "<dir/>");
+    await File.WriteAllTextAsync(ignoredText, "<dir>&IgnoredTextEntity;</dir>");
+    await File.WriteAllTextAsync(outsideController, "<dir>&OutsideEntity;</dir>");
+    var diagnosticPayload = new
+    {
+        root = diagnosticRoot,
+        files = new[] { missingController, invalidController, bufferedController, validController, ignoredText, outsideController },
+        buffers = new Dictionary<string, string> { [bufferedController] = "<dir/>" }
+    };
+    var controllerDiagnostics = JsonSerializer.SerializeToElement(
+        await CallProject("project.controllerDiagnostics", diagnosticPayload), Protocol.Json);
+    var controllerProblems = controllerDiagnostics.GetProperty("diagnostics").EnumerateArray().ToArray();
+    var invalidProblem = controllerProblems.Single(problem =>
+        problem.GetProperty("path").GetString()!.Equals(invalidController, StringComparison.OrdinalIgnoreCase));
+    Check(controllerProblems.Length == 2 &&
+        controllerProblems.Any(problem => problem.GetProperty("path").GetString()!
+            .Equals(missingController, StringComparison.OrdinalIgnoreCase)) &&
+        invalidProblem.GetProperty("message").GetString()!.Contains("MissingControllerEntity", StringComparison.Ordinal) &&
+        invalidProblem.GetProperty("line").GetInt32() == 2 && invalidProblem.GetProperty("column").GetInt32() > 0 &&
+        invalidProblem.GetProperty("severity").GetString() == "error",
+        "Controller diagnostics scan only project XML/F files, prefer buffers, and continue after a file read error");
+    using (var diagnosticCancellation = new CancellationTokenSource())
+    {
+        diagnosticCancellation.Cancel();
+        await Reject<OperationCanceledException>(async () =>
+            await projectTools.ExecuteAsync("project.controllerDiagnostics",
+                JsonSerializer.SerializeToElement(diagnosticPayload, Protocol.Json), diagnosticCancellation.Token),
+            "Controller diagnostics honor cancellation");
+    }
     Directory.CreateDirectory(Path.Combine(modernRoot, "Main"));
     var mobileFiles = JsonSerializer.SerializeToElement(await CallProject("project.controller",
         new { root = modernRoot, link = "", sysId = "Customer" }), Protocol.Json);

@@ -24,6 +24,7 @@ await page.addInitScript(()=>{
   const fixtureProject={id:'fixture',name:'Dự án thử UI',code:'Dự án thử UI',title:'Dự án thử UI',active:true,server:'.',database:'Fixture_App',sourcePath:projectRoot};
   const otherProject={id:'other',name:'Dự án lịch sử',code:'Dự án lịch sử',title:'Dự án lịch sử',active:true,server:'.',database:'Other_App',sourcePath:'C:\\Other'};
   const pastFile='C:\\Other\\Controller\\Main\\past.xml';
+  const controllerDiagnosticPath=projectRoot+'\\App_Data\\Controllers\\Filter\\nhanvien.xml';
   const history=new Map([['other',[pastFile]]]);
   const controllerFiles=name=>[
     projectRoot+'\\Main\\'+name+'.aspx',
@@ -83,6 +84,14 @@ await page.addInitScript(()=>{
         if(link==='hrEmployeeInformation.aspx') files[0]=projectRoot+'\\Main\\hrEmployeeInformation.aspx';
         result={file:files[0],files};break;
       }
+      case 'project.controllerDiagnostics':{
+        const text=request.payload.buffers?.[controllerDiagnosticPath]??'';
+        const belongs=(request.payload.files??[]).some(file=>file.toLowerCase()===controllerDiagnosticPath.toLowerCase());
+        result={diagnostics:belongs&&!text.includes('<!ENTITY MissingEntity ')?[{
+          path:controllerDiagnosticPath,line:2,column:3,severity:'error',
+          message:"Reference to undeclared entity 'MissingEntity'.",
+        }]:[]};break;
+      }
       case 'project.details':result={programPath:'C:\\Fixture\\program.exe',updatePath:'C:\\Fixture\\update',metadata:'<project><FolderName>Dự án thử UI</FolderName></project>'};break;
       case 'window.new':result=true;break;
       case 'recovery.load':result=[];break;
@@ -114,6 +123,7 @@ await page.addInitScript(()=>{
         const filePath=requested??(entityFixture?entityMainPath:'C:\\Fixture\\fixture.xml');
         const text=filePath===entityBodyPath?entityBodyText:filePath===entityDtdPath?entityDtdText:
           entityFixture&&(filePath===entityMainPath||filePath.endsWith('fixture.xml'))?entityMainText:
+          filePath.toLowerCase()===controllerDiagnosticPath.toLowerCase()?'<root>\r\n  &MissingEntity;\r\n</root>':
           filePath.endsWith('nhanvien.xml')?'<root>\r\n<fields/>\r\n<toolbar/>\r\n<command><text><![CDATA[SELECT 42 AS x]]></text></command>\r\n<query>SELECT 43 AS y</query>\r\n<script><![CDATA[const z = 1;]]></script>\r\n</root>':'<root>Tiếng Việt</root>';
         result=doc('open-'+(++serial),text,filePath.split(/[\\/]/).at(-1),filePath);break;
       }
@@ -147,8 +157,15 @@ await page.addInitScript(()=>{
         }else result=null;
         break;
       }
-      case 'xml.diagnostics':result={diagnostic:null,warnings:request.payload.text.includes('SELECT 42 AS x')?
-        [{line:2,column:2,message:"Field 'missing' đã khai báo nhưng chưa có trong <views>."}]:[]};break;
+      case 'xml.diagnostics':{
+        const missing=request.payload.text.includes('&MissingEntity;')&&
+          !request.payload.text.includes('<!ENTITY MissingEntity ');
+        result=missing
+          ? {diagnostic:{line:2,column:3,message:"Reference to undeclared entity 'MissingEntity'."},warnings:[]}
+          : {diagnostic:null,warnings:request.payload.text.includes('SELECT 42 AS x')?
+            [{line:2,column:2,message:"Field 'missing' đã khai báo nhưng chưa có trong <views>."}]:[]};
+        break;
+      }
       case 'xml.controllerPreview':result=window.__previewDir ? {
         kind:'dir', title:'Khai báo nhân viên', subtitle:'Thông tin nhân viên', toolbar:['Lưu'],
         views:[{name:'Dir', columns:[], layout:{widths:[120,40,60,320],rows:[
@@ -343,6 +360,58 @@ async function testTableRefreshAndNotice(){
     window.__nativeCalls.filter(c=>c.method==='table.catalog').length>=2 &&
     window.__nativeCalls.some(c=>c.method==='table.metadata' && c.payload.table==='BangMoiFixture')),
     'A new table appears after running SQL and keeps its first data snapshot');
+  const dataGrid=tablePanel.locator('.table-data-grid');
+  const codeCell=dataGrid.locator('td[data-table-cell="0:0"]');
+  const labelCell=dataGrid.locator('td[data-table-cell="0:1"]');
+  await dataGrid.evaluate(element=>{
+    Object.assign(element.style,{flex:'0 0 260px',maxWidth:'260px'});
+    element.querySelector('table').style.width='620px';
+  });
+  await codeCell.click();
+  await page.getByRole('button',{name:'Tập lệnh',exact:true}).click();
+  await page.getByRole('menuitemcheckbox',{name:'Đóng băng đến cột code',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelector('.table-data-grid')?.getAttribute('data-frozen-through')==='code');
+  const codeHeader=dataGrid.locator('thead th[data-table-column="code"]');
+  const labelHeader=dataGrid.locator('thead th[data-table-column="label"]');
+  const beforeScroll=await Promise.all([codeHeader,labelHeader].map(locator=>locator.evaluate(element=>element.getBoundingClientRect().left)));
+  await dataGrid.evaluate(element=>{element.scrollLeft=180;});
+  await page.waitForTimeout(80);
+  const afterScroll=await Promise.all([codeHeader,labelHeader].map(locator=>locator.evaluate(element=>element.getBoundingClientRect().left)));
+  check(await codeHeader.evaluate(element=>getComputedStyle(element).position==='sticky') &&
+    Math.abs(beforeScroll[0]-afterScroll[0])<2 && beforeScroll[1]-afterScroll[1]>80,
+    'Toolbar action freezes every column through the active column while later columns scroll');
+  await page.getByRole('button',{name:'Tập lệnh',exact:true}).click();
+  await page.getByRole('menuitemcheckbox',{name:'Bỏ đóng băng cột',exact:true}).click();
+  await page.waitForFunction(()=>!document.querySelector('.table-data-grid')?.hasAttribute('data-frozen-through'));
+  check(await codeHeader.evaluate(element=>getComputedStyle(element).position!=='sticky'),
+    'Selecting the toolbar action again removes frozen columns');
+  await dataGrid.evaluate(element=>{element.scrollLeft=0;});
+  await labelCell.click({button:'right',position:{x:8,y:8}});
+  const scriptMenu=page.getByRole('menu',{name:'Loại lệnh SQL'});
+  await scriptMenu.waitFor();
+  check(await scriptMenu.locator('[role="menuitem"], [role="menuitemcheckbox"]').count()===5 &&
+    await scriptMenu.getByRole('menuitemcheckbox',{name:'Đóng băng đến cột label',exact:true}).isVisible() &&
+    await scriptMenu.getByRole('menuitem',{name:'Thêm key vào SQL Data'}).isVisible() &&
+    await scriptMenu.getByRole('menuitem',{name:'Tạo lệnh tạo bảng',exact:true}).isVisible() &&
+    await scriptMenu.getByRole('menuitem',{name:'Tạo lệnh INSERT cho kết quả hiện tại'}).isVisible() &&
+    await scriptMenu.getByRole('menuitem',{name:'Tạo lệnh xóa bảng',exact:true}).isVisible(),
+    'Right click on a cell opens freeze together with every SQL script command');
+  await scriptMenu.getByRole('menuitemcheckbox',{name:'Đóng băng đến cột label',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelector('.table-data-grid')?.getAttribute('data-frozen-through')==='label');
+  await page.waitForFunction(()=>['code','label'].every(name=>{
+    const header=document.querySelector(`.table-data-grid thead th[data-table-column="${name}"]`);
+    return header&&getComputedStyle(header).position==='sticky';
+  }));
+  check(await codeHeader.evaluate(element=>getComputedStyle(element).position==='sticky') &&
+    await labelHeader.evaluate(element=>getComputedStyle(element).position==='sticky'),
+    'Context action freezes all columns from the first through the pointed column');
+  await codeCell.click({button:'right',position:{x:8,y:8}});
+  await page.getByRole('menuitemcheckbox',{name:'Bỏ đóng băng cột',exact:true}).click();
+  await page.waitForFunction(()=>!document.querySelector('.table-data-grid')?.hasAttribute('data-frozen-through'));
+  await dataGrid.evaluate(element=>{
+    element.style.removeProperty('flex');element.style.removeProperty('max-width');
+    element.querySelector('table').style.removeProperty('width');
+  });
 
   await page.evaluate(()=>{window.__pagedTable=true;});
   await tablePanel.getByRole('button',{name:'Chạy',exact:true}).click();
@@ -572,6 +641,43 @@ Trạng thái: 1-Còn sử dụng, 0-Không còn sử dụng`);
     check(await page.locator('#results-panel').evaluate(element=>element.classList.contains('collapsed')),
       'Returning to an existing XML tab collapses the bottom panel again');
     check(errors.length===0,'No uncaught browser errors');
+  } else if(process.argv.includes('--controller-diagnostics-regression')){
+    await page.locator('.project-row').filter({hasText:'Dự án thử UI'}).click();
+    await page.locator('dialog').waitFor({state:'detached'});
+    await page.getByRole('button',{name:'Chức năng',exact:true}).click();
+    await page.getByRole('button',{name:'Nhân viên',exact:true}).click();
+    const diagnosticPath='C:\\Fixture\\App_Data\\Controllers\\Filter\\nhanvien.xml';
+    const fileTree=page.locator('.project-file-tree');
+    const diagnosticFile=fileTree.getByTitle(diagnosticPath,{exact:true});
+    await diagnosticFile.waitFor();
+    await page.waitForFunction(path=>[...document.querySelectorAll('button[title]')]
+      .some(button=>button.title===path&&button.getAttribute('aria-invalid')==='true'),diagnosticPath);
+    check(await diagnosticFile.getAttribute('data-diagnostic')==='error',
+      'Controller scan marks the undeclared-entity file in red');
+    const controllerNotice=page.locator('.table-notice').filter({hasText:'Khai báo controller chưa hợp lệ'});
+    await controllerNotice.waitFor();
+    check((await controllerNotice.textContent()).includes('MissingEntity')&&
+      (await controllerNotice.textContent()).includes(diagnosticPath),
+      'Function click reports the missing declaration and exact file immediately');
+    await diagnosticFile.click();
+    const banner=page.locator('.editor-diagnostic-banner').filter({hasText:'MissingEntity'});
+    await banner.waitFor();
+    check((await banner.textContent()).includes('Dòng 2, cột 3')&&
+      (await banner.textContent()).includes(diagnosticPath),
+      'Invalid controller shows a banner with entity, line, column, and path');
+    await page.screenshot({path:out+'/controller-diagnostics-error.png',animations:'disabled'});
+    await page.locator('.editor-group.focused .monaco-editor').click({position:{x:160,y:48}});
+    await page.keyboard.press('Control+Home');
+    await page.keyboard.insertText('<!DOCTYPE root [<!ENTITY MissingEntity "đã khai báo">]>\r\n');
+    await page.waitForFunction(path=>window.__nativeCalls.some(call=>call.method==='xml.diagnostics'&&
+      call.payload.path===path&&call.payload.text.includes('<!ENTITY MissingEntity ')),diagnosticPath);
+    await banner.waitFor({state:'detached'});
+    await page.waitForFunction(path=>[...document.querySelectorAll('button[title]')]
+      .some(button=>button.title===path&&!button.hasAttribute('aria-invalid')),diagnosticPath);
+    await controllerNotice.waitFor({state:'detached'});
+    check(true,'Correct declaration clears the banner and red file state');
+    await page.screenshot({path:out+'/controller-diagnostics.png',animations:'disabled'});
+    check(errors.length===0,'No uncaught browser errors');
   } else if(process.argv.includes('--profiler-regression')){
     await page.locator('.project-row').filter({hasText:'Dự án thử UI'}).click();
     await page.locator('dialog').waitFor({state:'detached'});
@@ -732,12 +838,9 @@ Trạng thái: 1-Còn sử dụng, 0-Không còn sử dụng`);
   await page.locator('.menu-kind-tabs').getByRole('tab',{name:'Web',exact:true}).click();
   check(await page.locator('.function-separator').count()===1,'Dash function renders as horizontal separator');
   const functionRow=page.getByRole('button',{name:'Nhân viên',exact:true});
-  await functionRow.click();
-  check(await functionRow.getAttribute('aria-current')==='page' && await page.locator('.project-file-tree').count()===0,
-    'A single function click only highlights the selected row');
   check(await page.getByRole('button',{name:'menu-parent',exact:true}).count()===0,
     'Parent functions keep menu ID text without a source action');
-  await page.getByRole('button',{name:'menu1',exact:true}).click();
+  await functionRow.click();
   const fileTree=page.locator('.project-file-tree');
   const dirPath='C:\\Fixture\\App_Data\\Controllers\\Dir';
   const gridPath='C:\\Fixture\\App_Data\\Controllers\\Grid';
@@ -746,7 +849,7 @@ Trạng thái: 1-Còn sử dụng, 0-Không còn sử dụng`);
   await dirFile.waitFor();await gridFile.waitFor();
   check(await fileTree.getByTitle('C:\\Fixture\\Main\\nhanvien.aspx',{exact:true}).getAttribute('aria-current')!=='page' &&
     await page.evaluate(before=>window.__nativeCalls.filter(c=>c.method==='document.open').length===before,openedBefore),
-    'Menu ID only reveals the controller tree without opening Main');
+    'A function click scans and reveals its controller tree without opening Main');
   await page.getByRole('button',{name:'Chức năng',exact:true}).click();
   const functionRowAgain=page.getByRole('button',{name:'Nhân viên',exact:true});
   await functionRowAgain.focus();await functionRowAgain.press('F12');
@@ -783,6 +886,28 @@ Trạng thái: 1-Còn sử dụng, 0-Không còn sử dụng`);
     'ERP function reveals actual App_Data and Controllers ancestors');
   check(await page.evaluate(before=>window.__nativeCalls.filter(c=>c.method==='document.open').length===before,openedBefore),
     'Opening a function expands folders without opening a document');
+  const diagnosticPath=dirPath.replace(/\\Dir$/,'\\Filter')+'\\nhanvien.xml';
+  const diagnosticFile=fileTree.getByTitle(diagnosticPath,{exact:true});
+  await diagnosticFile.waitFor();
+  await page.waitForFunction(path=>[...document.querySelectorAll('button[title]')]
+    .some(button=>button.title===path&&button.getAttribute('aria-invalid')==='true'),diagnosticPath);
+  check(await diagnosticFile.getAttribute('data-diagnostic')==='error',
+    'Controller scan marks only the file with an undeclared entity in red');
+  await diagnosticFile.click();
+  const diagnosticBanner=page.locator('.editor-diagnostic-banner').filter({hasText:'MissingEntity'});
+  await diagnosticBanner.waitFor();
+  check((await diagnosticBanner.textContent()).includes('Dòng 2, cột 3')&&
+    (await diagnosticBanner.textContent()).includes(diagnosticPath),
+    'Opening an invalid controller shows a persistent banner with entity, position, and path');
+  await page.locator('.editor-group.focused .monaco-editor').click({position:{x:160,y:48}});
+  await page.keyboard.press('Control+Home');
+  await page.keyboard.insertText('<!DOCTYPE root [<!ENTITY MissingEntity "đã khai báo">]>\r\n');
+  await page.waitForFunction(path=>window.__nativeCalls.some(call=>call.method==='xml.diagnostics'&&
+    call.payload.path===path&&call.payload.text.includes('<!ENTITY MissingEntity ')),diagnosticPath);
+  await diagnosticBanner.waitFor({state:'detached'});
+  await page.waitForFunction(path=>[...document.querySelectorAll('button[title]')]
+    .some(button=>button.title===path&&!button.hasAttribute('aria-invalid')),diagnosticPath);
+  check(true,'Correct declaration clears the editor banner and red file state after realtime validation');
   check(await fileTree.getByTitle(dirPath+'\\bophan.xml',{exact:true}).count()===0,
     'The controller tree excludes files from other controllers in the same directory');
   check(await fileTree.locator('.category-heading').allTextContents().then(names=>
@@ -1070,8 +1195,17 @@ Trạng thái: 1-Còn sử dụng, 0-Không còn sử dụng`);
   await page.getByRole('menuitem',{name:'Thêm key vào SQL Data'}).click();
   await page.getByRole('tab',{name:'Generate Update',exact:true}).waitFor();
   await firstTableTab.click();
-  await page.getByRole('button',{name:'Tập lệnh',exact:true}).click();
-  await page.getByRole('menuitem',{name:'Tạo lệnh tạo bảng',exact:true}).click();
+  await tablePanel.locator('.table-data-grid td[title="1"]').first().click({button:'right'});
+  const tableScriptContextMenu=page.getByRole('menu',{name:'Loại lệnh SQL'});
+  await tableScriptContextMenu.waitFor();
+  check(await tableScriptContextMenu.locator('[role="menuitem"], [role="menuitemcheckbox"]').count()===5 &&
+    await tableScriptContextMenu.getByRole('menuitemcheckbox',{name:/^Đóng băng đến cột /}).isVisible() &&
+    await tableScriptContextMenu.getByRole('menuitem',{name:'Thêm key vào SQL Data'}).isVisible() &&
+    await tableScriptContextMenu.getByRole('menuitem',{name:'Tạo lệnh tạo bảng',exact:true}).isVisible() &&
+    await tableScriptContextMenu.getByRole('menuitem',{name:'Tạo lệnh INSERT cho kết quả hiện tại'}).isVisible() &&
+    await tableScriptContextMenu.getByRole('menuitem',{name:'Tạo lệnh xóa bảng',exact:true}).isVisible(),
+    'Right click on table data opens the complete SQL script menu');
+  await tableScriptContextMenu.getByRole('menuitem',{name:'Tạo lệnh tạo bảng',exact:true}).click();
   await page.getByRole('tab',{name:'DanhMuc-create.sql'}).waitFor();
   await firstTableTab.click();
   await page.getByRole('button',{name:'Tập lệnh',exact:true}).click();
