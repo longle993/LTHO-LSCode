@@ -9,6 +9,7 @@
     "typecheck": "tsc -b"
   },
   "dependencies": {
+    "exceljs": "4.4.0",
     "lucide-react": "0.468.0",
     "monaco-editor": "0.52.2",
     "react": "18.3.1",

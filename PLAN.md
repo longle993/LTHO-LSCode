@@ -138,6 +138,7 @@ Chi tiết và tiêu chí: [ERP-MENU-PERFORMANCE-MOBILE](docs/specifications/ERP
 
 - [x] Mở rộng FileSections theo mẫu hai danh sách của Fcode: nhóm thẻ và mục con có tên/id/controller. Lấy vị trí từ nội dung đang sửa, hỗ trợ tìm nhanh, phím mũi tên, Enter, Esc và trả focus về editor.
 - [x] Đăng ký Ctrl+Alt+C để mở ô lệnh riêng. Nhập `@@` rồi Enter mở QLYC. Từ QLYC, **View All** mở **Request Processing Statistics** dưới dạng bảng chỉ đọc. Hỗ trợ cấu hình `Qlcv` cũ của FCode và kết nối SQL đang mở trong LSCode; không ghi tài khoản hay danh sách nhân viên cá nhân vào mã nguồn.
+- [x] Sửa lớp hiển thị tiêu đề ghim và thanh cuộn của bảng QLYC. Import Excel ghi đè theo mã và thông báo số nhân viên vừa nhập. Đã kiểm tra bằng Chromium với bảng mẫu 60 dòng, gồm trường hợp tệp chứa mã trùng.
 - [x] Rà provider Monaco theo vùng XML, SQL và JavaScript. Xác nhận gợi ý biến FAST trong SQL nhúng và tên field trong chuỗi của f./g. đã chạy qua provider tách vùng, giới hạn phân tích XML 1 MB và bỏ kết quả completion khi Monaco hủy yêu cầu.
 - [x] Build/publish frontend và Desktop; 155 WebView checks với SQL fixture, 146 Core checks và 12 smoke WebView2 đạt. Còn smoke trực tiếp Ctrl+Alt+C với cơ sở dữ liệu QLYC thật vì máy kiểm thử hiện không có cấu hình `HKCU\\Software\\FCoder\\Qlcv`.
 - [x] Chuyển publish mặc định sang `win-x64 --self-contained true`; chạy chính EXE self-contained qua 12 smoke WebView2 để xác nhận không phụ thuộc .NET Desktop Runtime cài trên máy.

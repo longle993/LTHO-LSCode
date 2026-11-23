@@ -47,6 +47,20 @@ Chỉ hiện thanh Web / Mobile khi tải được cây menu Mobile có mục. D
 Batch kiểm tra `dbo.dvcommand` phải chạy được trên các SYS FAST cũ: dùng `RAISERROR + RETURN`, không dùng cú pháp `THROW` yêu cầu SQL Server 2012 trở lên.
 # Điều hướng XML và quản lý yêu cầu
 
+Trong **View All** của QLYC, chọn **Xuất mẫu Excel**, điền danh sách rồi dùng **Import Excel**. Bảng nhóm và lọc theo mã bộ phận. Hai ô chọn điều khiển Số yêu cầu và Số lượng dưới mỗi kỳ. Tiêu đề cột sắp xếp tăng, giảm rồi trả về thứ tự nguồn trong từng nhóm.
+
+Sheet đầu tiên của tệp `.xlsx` có tiêu đề `ma_bp`, `ma_nv`, `ten_nv` theo thứ tự dưới đây. `ma_nv` là mã người xử lý trong dữ liệu QLYC. Mẫu định dạng cột dưới dạng văn bản để giữ số 0 đầu mã. LSCode kiểm tra trùng sau khi bỏ khoảng trắng hai đầu và bỏ phân biệt hoa/thường. Tệp lỗi giữ nguyên danh sách đang dùng. Khi import thành công, LSCode thêm mã mới và ghi đè bộ phận, tên của mã đã có, đồng thời giữ các mã vắng mặt trong tệp. Thông báo nhập hiển thị số nhân viên trong lần nhập vừa hoàn tất.
+
+Hai hàng tiêu đề bảng luôn hiển thị khi cuộn dọc. Cột mã và tên đã ghim vẫn hiển thị khi cuộn ngang. Vùng bảng có thanh cuộn theo các chiều mà dữ liệu vượt khung.
+
+```tsv
+ma_bp	ma_nv	ten_nv
+KT	NV001	Nguyễn Văn An
+KT	NV002	Trần Minh Bình
+```
+
+Thống kê mở ở bộ phận **LTHO** và chỉ hiển thị người có bộ phận trong danh sách đã import. Sau khi import, bộ lọc trở về LTHO. Hai nút icon nhập/xuất mẫu Excel nằm trên thanh công cụ. Bảng cuộn đến tháng hiện tại, mặc định ghim mã và tên nhân viên, cho phép kéo chọn vùng và Ctrl+C để sao chép. Dòng đầu mỗi bộ phận có màu nhận diện. Bật cả hai ô để xem số yêu cầu bên trái và số lượng bên phải trong từng tháng, Tổng và TB.
+
 Ctrl+G trong XML ERP hiển thị TAG và DETAIL với màu nhận diện cho từng nhóm. Nhóm fields có Start tại field đầu tiên và End tại field cuối cùng. Nhóm views liệt kê các view theo `id`. Nhóm command liệt kê sự kiện theo thứ tự nguồn, script chỉ liệt kê tên hàm JavaScript, và css có End/Start. Không đưa `items` hoặc `text` vào danh sách điều hướng. Chọn một mục để nhảy tới vị trí tương ứng trong buffer đang sửa.
 
 Danh sách Ctrl+G lấy trực tiếp từ buffer đang sửa và hỗ trợ tìm nhanh, mũi tên, Enter, Esc; không đọc lại nội dung cũ từ đĩa.
