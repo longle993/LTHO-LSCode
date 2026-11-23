@@ -4,9 +4,10 @@ import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { X, ChevronDown, Check, CircleAlert, CheckCircle2, Info } from "lucide-react";
 import { createPortal } from "react-dom";
 import type { Table } from "./bridge";
-export function WorkbenchNotice({ error, status, onClose }: {
+export function WorkbenchNotice({ error, status, errorTitle, onClose }: {
   error?: string;
   status?: string;
+  errorTitle?: string;
   onClose: () => void;
 }) {
   const message = error || status;
@@ -17,7 +18,7 @@ export function WorkbenchNotice({ error, status, onClose }: {
         role={error ? "alert" : "status"}>
         <Icon size={18} className="table-notice-icon" aria-hidden />
         <span className="table-notice-content">
-          <strong>{error ? "Thao tác thất bại" : "Thông báo"}</strong>
+          <strong>{error ? errorTitle ?? "Thao tác thất bại" : "Thông báo"}</strong>
           <span>{message}</span>
         </span>
         <IconButton label="Đóng thông báo" onClick={onClose}><X size={15} /></IconButton>

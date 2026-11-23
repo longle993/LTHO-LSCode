@@ -27,6 +27,7 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
     private static readonly SemaphoreSlim persistenceGate = new(1);
     private readonly CatalogWorkspace catalog = new();
     private sealed record TableSnapshot(string Id, SqlTarget Target, string Qualified, DataTable Data);
+    private sealed record ControllerProblem(string Path, string Message, int Line, int Column, string Severity);
     private readonly ConcurrentDictionary<string, TableSnapshot> tableSnapshots = new();
     public DeveloperTools() => http.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "Mozilla/5.0");
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -673,6 +674,15 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                     var entry = file ?? matches[0];
                     return new { file = entry, files = matches.Prepend(entry).Distinct(StringComparer.OrdinalIgnoreCase).ToArray() };
                 }, ct);
+            case "project.controllerDiagnostics":
+                var controllerDiagnosticFiles = p.TryGetProperty("files", out var diagnosticFileValues) &&
+                    diagnosticFileValues.ValueKind == JsonValueKind.Array
+                    ? diagnosticFileValues.Deserialize<string[]>(Json) ?? []
+                    : [];
+                return new
+                {
+                    diagnostics = await ControllerDiagnosticsAsync(S("root"), controllerDiagnosticFiles, OpenBuffers(), ct)
+                };
             case "text.format":
                 return S("language") switch { "sql" => SqlLanguageService.Format(S("text")), "xml" => XmlTools.Format(S("text")), "json" => JsonSerializer.Serialize(JsonDocument.Parse(S("text")).RootElement, new JsonSerializerOptions { WriteIndented = true }), _ => S("text") };
             case "xml.analyze":
@@ -868,6 +878,84 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
         if (existing.Any(item => item.Id == candidate.Id || Same(item.Field("StandardProjectCode") is { Length: > 0 } itemCode ? itemCode : item.Name, code)))
             throw new InvalidOperationException($"Profile dự án '{candidate.Name}' đã tồn tại.");
     }
+
+    private static async Task<ControllerProblem[]> ControllerDiagnosticsAsync(string root, IEnumerable<string> files,
+        IReadOnlyDictionary<string, string> buffers, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        if (string.IsNullOrWhiteSpace(root) || !Path.IsPathFullyQualified(root))
+            throw new ArgumentException("Thư mục dự án không hợp lệ.");
+        root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
+        if (!Directory.Exists(root)) throw new DirectoryNotFoundException("Thư mục dự án không tồn tại.");
+
+        bool IsInsideRoot(string path)
+        {
+            var relative = Path.GetRelativePath(root, path);
+            return !Path.IsPathRooted(relative) && relative != ".." &&
+                !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) &&
+                !relative.StartsWith(".." + Path.AltDirectorySeparatorChar, StringComparison.Ordinal);
+        }
+
+        string? Normalize(string candidate)
+        {
+            if (string.IsNullOrWhiteSpace(candidate)) return null;
+            try
+            {
+                var path = Path.GetFullPath(Path.IsPathFullyQualified(candidate)
+                    ? candidate
+                    : Path.Combine(root, candidate));
+                return IsInsideRoot(path) ? path : null;
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                return null;
+            }
+        }
+
+        var openBuffers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (candidate, text) in buffers)
+        {
+            token.ThrowIfCancellationRequested();
+            if (Normalize(candidate) is { } path) openBuffers[path] = text;
+        }
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var controllerFiles = new List<string>();
+        foreach (var candidate in files)
+        {
+            token.ThrowIfCancellationRequested();
+            if (Normalize(candidate) is not { } path ||
+                Path.GetExtension(path).ToLowerInvariant() is not (".f" or ".xml") || !seen.Add(path)) continue;
+            controllerFiles.Add(path);
+        }
+
+        var diagnostics = new List<ControllerProblem>();
+        foreach (var path in controllerFiles)
+        {
+            token.ThrowIfCancellationRequested();
+            try
+            {
+                var text = openBuffers.TryGetValue(path, out var buffer)
+                    ? buffer
+                    : await File.ReadAllTextAsync(path, token).ConfigureAwait(false);
+                token.ThrowIfCancellationRequested();
+                var inspected = XmlTools.InspectEditor(text, path, openBuffers);
+                token.ThrowIfCancellationRequested();
+                if (inspected.Diagnostic is { } diagnostic)
+                    diagnostics.Add(new(path, diagnostic.Message, diagnostic.Line, diagnostic.Column, "error"));
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                diagnostics.Add(new(path, $"Không đọc được file XML: {ex.Message}", 1, 1, "error"));
+            }
+        }
+        return diagnostics.ToArray();
+    }
+
     private static bool UsesDedicatedProfilerLogin(string server) =>
         server.Equals(@"172.168.5.14\SQL2014", StringComparison.OrdinalIgnoreCase) ||
         server.Equals(@"172.168.5.14\SQL2008", StringComparison.OrdinalIgnoreCase);

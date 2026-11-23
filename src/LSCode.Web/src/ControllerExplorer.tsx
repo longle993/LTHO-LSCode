@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Button, Modal } from "./ui";
 import { pathIsWithin, rebasePath } from "./fileLabels";
+import type { EditorDiagnostic } from "./editor";
 import { ChevronRight, ChevronDown, Folder, FileCode2, PanelsTopLeft,
-  ChartNoAxesCombined, FileSpreadsheet, FileText, FileChartColumn } from "lucide-react";
+  ChartNoAxesCombined, CircleAlert, FileSpreadsheet, FileText, FileChartColumn } from "lucide-react";
 
 function OutlineDocumentIcon({ kind }: { kind: "f" | "xml" }) {
   return <svg width="19" height="19" viewBox="0 0 20 20" fill="none" aria-hidden="true"
@@ -36,12 +37,13 @@ export const folderKind = (name: string) =>
 
 export default function ControllerExplorer({
   root, files, activePath, onOpen, onCopy, onReveal, onDuplicate, onRename, onSourceCollection,
-  selectedFiles, onToggleFile,
+  selectedFiles, onToggleFile, problemsByPath,
   emptyMessage = "Mở một chức năng ERP để xem file của controller.",
 }: {
   root: string;
   selectedFiles?: string[];
   onToggleFile?: (path: string, checked: boolean) => void;
+  problemsByPath?: ReadonlyMap<string, readonly EditorDiagnostic[]>;
   files?: string[];
   activePath?: string | null;
   onOpen?: (path: string) => void;
@@ -54,6 +56,11 @@ export default function ControllerExplorer({
 }) {
   const [collapsed, setCollapsed] = useState(new Set<string>());
   const checkedPaths = useMemo(() => new Set(selectedFiles?.map(pathKey)), [selectedFiles]);
+  const normalizedProblems = useMemo(() => {
+    const result = new Map<string, readonly EditorDiagnostic[]>();
+    for (const [path, problems] of problemsByPath ?? []) result.set(pathKey(path), problems);
+    return result;
+  }, [problemsByPath]);
   const directories = useMemo(() => {
     const result = new Map<string, Map<string, ExplorerItem>>();
     for (const file of files ?? []) {
@@ -131,17 +138,30 @@ export default function ControllerExplorer({
 
   function tree(path: string, inheritedKind = "folder"): React.ReactNode {
     return directories.get(pathKey(path))?.map((item) => {
-      if (!item.directory) return <button
-        key={item.path}
-        className="tree-row"
-        aria-current={item.path.toLowerCase() === activePath?.toLowerCase() ? "page" : undefined}
-        {...actions(item)}
-        onClick={() => onOpen ? onOpen(item.path) : onToggleFile?.(item.path, !checkedPaths.has(pathKey(item.path)))}
-      >{onToggleFile && <input type="checkbox" aria-label={"Chọn " + item.name}
-        checked={checkedPaths.has(pathKey(item.path))}
-        onClick={event => event.stopPropagation()}
-        onChange={event => onToggleFile(item.path, event.target.checked)} />}
-        <FileIcon path={item.path} /><span>{item.name}</span></button>;
+      if (!item.directory) {
+        const errors = (normalizedProblems.get(pathKey(item.path)) ?? [])
+          .filter(problem => problem.severity === "error");
+        const firstError = errors[0];
+        return <button
+          key={item.path}
+          className={"tree-row" + (firstError ? " controller-file-error" : "")}
+          aria-current={item.path.toLowerCase() === activePath?.toLowerCase() ? "page" : undefined}
+          aria-invalid={firstError ? true : undefined}
+          data-diagnostic={firstError ? "error" : undefined}
+          data-diagnostic-message={firstError?.message}
+          {...actions(item)}
+          title={item.path}
+          onClick={() => onOpen ? onOpen(item.path) : onToggleFile?.(item.path, !checkedPaths.has(pathKey(item.path)))}
+        >{onToggleFile && <input type="checkbox" aria-label={"Chọn " + item.name}
+          checked={checkedPaths.has(pathKey(item.path))}
+          onClick={event => event.stopPropagation()}
+          onChange={event => onToggleFile(item.path, event.target.checked)} />}
+          <FileIcon path={item.path} /><span className="controller-file-name">{item.name}</span>
+          {firstError && <span className="controller-file-problem-badge" aria-label={`${errors.length} lỗi`}>
+            <CircleAlert size={13} aria-hidden="true" /><span>{errors.length}</span>
+          </span>}
+        </button>;
+      }
       const category = folderKind(item.name);
       const kind = category === "folder" ? inheritedKind : category;
       const open = !collapsed.has(item.path);
