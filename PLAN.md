@@ -8,14 +8,24 @@
 - [x] Build frontend và Desktop Release. Chạy 154 kiểm tra Core và 11 kiểm tra Chrome trên bản production, gồm phân trang và tìm kiếm ở chiều rộng 375 px. Probe màn chung ghi ba điểm ngoài hai khu vực thay đổi: nút **Mở thư mục** xuống dòng và nút tìm lệnh có vùng bấm dưới 24 px ở 375 px, nút **Chức năng** xuống dòng ở 1.440 px.
 - [ ] Đo thời gian và bộ nhớ trên dữ liệu ERP thực tế. Nhánh đọc SQL Server 2008 chưa được chạy trên máy chủ phiên bản đó.
 
+## Menu Tập lệnh bằng chuột phải — 23/11/2026
+
+- [x] Nhấp chuột phải trên bề mặt dữ liệu của tab Cấu trúc và dữ liệu mở đúng menu Tập lệnh hiện có với đủ bốn thao tác: thêm key vào SQL Data, tạo bảng, INSERT kết quả hiện tại và xóa bảng.
+- [x] Dùng chung một popover cho nút toolbar và vị trí con trỏ; giữ menu riêng của danh sách cột và không chặn menu soạn thảo khi người dùng đang nhập trong ô.
+- [x] Thêm thao tác đóng băng đến cột đang chọn vào menu toolbar và menu chuột phải. Lưới đo chiều rộng thực tế, giữ cột số dòng cùng mọi cột từ đầu đến cột đích khi cuộn ngang; chọn lại thao tác sẽ bỏ đóng băng.
+- [x] TypeScript typecheck và production build đạt. Chrome fixture `--table-regression` đạt 9 kiểm tra, gồm cuộn ngang thật, bật/tắt từ toolbar và menu chuột phải; không publish theo yêu cầu.
+
 ## Tự chạy SQL Profiler — 20/11/2026
 
 - [x] Đối chiếu thao tác mở Profiler từ editor của FSD Studio và xác định thông tin lấy từ kết nối hiện tại.
 - [x] Điền bộ lọc database, nạp cấu hình SSMS, tự khởi động và giữ luồng chọn `PROFILER.EXE`.
 - [x] Kiểm tra chọn executable và tự chạy trên giao diện bằng fixture. Thu sự kiện thật và xác nhận dọn phiên Extended Events trên SQL Server LocalDB. Chạy smoke WebView2 và publish Windows x64.
 - [x] Xử lý máy chủ SQL2014 từ chối Extended Events của tài khoản dự án. Kiểm tra SQL Trace tích hợp bằng truy vấn fixture trên LocalDB và xác nhận mở, đọc, đóng phiên đã lọc trên máy chủ tương ứng.
+- [x] Sửa lỗi SQL Server 2008 `Incorrect syntax near 'THROW'`: tự chọn SQL Trace cho version 10.x, đổi batch sang `RAISERROR + RETURN` và kiểm tra bằng parser T-SQL 100 trong bộ 109 WebView checks.
+- [x] Sửa lỗi `You do not have permission to run 'SP_TRACE_CREATE'` trên instance SQL2008 chuẩn bằng cách tự dùng tài khoản Profiler riêng thay cho tài khoản dự án; không đưa mật khẩu qua bridge hoặc UI.
 - [x] Giữ dữ liệu đã thu khi Dừng rồi Chạy lại và kiểm tra sự kiện của phiên mới được nối vào lưới.
 - [x] Tự thu gọn panel dưới khi mở hoặc chọn tab XML, giữ nguyên dữ liệu và cho phép mở lại.
+- [ ] Smoke phiên thu thật trên instance SQL Server 2008 của người dùng sau khi cài bản publish mới.
 
 ## Đồng bộ dự án theo FSD Studio — 20/11/2026
 
@@ -196,3 +206,12 @@ Phạm vi và tiêu chí nghiệm thu nằm trong [SPEC.md](SPEC.md#check-mail--
 3. **Nối luồng C#.** Khai báo request/response ở Contracts, command và handler MediatR ở Application, adapter SMTP bất đồng bộ ở Infrastructure. Đề xuất dùng MailKit cho hai chế độ TLS, kiểm tra tương thích với target framework trước khi thêm gói. Giữ kiểm tra chứng chỉ máy chủ. Tạo thư UTF-8 theo Text/HTML, xử lý Bcc đúng vai trò. Gắn giới hạn thời gian và hủy khi đóng tab. Rà đường ghi log bridge trước khi truyền mật khẩu.
 4. **Trả kết quả tại chỗ.** Hiện bước gặp lỗi, mã phản hồi SMTP nếu có và địa chỉ bị từ chối khi xác định được. Khi mất kết nối sau khi đã chuyển nội dung nhưng chưa có xác nhận, báo chưa xác định được kết quả và để người dùng quyết định gửi lại. Không tự động gửi lại.
 5. **Kiểm thử và bàn giao.** Dùng SMTP thử nghiệm cục bộ và địa chỉ thuộc example.test. Kiểm tra Text/HTML tiếng Việt, nhiều người nhận, Bcc ẩn khỏi header, lỗi cổng/chứng chỉ/mật khẩu, bấm gửi liên tiếp, đóng tab khi đang gửi và mở công cụ khi chưa chọn dự án. Kiểm tra theme sáng/tối, thu hẹp cửa sổ, điều hướng bàn phím và log đã lọc dữ liệu. Sau khi đạt tiêu chí, cập nhật hướng dẫn sử dụng và build bản chạy trực tiếp.
+
+## Chẩn đoán khai báo controller ERP — 23/11/2026
+
+- [x] Dùng parser XML/DTD hiện có để quét toàn bộ `.f` và `.xml` của controller qua bridge riêng, không lưu diagnostics trong cache danh sách file.
+- [x] Tô đỏ đúng file lỗi trong cây và hiển thị thanh cảnh báo trên từng pane editor với thông báo, dòng, cột và đường dẫn.
+- [x] Ưu tiên buffer chưa lưu, cập nhật trạng thái theo document và quét lại controller sau debounce để khai báo sửa đúng tự xóa lỗi.
+- [x] Thêm fixture native cho file hợp lệ, entity thiếu, buffer đã sửa, file ngoài dự án, file không hỗ trợ và cancellation.
+- [x] Chạy regression trình duyệt cho chu trình file đỏ → mở banner → thêm khai báo → tự xóa; TypeScript/Vite build đạt, 111 WebView checks và 156 Core checks đạt, 12 smoke native đạt; đã publish `artifacts/publish-webview/LSCode.WebView.exe`.
+- [ ] Nghiệm thu trên controller FAST ERP thật có DTD/include nhiều tầng; phân tích hàm JavaScript ngoài entity sẽ được đặc tả riêng nếu cần.
