@@ -12,6 +12,55 @@ namespace LSCode.Infrastructure;
 internal sealed class SqlTraceStream(SqlTarget target, string databasePrefix)
 {
     private const int QueueLimit = 5000;
+    private const string ConfigureSql = """
+        DECLARE @result int;
+        DECLARE @columns table (id int);
+        INSERT @columns VALUES (1), (8), (10), (11), (12), (13), (14), (16), (17), (18), (35);
+        DECLARE @event int, @column int, @enabled bit = 1;
+        DECLARE trace_columns CURSOR LOCAL FAST_FORWARD FOR
+            SELECT eventid, id FROM (VALUES (10), (12)) AS trace_events(eventid) CROSS JOIN @columns;
+        OPEN trace_columns;
+        FETCH NEXT FROM trace_columns INTO @event, @column;
+        WHILE @@FETCH_STATUS = 0
+        BEGIN
+            EXEC @result = sys.sp_trace_setevent @traceId, @event, @column, @enabled;
+            IF @result <> 0
+            BEGIN
+                RAISERROR(N'Không cấu hình được cột SQL Trace.', 16, 1);
+                RETURN;
+            END;
+            FETCH NEXT FROM trace_columns INTO @event, @column;
+        END;
+        CLOSE trace_columns;
+        DEALLOCATE trace_columns;
+        EXEC @result = sys.sp_trace_setfilter @traceId, 35, 0, 6, @database;
+        IF @result <> 0
+        BEGIN
+            RAISERROR(N'Không đặt được bộ lọc database cho SQL Trace.', 16, 1);
+            RETURN;
+        END;
+        EXEC @result = sys.sp_trace_setstatus @traceId, 1;
+        IF @result <> 0
+        BEGIN
+            RAISERROR(N'Không bắt đầu được SQL Trace.', 16, 1);
+            RETURN;
+        END;
+        """;
+    private const string DropSql = """
+        DECLARE @result int;
+        EXEC @result = sys.sp_trace_setstatus @traceId, 0;
+        IF @result NOT IN (0, 9)
+        BEGIN
+            RAISERROR(N'Không dừng được phiên SQL Trace.', 16, 1);
+            RETURN;
+        END;
+        EXEC @result = sys.sp_trace_setstatus @traceId, 2;
+        IF @result NOT IN (0, 9)
+        BEGIN
+            RAISERROR(N'Không đóng được phiên SQL Trace.', 16, 1);
+            RETURN;
+        END;
+        """;
     private readonly ConcurrentQueue<ProfilerEvent> events = new();
     private readonly CancellationTokenSource stop = new();
     private int traceId;
@@ -57,28 +106,7 @@ internal sealed class SqlTraceStream(SqlTarget target, string databasePrefix)
             throw new InvalidOperationException($"SQL Server từ chối tạo SQL Trace (mã {result.Value}).");
         traceId = created;
 
-        using var setup = new SqlCommand("""
-            DECLARE @result int;
-            DECLARE @columns table (id int);
-            INSERT @columns VALUES (1), (8), (10), (11), (12), (13), (14), (16), (17), (18), (35);
-            DECLARE @event int, @column int, @enabled bit = 1;
-            DECLARE trace_columns CURSOR LOCAL FAST_FORWARD FOR
-                SELECT eventid, id FROM (VALUES (10), (12)) AS trace_events(eventid) CROSS JOIN @columns;
-            OPEN trace_columns;
-            FETCH NEXT FROM trace_columns INTO @event, @column;
-            WHILE @@FETCH_STATUS = 0
-            BEGIN
-                EXEC @result = sys.sp_trace_setevent @traceId, @event, @column, @enabled;
-                IF @result <> 0 THROW 50000, N'Không cấu hình được cột SQL Trace.', 1;
-                FETCH NEXT FROM trace_columns INTO @event, @column;
-            END;
-            CLOSE trace_columns;
-            DEALLOCATE trace_columns;
-            EXEC @result = sys.sp_trace_setfilter @traceId, 35, 0, 6, @database;
-            IF @result <> 0 THROW 50000, N'Không đặt được bộ lọc database cho SQL Trace.', 1;
-            EXEC @result = sys.sp_trace_setstatus @traceId, 1;
-            IF @result <> 0 THROW 50000, N'Không bắt đầu được SQL Trace.', 1;
-            """, connection);
+        using var setup = new SqlCommand(ConfigureSql, connection);
         setup.Parameters.Add("@traceId", SqlDbType.Int).Value = traceId;
         setup.Parameters.Add("@database", SqlDbType.NVarChar, 1024).Value =
             databasePrefix.Replace("[", "[[]").Replace("_", "[_]").Replace("%", "[%]") + "%";
@@ -153,12 +181,7 @@ internal sealed class SqlTraceStream(SqlTarget target, string databasePrefix)
         {
             await using var connection = new SqlConnection(ConnectionString);
             await connection.OpenAsync();
-            await using var command = new SqlCommand("""
-                DECLARE @result int;
-                EXEC @result = sys.sp_trace_setstatus @traceId, 0;
-                EXEC @result = sys.sp_trace_setstatus @traceId, 2;
-                IF @result NOT IN (0, 9) THROW 50000, N'Không đóng được phiên SQL Trace.', 1;
-                """, connection);
+            await using var command = new SqlCommand(DropSql, connection);
             command.Parameters.Add("@traceId", SqlDbType.Int).Value = traceId;
             await command.ExecuteNonQueryAsync();
             traceId = 0;

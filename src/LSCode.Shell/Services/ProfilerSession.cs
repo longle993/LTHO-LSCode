@@ -45,10 +45,12 @@ public sealed class ProfilerSession(SqlTarget target, ProfilerTemplate template)
     public async Task StartAsync(CancellationToken token)
     {
         using var connection = new SqlConnection(ConnectionString); await connection.OpenAsync(token);
-        var sql = "BEGIN TRY\n" + CreateSql(Name, target.Database, template) + "\nEND TRY\nBEGIN CATCH\nTHROW;\nEND CATCH;";
+        var sql = StartBatchSql(Name, target.Database, template);
         using var command = new SqlCommand(sql, connection) { CommandTimeout = 0 };
         await command.ExecuteNonQueryAsync(token);
     }
+    private static string StartBatchSql(string session, string database, ProfilerTemplate template) =>
+        CreateSql(session, database, template);
     public async Task<ProfilerBatch> ReadAsync(CancellationToken token)
     {
         using var connection = new SqlConnection(ConnectionString); await connection.OpenAsync(token);

@@ -748,8 +748,15 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                     if (S("templatePath").Length > 0) template = template with { TraceTemplatePath = S("templatePath") };
                     if (S("filter").Length > 0) template = template with { DatabaseFilter = S("filter") };
                     if (engine == "auto")
-                        engine = !string.IsNullOrWhiteSpace(SettingsStore.Load().Profiler18Path) || File.Exists(SqlTraceSession.DefaultProfilerPath)
-                            ? "ssms18" : dedicatedLogin || !B("useTargetCredentials") ? "sqlTrace" : "extendedEvents";
+                    {
+                        var profilerAvailable = !string.IsNullOrWhiteSpace(SettingsStore.Load().Profiler18Path) ||
+                            File.Exists(SqlTraceSession.DefaultProfilerPath);
+                        var useTargetCredentials = B("useTargetCredentials");
+                        var serverMajorVersion = profilerAvailable || dedicatedLogin || !useTargetCredentials
+                            ? int.MaxValue
+                            : await ServerMajorVersionAsync(t, ct);
+                        engine = AutomaticProfilerEngine(profilerAvailable, dedicatedLogin, useTargetCredentials, serverMajorVersion);
+                    }
                     if (engine == "sqlTrace")
                     {
                         traceStream = new(t, template.DatabaseFilter ?? t.Database);
@@ -862,7 +869,29 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
             throw new InvalidOperationException($"Profile dự án '{candidate.Name}' đã tồn tại.");
     }
     private static bool UsesDedicatedProfilerLogin(string server) =>
-        server.Equals(@"172.168.5.14\SQL2014", StringComparison.OrdinalIgnoreCase);
+        server.Equals(@"172.168.5.14\SQL2014", StringComparison.OrdinalIgnoreCase) ||
+        server.Equals(@"172.168.5.14\SQL2008", StringComparison.OrdinalIgnoreCase);
+
+    private static string AutomaticProfilerEngine(bool profilerAvailable, bool dedicatedLogin,
+        bool useTargetCredentials, int serverMajorVersion) =>
+        profilerAvailable ? "ssms18" : dedicatedLogin || !useTargetCredentials || serverMajorVersion < 11
+            ? "sqlTrace" : "extendedEvents";
+
+    private static async Task<int> ServerMajorVersionAsync(SqlTarget target, CancellationToken token)
+    {
+        var configuration = new SqlConnectionStringBuilder(target.ConnectionString)
+        {
+            InitialCatalog = "master",
+            ApplicationName = "LSCode.Profiler",
+            ConnectTimeout = 10
+        };
+        await using var connection = new SqlConnection(configuration.ConnectionString);
+        await connection.OpenAsync(token);
+        var version = connection.ServerVersion.Split('.', 2)[0];
+        return int.TryParse(version, out var major) && major > 0
+            ? major
+            : throw new InvalidOperationException($"Không xác định được phiên bản SQL Server '{connection.ServerVersion}'.");
+    }
 
     public async Task StopTraceAsync()
     {
