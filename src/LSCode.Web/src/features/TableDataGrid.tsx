@@ -43,6 +43,8 @@ export function TableDataGrid({
   focusColumn,
   rowOffset,
   onPendingChange,
+  frozenThrough,
+  onActiveColumnChange,
   emptyMessage = "Chưa có dữ liệu. Nhập ở dòng * rồi bấm Lưu để thêm.",
 }: {
   table: Table;
@@ -55,6 +57,8 @@ export function TableDataGrid({
   focusColumn?: { name: string; sequence: number };
   rowOffset: number;
   onPendingChange: (dirty: boolean) => void;
+  frozenThrough?: string;
+  onActiveColumnChange?: (name?: string) => void;
   emptyMessage?: string;
 }) {
   const [drafts, setDrafts] = useState<Record<string, (string | null)[]>>({});
@@ -110,6 +114,11 @@ export function TableDataGrid({
   const safeColumns = table.columns;
   const safeRows = table.rows;
   const safeMetadata = metadata;
+  const columnSignature = safeColumns.join("\u0000");
+  const frozenColumn = frozenThrough
+    ? safeColumns.findIndex((name) => name.toLowerCase() === frozenThrough.toLowerCase())
+    : -1;
+  const [frozenLayout, setFrozenLayout] = useState<{ offsets: number[]; width: number }>({ offsets: [], width: 0 });
   const columns = useMemo(() => {
     const byName = new Map(metadata.map(column => [column.name.toLowerCase(), column]));
     return safeColumns.map(name => byName.get(name.toLowerCase()));
@@ -134,6 +143,44 @@ export function TableDataGrid({
     keyboardScroll.current = false;
     cell?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [selection, first, last]);
+  useEffect(() => {
+    const column = selection ? safeColumns[selection.endColumn] : undefined;
+    onActiveColumnChange?.(column);
+  }, [selection?.endColumn, selection?.kind, columnSignature, onActiveColumnChange]);
+  useLayoutEffect(() => {
+    const root = grid.current;
+    if (!root || frozenColumn < 0) {
+      setFrozenLayout((current) => current.offsets.length ? { offsets: [], width: 0 } : current);
+      return;
+    }
+    let frame = 0;
+    const headers = Array.from(root.querySelectorAll<HTMLTableCellElement>("thead > tr > th"));
+    const measure = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        let width = 0;
+        const offsets: number[] = [];
+        const last = Math.min(frozenColumn + 1, headers.length - 1);
+        for (let index = 0; index <= last; index += 1) {
+          offsets.push(width);
+          width += headers[index]?.getBoundingClientRect().width ?? 0;
+        }
+        setFrozenLayout((current) => current.width === width &&
+          current.offsets.length === offsets.length && current.offsets.every((value, index) => value === offsets[index])
+          ? current : { offsets, width });
+      });
+    };
+    measure();
+    const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(measure);
+    observer?.observe(root);
+    headers.forEach((header) => observer?.observe(header));
+    window.addEventListener("resize", measure);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [frozenColumn, columnSignature]);
   useEffect(() => {
     if (!focusColumn || !safeRows.length) return;
     const column = safeColumns.findIndex((name) => name.toLowerCase() === focusColumn.name.toLowerCase());
@@ -211,6 +258,18 @@ export function TableDataGrid({
   } > td${
     selection.kind === "row" ? "" : range(selection.column + 2, selection.endColumn + 2)
   }:not(:has(input)) { background: color-mix(in srgb, var(--primary) 13%, var(--surface)); outline: 1px solid var(--primary); outline-offset: -1px; }`;
+  const frozenRule = frozenColumn >= 0 && frozenLayout.offsets.length ? frozenLayout.offsets.map((left, index) => {
+    const child = index + 1;
+    return `
+#${CSS.escape(gridId)} tr > :nth-child(${child}) { position: sticky; left: ${left}px; z-index: 1; background: var(--surface); }
+#${CSS.escape(gridId)} thead > tr > :nth-child(${child}) { z-index: 3; background: var(--background); }
+#${CSS.escape(gridId)} tbody > tr:hover > :nth-child(${child}) { background: var(--item-hover); }
+#${CSS.escape(gridId)} tbody > tr.table-new-row > :nth-child(${child}) { background: color-mix(in srgb, var(--accent, #3879c7) 5%, var(--surface)); }`;
+  }).join("") + `
+#${CSS.escape(gridId)} tr > :nth-child(${frozenLayout.offsets.length})::after {
+  position: absolute; top: 0; right: -1px; bottom: 0; width: 2px; content: "";
+  background: color-mix(in srgb, var(--primary) 55%, var(--border)); pointer-events: none;
+}` : "";
   async function copySelection() {
     if (!selection) return;
     const rowStart = selection.kind === "column" ? 0 : Math.min(selection.row, selection.endRow);
@@ -248,6 +307,7 @@ export function TableDataGrid({
                 const column = columns[columnIndex];
                 const isEditing = editing?.row === rowIndex && editing.column === columnIndex;
                 return <td key={columnIndex} title={value == null ? "NULL" : value.length > 480 ? value.slice(0, 480) + "…" : value} data-table-cell={`${rowIndex}:${columnIndex}`}
+                  data-table-column={safeColumns[columnIndex]}
                   aria-invalid={conflict === rowIndex && isUniqueKey(column) || undefined}
                   className={column?.key ? "table-key-column" : undefined}
                   onPointerDown={event => {
@@ -286,6 +346,8 @@ export function TableDataGrid({
       aria-label="Dữ liệu bảng · Chọn ô và dùng phím mũi tên để di chuyển, nhấp đúp để sửa, Ctrl+C sao chép, F8 xóa dòng"
       aria-busy={busy} data-loading={showLoading ? "true" : undefined}
       onScroll={measure}
+      data-frozen-through={frozenColumn >= 0 ? safeColumns[frozenColumn] : undefined}
+      style={frozenColumn >= 0 ? { scrollPaddingInlineStart: frozenLayout.width } : undefined}
       onPointerUp={() => { dragging.current = false; }}
       onPointerCancel={() => { dragging.current = false; }}
       onKeyDown={(event) => {
@@ -332,7 +394,7 @@ export function TableDataGrid({
             : { row, column, endRow: row, endColumn: column, kind: "cell" });
         }
       }}>
-      <style>{selectionRule}</style>
+      <style>{frozenRule}{selectionRule}</style>
       {saveSlot && createPortal(
         <Button disabled={readonly || busy || !pending.length} onClick={() => void save()} title="Ctrl+S">Lưu</Button>,
         saveSlot,
@@ -361,6 +423,7 @@ export function TableDataGrid({
             {safeColumns.map((name, index) => {
               const column = columns[index];
               return <th key={name + index} title={`${column?.sqlType ?? name} · Chọn cột, Ctrl+C sao chép`}
+                data-table-column={name}
                 className={column?.key ? "table-key-column" : undefined}
                 onClick={(event) => {
                   grid.current?.focus({ preventScroll: true });
@@ -381,7 +444,8 @@ export function TableDataGrid({
             {safeColumns.map((name, columnIndex) => {
               const column = columns[columnIndex];
               const editable = !readonly && !!column?.writable;
-              return <td key={name + columnIndex} aria-invalid={conflict === -1 && isUniqueKey(column) || undefined} className={column?.key ? "table-key-column" : undefined}>
+              return <td key={name + columnIndex} data-table-column={name}
+                aria-invalid={conflict === -1 && isUniqueKey(column) || undefined} className={column?.key ? "table-key-column" : undefined}>
                 {editable ? <input
                   aria-label={`${name} dòng mới`}
                   placeholder={column?.nullable ? "NULL" : "Nhập giá trị"}
