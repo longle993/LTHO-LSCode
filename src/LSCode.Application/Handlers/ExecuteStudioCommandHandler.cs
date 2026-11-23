@@ -45,6 +45,14 @@ internal sealed class ExecuteStudioCommandHandler(
                 return string.IsNullOrEmpty(path)
                     ? null
                     : await documents.SaveAsync(Text("id"), path, Text("text"), payload.GetProperty("version").GetInt64(), cancellationToken, Flag("overwriteReadOnly"));
+            case "requestTracking.exportTemplate":
+                var templateData = Text("base64");
+                if (templateData.Length > 256_000) throw new ArgumentException("Tệp mẫu vượt giới hạn kích thước.");
+                var templateBytes = Convert.FromBase64String(templateData);
+                var templatePath = dialogs.SaveFile("mau-nhan-vien-qlyc.xlsx", "Excel (*.xlsx)|*.xlsx");
+                if (templatePath is null) return false;
+                await File.WriteAllBytesAsync(templatePath, templateBytes, cancellationToken);
+                return true;
             case "text.export":
                 var exportPath = dialogs.SaveFile(Text("name", "export.txt"));
                 if (exportPath == null) return null;
