@@ -1,5 +1,5 @@
 import { Component, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
-import type { ChangeEvent, ErrorInfo, KeyboardEvent as ReactKeyboardEvent, ReactNode, SyntheticEvent } from "react";
+import type { ChangeEvent, ErrorInfo, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode, SyntheticEvent } from "react";
 import { createPortal } from "react-dom";
 import { ChevronRight, CircleAlert, Copy, KeyRound, Play, RefreshCw, X } from "lucide-react";
 import { Button, IconButton, Modal, Select, WorkbenchNotice } from "../ui";
@@ -66,6 +66,7 @@ type ColumnMenu = { x: number; y: number; columns: string[] };
 type ScriptPreview = { title: string; script: string };
 type ColumnDialog = { mode: "add" | "alter"; column?: string };
 type DeleteRequest = { count: number; table: string; resolve: (confirmed: boolean) => void };
+type ScriptMenuAnchor = "toolbar" | { x: number; y: number };
 type Suggestion = { label: string; value: string; caret?: number };
 type Clause = "select" | "where" | "orderBy";
 const ident = /^(?:\[((?:[^\]]|\]\])+)\]|([^.[\]]+))(?:\s*\.\s*(?:\[((?:[^\]]|\]\])+)\]|([^.[\]]+)))?$/u;
@@ -243,7 +244,9 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
     [scriptPreview, setScriptPreview] = useState<ScriptPreview>(),
     [columnDialog, setColumnDialog] = useState<ColumnDialog>(),
     [columnMenuGroup, setColumnMenuGroup] = useState<string>(),
-    [scriptMenu, setScriptMenu] = useState(false),
+    [scriptMenu, setScriptMenu] = useState<ScriptMenuAnchor>(),
+    [activeColumn, setActiveColumn] = useState<string>(),
+    [frozenColumn, setFrozenColumn] = useState<string>(),
     [status, setStatus] = useState(""),
     [dataError, setDataError] = useState(""),
     [goToOpen, setGoToOpen] = useState(false),
@@ -380,7 +383,7 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
     setFilterField("");
     setFilterValue("");
     setCarets({ select: 0, where: 0, orderBy: 0 });
-    setScriptMenu(false);
+    setScriptMenu(undefined);
   }, [targetId]);
   useEffect(() => {
     if (initialTable && initialTable !== input) setInput(initialTable);
@@ -388,6 +391,8 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
   useEffect(() => {
     setColumnMenu(undefined);
     setColumnMenuGroup(undefined);
+    setActiveColumn(undefined);
+    setFrozenColumn(undefined);
     setDrop(undefined);
     setScriptPreview(undefined);
     setStatus("");
@@ -424,10 +429,10 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
     function dismiss(event: PointerEvent) {
       const element = event.target as Node;
       if (!columnContextMenu.current?.contains(element)) { setColumnMenu(undefined); setColumnMenuGroup(undefined); }
-      if (!scriptControls.current?.contains(element) && !scriptPopup.current?.contains(element)) setScriptMenu(false);
+      if (!scriptControls.current?.contains(element) && !scriptPopup.current?.contains(element)) setScriptMenu(undefined);
     }
     function escape(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") { setColumnMenu(undefined); setColumnMenuGroup(undefined); setScriptMenu(false); }
+      if (event.key === "Escape") { setColumnMenu(undefined); setColumnMenuGroup(undefined); setScriptMenu(undefined); }
     }
     document.addEventListener("pointerdown", dismiss);
     document.addEventListener("keydown", escape);
@@ -443,6 +448,19 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
     popup.setAttribute("popover", "manual");
     if (typeof popup.showPopover === "function") popup.showPopover();
     const place = () => {
+      if (typeof scriptMenu === "object") {
+        const width = Math.min(250, window.innerWidth - 16);
+        const maxHeight = Math.max(80, Math.min(220, window.innerHeight - 16));
+        const height = Math.min(popup.scrollHeight, maxHeight);
+        Object.assign(popup.style, {
+          width: `${width}px`,
+          left: `${Math.max(8, Math.min(scriptMenu.x, window.innerWidth - width - 8))}px`,
+          top: `${Math.max(8, Math.min(scriptMenu.y, window.innerHeight - height - 8))}px`,
+          bottom: "auto",
+          maxHeight: `${maxHeight}px`,
+        });
+        return;
+      }
       const rect = trigger.getBoundingClientRect();
       const width = Math.min(250, window.innerWidth - 16);
       const below = window.innerHeight - rect.bottom - 8;
@@ -457,6 +475,7 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
       });
     };
     place();
+    if (typeof scriptMenu === "object") popup.querySelector<HTMLButtonElement>("button")?.focus();
     window.addEventListener("resize", place);
     document.addEventListener("scroll", place, true);
     return () => {
@@ -520,7 +539,7 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
     void readData(chosen, changing ? { where: "", select: "*", orderBy: "" } : undefined);
   }
   function captureSqlDataKey() {
-    setScriptMenu(false);
+    setScriptMenu(undefined);
     if (!target || !name || !knownTable) {
       setStatus("Chọn một bảng hợp lệ trước khi thêm key vào SQL Data.");
       return;
@@ -530,7 +549,7 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
     setStatus(`Đã gửi ${tableName}: ${where.trim() || "1=1"} vào SQL Data.`);
   }
   function generateScript(kind: "create" | "drop" | "insert") {
-    setScriptMenu(false);
+    setScriptMenu(undefined);
     void task.run(async () => {
       if (!table || !schema || !targetId) return;
       if (kind === "insert") {
@@ -547,6 +566,20 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
       const script = await request<string>("table.createScript", payload);
       onText(script, table + "-create.sql");
     });
+  }
+  function toggleFrozenColumn() {
+    setScriptMenu(undefined);
+    if (frozenColumn) {
+      setFrozenColumn(undefined);
+      setStatus("Đã bỏ đóng băng cột.");
+      return;
+    }
+    if (!activeColumn) {
+      setStatus("Chọn một ô hoặc cột trước khi đóng băng.");
+      return;
+    }
+    setFrozenColumn(activeColumn);
+    setStatus(`Đã đóng băng từ cột đầu đến ${activeColumn}.`);
   }
   const scriptActionLabels: Record<string, string> = {
     add: "Thêm cột",
@@ -666,6 +699,17 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
     setGoToRequest({ name: found, sequence: (goToRequest?.sequence ?? 0) + 1 });
     setGoToOpen(false);
   }
+  function openScriptMenuAt(event: ReactMouseEvent<HTMLElement>) {
+    const target = event.target instanceof Element ? event.target : undefined;
+    if (!visible || !canRead || target?.closest("input, textarea, button, [contenteditable='true']")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const pointedColumn = target?.closest<HTMLElement>("[data-table-column]")?.dataset.tableColumn;
+    if (pointedColumn) setActiveColumn(pointedColumn);
+    setColumnMenu(undefined);
+    setColumnMenuGroup(undefined);
+    setScriptMenu({ x: event.clientX, y: event.clientY });
+  }
   const view = currentPreview?.data;
   const filterOptions = [
     { value: "", label: "Chọn trường" },
@@ -711,8 +755,13 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
       <RefreshCw size={15} />
     </IconButton>}
     <div ref={scriptControls} className="relative">
-      <Button aria-expanded={scriptMenu} aria-haspopup="menu" disabled={!canRead} onClick={() => setScriptMenu(!scriptMenu)}>Tập lệnh</Button>
+      <Button aria-expanded={!!scriptMenu} aria-haspopup="menu" disabled={!canRead}
+        onClick={() => setScriptMenu((current) => current ? undefined : "toolbar")}>Tập lệnh</Button>
       {scriptMenu && <div ref={scriptPopup} className="table-action-menu table-script-menu" role="menu" aria-label="Loại lệnh SQL">
+        <Button role="menuitemcheckbox" aria-checked={!!frozenColumn} variant="ghost"
+          disabled={!frozenColumn && !activeColumn} onClick={toggleFrozenColumn}>
+          {frozenColumn ? "Bỏ đóng băng cột" : activeColumn ? `Đóng băng đến cột ${activeColumn}` : "Đóng băng đến cột đang chọn"}
+        </Button>
         <Button role="menuitem" variant="ghost" onClick={captureSqlDataKey}>Thêm key vào SQL Data<kbd>Ctrl+D</kbd></Button>
         <Button role="menuitem" variant="ghost" onClick={() => generateScript("create")}>Tạo lệnh tạo bảng</Button>
         <Button role="menuitem" variant="ghost" disabled={!view?.rows.length || previewPending}
@@ -824,10 +873,12 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
           }) : <span className="muted table-column-empty">{currentMetadata ? "Không có trường phù hợp." : "Chọn bảng để tải danh sách trường."}</span>}
           </div>
         </aside>
-        <section className="table-inspection-content">
+        <section className="table-inspection-content" onContextMenu={openScriptMenuAt}>
           {currentPreview?.data && currentMetadata ? <TableDataGrid
             saveSlot={saveSlot}
             focusColumn={goToRequest}
+            frozenThrough={frozenColumn}
+            onActiveColumnChange={setActiveColumn}
             table={currentPreview.data} metadata={currentMetadata} readonly={readonly} busy={task.busy || previewPending} onCommit={commitRows}
             onDelete={deleteRows}
             emptyMessage={filterField && (filterOperator === "IS NULL" || filterOperator === "IS NOT NULL" || filterValue.trim())
