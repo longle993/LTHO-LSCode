@@ -2133,6 +2133,38 @@ body.entity-peek-scroll-locked {
   font-size: 12px;
   overflow-wrap: anywhere;
 }
+.project-file-tree .controller-file-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-file-tree .tree-row.controller-file-error {
+  color: var(--error-text);
+  background: color-mix(in srgb, var(--error-text) 8%, transparent);
+}
+.project-file-tree .tree-row.controller-file-error:hover,
+.project-file-tree .tree-row.controller-file-error[aria-current="page"] {
+  background: color-mix(in srgb, var(--error-text) 14%, var(--surface));
+}
+.project-file-tree .controller-file-problem-badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 3px;
+  min-width: 20px;
+  padding: 1px 5px;
+  overflow: visible;
+  color: var(--error-text);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--error-text) 12%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--error-text) 38%, transparent);
+  border-radius: 999px;
+}
 .explorer-action-menu {
   position: fixed;
   z-index: 100;
@@ -2621,6 +2653,37 @@ body.entity-peek-scroll-locked {
 .editor-group .code-editor {
   @apply [flex:1];
   @apply min-h-0;
+}
+.editor-diagnostic-banner {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 6px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--error-text) 55%, var(--border));
+  background: color-mix(in srgb, var(--error-text) 13%, var(--surface));
+  color: var(--error-text);
+  font-size: 12px;
+}
+.editor-diagnostic-banner > svg {
+  flex: 0 0 auto;
+}
+.editor-diagnostic-message {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 650;
+}
+.editor-diagnostic-location {
+  flex: 0 1 46%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--error-text) 82%, var(--foreground));
 }
 .pane-file-picker {
   @apply shrink-0;

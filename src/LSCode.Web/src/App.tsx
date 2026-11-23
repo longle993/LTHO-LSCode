@@ -46,6 +46,7 @@ import {
   ArrowUpRight,
   NotebookPen,
   Copy,
+  AlertTriangle,
 } from "lucide-react";
 import { native, request, operation, subscribe, quoteSqlName, notifyWindowReady, writeClipboard } from "./bridge";
 import { PanelResizeHandle, WorkspaceResizeHandle } from "./PanelResizeHandle";
@@ -74,6 +75,7 @@ import {
   language,
   markSqlErrors,
   setEditorSnippets,
+  xmlIncludeBuffers,
 } from "./editor";
 import type { EditorDiagnostic, EditorHandle } from "./editor";
 import { Button, IconButton, Select, Modal, DataGrid, WorkbenchNotice } from "./ui";
@@ -86,7 +88,26 @@ import {
 
 type Tab = DocumentInfo & { saved: string; target?: Target; project?: string };
 type TableTab = { id: string; number: number; target?: Target; table?: string };
-type ControllerGroup = { id: string; link: string; file: string; files: string[]; employeeTab?: boolean; sysId?: string };
+type ControllerProblem = EditorDiagnostic & { path: string };
+type ControllerGroup = {
+  id: string;
+  link: string;
+  file: string;
+  files: string[];
+  problems: ControllerProblem[];
+  diagnosticsLoading?: boolean;
+  employeeTab?: boolean;
+  sysId?: string;
+};
+const diagnosticPathKey = (path: string) => path.replaceAll("\\", "/").toLowerCase();
+function controllerProblemsByPath(problems: ControllerProblem[]) {
+  const result = new Map<string, EditorDiagnostic[]>();
+  for (const problem of problems) {
+    const current = result.get(problem.path) ?? [];
+    result.set(problem.path, [...current, problem]);
+  }
+  return result;
+}
 const employeeController = "hrpigeneralinformation";
 function isEmployeeController(group: ControllerGroup) {
   return group.files.some((path) => /(?:^|[\\/])hrpigeneralinformation\.(xml|f)$/i.test(path));
@@ -208,7 +229,8 @@ export default function App({
   initialProjectId,
   bootstrap,
 }: { initialProjectId?: string; bootstrap?: Bootstrap } = {}) {
-  const [diagnostics, setDiagnostics] = useState<EditorDiagnostic[]>([]);
+  const [diagnosticsByDocument, setDiagnosticsByDocument] = useState<Record<string, EditorDiagnostic[]>>({});
+  const [controllerNotice, setControllerNotice] = useState<{ id: string; message: string }>();
   const [settings, setSettings] = useState<Settings>(initialSettings),
     [projects, setProjects] = useState<Project[]>([]),
     [snippets, setSnippets] = useState<Snippet[]>([]);
@@ -420,13 +442,16 @@ export default function App({
     dbTimer = useRef<number>(),
     dbCache = useRef(new Map<string, { table: Table; expires: number }>()),
     controllerCache = useRef(new Map<string, { file: string; files: string[] }>()),
+    controllerDiagnosticsGeneration = useRef(new Map<string, number>()),
+    controllerDiagnosticsTimers = useRef(new Map<string, number>()),
     defaultTarget = useRef<Target>(),
     projectSysTarget = useRef<Target>(),
     projectTargetIds = useRef<string[]>([]),
     pendingOpens = useRef(new Map<string, Promise<void>>());
   latest.current = { tabs, activeId, settings };
   const active = tabs.find((t) => t.id === activeId),
-    target = active?.target ?? defaultTarget.current;
+    target = active?.target ?? defaultTarget.current,
+    diagnostics = active ? diagnosticsByDocument[active.id] ?? [] : [];
   useEffect(() => {
     if (!selectedTool && active && language(active.name) === "xml") setPanel(false);
   }, [active?.id, active?.name, selectedTool]);
@@ -1784,6 +1809,72 @@ export default function App({
         : "Không tìm thấy chức năng",
     );
   }
+  async function refreshControllerDiagnostics(
+    id: string,
+    root: string,
+    files: string[],
+    showLoading = true,
+  ) {
+    const generation = (controllerDiagnosticsGeneration.current.get(id) ?? 0) + 1;
+    controllerDiagnosticsGeneration.current.set(id, generation);
+    if (showLoading)
+      setControllers((current) => current.map((entry) =>
+        entry.id === id ? { ...entry, diagnosticsLoading: true } : entry));
+    try {
+      const response = await operation<{ diagnostics: ControllerProblem[] }>(
+        "project.controllerDiagnostics",
+        { root, files, buffers: xmlIncludeBuffers() },
+        20_000,
+      ).promise;
+      if (controllerDiagnosticsGeneration.current.get(id) !== generation ||
+          root !== latest.current.settings.workspace) return;
+      const controllerPaths = new Set(files.map(diagnosticPathKey));
+      const problems = (response?.diagnostics ?? []).filter((problem) =>
+        problem.path && controllerPaths.has(diagnosticPathKey(problem.path)));
+      setControllers((current) => current.map((entry) =>
+        entry.id === id ? { ...entry, problems, diagnosticsLoading: false } : entry));
+      const first = problems[0];
+      const message = first
+        ? `${first.message} Dòng ${first.line}, cột ${first.column}. Đường dẫn: ${first.path}` +
+          (problems.length > 1 ? ` Còn ${problems.length - 1} file lỗi khác.` : "")
+        : "";
+      setControllerNotice((current) => showLoading
+        ? first ? { id, message } : current?.id === id ? undefined : current
+        : current?.id === id ? first ? { id, message } : undefined : current);
+    } catch (problem) {
+      if (controllerDiagnosticsGeneration.current.get(id) !== generation) return;
+      setControllers((current) => current.map((entry) =>
+        entry.id === id ? { ...entry, diagnosticsLoading: false } : entry));
+      setStatus("Không kiểm tra được khai báo controller: " + (problem as Error).message);
+    }
+  }
+  function updateDocumentDiagnostics(doc: Tab, next: EditorDiagnostic[]) {
+    setDiagnosticsByDocument((current) => ({ ...current, [doc.id]: next }));
+    if (!doc.path) return;
+    const fileKey = diagnosticPathKey(doc.path);
+    const errors: ControllerProblem[] = next
+      .filter((problem) => problem.severity === "error")
+      .map((problem) => ({ ...problem, path: doc.path! }));
+    setControllers((current) => current.map((entry) =>
+      entry.files.some((path) => diagnosticPathKey(path) === fileKey)
+        ? {
+            ...entry,
+            problems: [
+              ...entry.problems.filter((problem) => diagnosticPathKey(problem.path) !== fileKey),
+              ...errors,
+            ],
+          }
+        : entry));
+    for (const group of controllers.filter((entry) =>
+      entry.files.some((path) => diagnosticPathKey(path) === fileKey))) {
+      const previous = controllerDiagnosticsTimers.current.get(group.id);
+      if (previous !== undefined) window.clearTimeout(previous);
+      controllerDiagnosticsTimers.current.set(group.id, window.setTimeout(() => {
+        controllerDiagnosticsTimers.current.delete(group.id);
+        void refreshControllerDiagnostics(group.id, latest.current.settings.workspace ?? "", group.files, false);
+      }, 650));
+    }
+  }
   async function openController(link: string, employeeTab = false, sysId = "", openSource = false, preserveNavigation = false) {
     const root = workspace;
     const generation = controllerRequest.current;
@@ -1808,9 +1899,17 @@ export default function App({
     }
     cache.set(key, found);
     const id = JSON.stringify([link, sysId]);
-    const group = { id, link, ...found, employeeTab, sysId };
-    setControllers((current) => current.some((entry) => entry.id === id)
-      ? current.map((entry) => entry.id === id ? { ...group, employeeTab: employeeTab || entry.employeeTab } : entry) : [...current, group]);
+    setControllers((current) => {
+      const previous = current.find((entry) => entry.id === id);
+      const group: ControllerGroup = {
+        id, link, ...found, employeeTab: employeeTab || previous?.employeeTab, sysId,
+        problems: previous?.problems ?? [], diagnosticsLoading: true,
+      };
+      return previous
+        ? current.map((entry) => entry.id === id ? group : entry)
+        : [...current, group];
+    });
+    void refreshControllerDiagnostics(id, root, found.files);
     if (selection === controllerSelection.current) {
       setExpandedController(id);
       if (!preserveNavigation) {
@@ -2024,7 +2123,10 @@ export default function App({
       };
     }));
     setControllers((current) => current.map((entry) => ({
-      ...entry, file: moved(entry.file), files: entry.files.map(moved),
+      ...entry,
+      file: moved(entry.file),
+      files: entry.files.map(moved),
+      problems: entry.problems.map((problem) => ({ ...problem, path: moved(problem.path) })),
     })));
     setHits((current) => current.map((hit) => ({ ...hit, path: moved(hit.path) })));
     setExternal((current) => current?.path ? { ...current, path: moved(current.path) } : current);
@@ -2162,7 +2264,11 @@ export default function App({
           .NET.
         </div>
       )}
-      <WorkbenchNotice error={error} onClose={() => setError("")} />
+      <WorkbenchNotice
+        error={error || controllerNotice?.message}
+        errorTitle={error ? undefined : "Khai báo controller chưa hợp lệ"}
+        onClose={() => error ? setError("") : setControllerNotice(undefined)}
+      />
       <div className={`workbench ${side ? "" : "side-closed"}`} style={{
         "--workspace-width": (settings.explorerWidth ?? 264) + "px",
         "--explorer-font-size": (settings.explorerFontSize ?? 12) + "px",
@@ -2337,6 +2443,7 @@ export default function App({
                           <ControllerExplorer
                             root={workspace}
                             files={group.files}
+                            problemsByPath={controllerProblemsByPath(group.problems)}
                             emptyMessage="Controller chưa có file."
                             activePath={active?.path}
                             onOpen={(p) => void guard(() => open(p))}
@@ -2593,8 +2700,10 @@ export default function App({
                         aria-current={
                           selectedCommand === n.entry.id || (menuQuery && i === menuIndex) ? "page" : undefined
                         }
-                        onClick={() => setSelectedCommand(n.entry.id)}
-                        onDoubleClick={() => openFunctionController(n)}
+                        onClick={() => {
+                          setSelectedCommand(n.entry.id);
+                          if (n.entry.link || n.entry.sysId) openFunctionController(n);
+                        }}
                         onFocus={() => setSelectedCommand(n.entry.id)}
                         onKeyDown={(event) => {
                           if (menuKind === "web" && event.key === "F3") {
@@ -2968,6 +3077,8 @@ export default function App({
                 {[0, ...(split ? [1] : [])].map((pane) => {
                   const doc =
                     tabs.find((t) => t.id === paneIds[pane]) ?? active;
+                  const paneDiagnostics = diagnosticsByDocument[doc.id] ?? [];
+                  const paneError = paneDiagnostics.find((problem) => problem.severity === "error");
                   return (
                     <div
                       key={pane}
@@ -2995,6 +3106,16 @@ export default function App({
                           />
                         </div>
                       )}
+                      {paneError && (
+                        <div className="editor-diagnostic-banner" role="alert" title={doc.path ?? doc.name}>
+                          <AlertTriangle size={15} aria-hidden="true" />
+                          <span className="editor-diagnostic-message">{paneError.message}</span>
+                          <span className="editor-diagnostic-location">
+                            Dòng {paneError.line}, cột {paneError.column}
+                            {doc.path ? ` · ${doc.path}` : ""}
+                          </span>
+                        </div>
+                      )}
                       <CodeEditor
                         viewId={String(pane)}
                         document={doc}
@@ -3019,7 +3140,7 @@ export default function App({
                             editor.current = e;
                         }}
                         onCursor={setCursor}
-                        onDiagnostics={setDiagnostics}
+                        onDiagnostics={(next) => updateDocumentDiagnostics(doc, next)}
                         onChange={() => {
                           if (!suppress.current)
                             setTabs((old) =>
@@ -3392,7 +3513,9 @@ export default function App({
                 const count = await request<number>("project.structure.clear", { id: structureClear.id, path: structureClear.path });
                 controllerCache.current.clear();
                 setControllers((current) => current.map((entry) => ({
-                  ...entry, files: entry.files.filter((file) => !pathIsWithin(file, structureClear.path)),
+                  ...entry,
+                  files: entry.files.filter((file) => !pathIsWithin(file, structureClear.path)),
+                  problems: entry.problems.filter((problem) => !pathIsWithin(problem.path, structureClear.path)),
                 })));
                 setStructureClear(undefined);
                 setHistoryRevision((version) => version + 1);
@@ -3615,6 +3738,8 @@ function FunctionTree({
                       else next.add(node.entry.id);
                       return next;
                     });
+                  else if (node.entry.link || node.entry.sysId)
+                    onOpen(node);
                 }}
                 onKeyDown={(event) => {
                   if (allowMenuActions && event.key === "F3") {
@@ -3631,9 +3756,6 @@ function FunctionTree({
                   event.preventDefault();
                   onSelect(node.entry.id);
                   onContext(node, event.clientX, event.clientY);
-                }}
-                onDoubleClick={() => {
-                  if (node.entry.link || node.entry.sysId) onOpen(node);
                 }}
               >
                 {node.children.length ? (
