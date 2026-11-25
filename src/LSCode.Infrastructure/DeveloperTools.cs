@@ -632,7 +632,7 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                     ?? throw new ArgumentException("Thiếu cấu hình Tạo danh mục."), S("fingerprint"), S("folder"), ct);
             case "project.menu.details": return await MenuEditor.ReadAsync(Target(p), S("wmenuId"), ct);
             case "project.menu.new": return await MenuEditor.NewAsync(Target(p), S("selectedId"), ct);
-            case "project.menu.insertScript": return await MenuEditor.InsertScriptAsync(Target(p), S("wmenuId"), ct);
+            case "project.menu.insertScript": return await MenuEditor.InsertScriptAsync(Target(p), S("wmenuId"), ct, B("includeChildren"));
             case "project.menu.resources": return await MenuEditor.ResourcesAsync(S("root"), S("link"), S("sysId"), ct);
             case "project.menu.save":
                 var menuValues = p.GetProperty("values").Deserialize<Dictionary<string, string?>>(Json) ?? [];
@@ -728,15 +728,13 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
             case "translation.browser": Process.Start(new ProcessStartInfo(TranslationClient.BrowserUrl(S("from", "auto"), S("to", "vi"), S("text"))) { UseShellExecute = true }); return true;
             case "profiler.defaults":
                 var profilerTarget = Target(p);
-                var profilerConnection = new SqlConnectionStringBuilder(profilerTarget.ConnectionString);
                 var configuredProfiler = SettingsStore.Load().Profiler18Path;
                 return new
                 {
                     filter = ProfilerTemplate.Default(profilerTarget.Database).DatabaseFilter,
                     profilerPath = !string.IsNullOrWhiteSpace(configuredProfiler) ? configuredProfiler
                         : File.Exists(SqlTraceSession.DefaultProfilerPath) ? SqlTraceSession.DefaultProfilerPath : "",
-                    authentication = UsesDedicatedProfilerLogin(profilerConnection.DataSource) ? "SQL Server · profile"
-                        : profilerConnection.IntegratedSecurity ? "Windows" : "SQL Server"
+                    authentication = "SQL Server · profile"
                 };
             case "profiler.start":
                 await traceGate.WaitAsync(ct);

@@ -1,6 +1,6 @@
 @reference "./motion.css";
 /* Brand: --primary/--primary-hover in each theme. UI font: --app-font. */
-:root {
+:root, :where(.button-theme-preview) {
   @apply [color-scheme:light];
   --app-font: "Segoe UI", system-ui, sans-serif;
   --primary: #2563a6;
@@ -24,7 +24,7 @@
   --success: #007a55;
   --code-background: #fff;
 }
-:root[data-theme="Dark"] {
+:is(:root, .button-theme-preview)[data-theme="Dark"] {
   @apply [color-scheme:dark];
   --primary: #88b9ef;
   --primary-hover: #a4caf3;
@@ -45,7 +45,7 @@
   --success: #71cfb0;
   --code-background: #1e1e1e;
 }
-:root[data-theme="High Contrast"] {
+:is(:root, .button-theme-preview)[data-theme="High Contrast"] {
   @apply [color-scheme:dark];
   --primary: #ffff00;
   --primary-hover: #e6e600;
@@ -216,6 +216,61 @@ kbd {
   @apply [min-width:32px];
   @apply [padding:6px];
 }
+.button.primary {
+  background: var(--button-primary-background, var(--primary));
+  color: var(--button-primary-foreground, var(--primary-foreground));
+  border-color: var(--button-primary-border, transparent);
+}
+.button.primary:hover:not(:disabled) {
+  background: var(--button-primary-hover, var(--primary-hover));
+  color: var(--button-primary-foreground, var(--primary-foreground));
+}
+.button:is(.outline, .secondary) {
+  background: var(--button-secondary-background, var(--secondary-default-background, var(--surface)));
+  color: var(--button-secondary-foreground, var(--foreground));
+  border-color: var(--button-secondary-border, var(--border-strong));
+}
+.button:is(.outline, .secondary):hover:not(:disabled) {
+  background: var(--button-secondary-hover, var(--button-hover));
+  color: var(--button-secondary-foreground, var(--foreground));
+}
+.button.ghost {
+  background: var(--button-ghost-background, transparent);
+  color: var(--button-ghost-foreground, var(--muted));
+  border-color: var(--button-ghost-border, transparent);
+}
+.button.ghost:hover:not(:disabled) {
+  background: var(--button-ghost-hover, var(--item-hover));
+  color: var(--button-ghost-foreground, var(--muted));
+}
+.button.destructive {
+  background: var(--button-destructive-background, var(--error-bg));
+  color: var(--button-destructive-foreground, var(--error-text));
+  border-color: var(--button-destructive-border, transparent);
+}
+.button.destructive:hover:not(:disabled) {
+  background: var(--button-destructive-hover, color-mix(in srgb, var(--error-text) 15%, var(--surface)));
+  color: var(--button-destructive-foreground, var(--error-text));
+}
+.button.icon-button:not(.destructive) {
+  background: var(--button-icon-background, transparent);
+  color: var(--button-icon-foreground, var(--foreground));
+  border-color: var(--button-icon-border, transparent);
+}
+.button.icon-button:not(.destructive):hover:not(:disabled) {
+  background: var(--button-icon-hover, var(--item-hover));
+  color: var(--button-icon-foreground, var(--foreground));
+}
+.button.secondary { --secondary-default-background: var(--secondary); }
+.button:active:not(:disabled) { filter: brightness(.9); }
+.button:focus-visible { outline: 2px solid var(--foreground); outline-offset: 2px; }
+.button-theme-settings { display: grid; gap: 8px; min-width: 0; }
+.button-theme-row { display: grid; grid-template-columns: minmax(100px, 1fr) repeat(3, minmax(76px, 1fr)) auto; gap: 8px; align-items: end; }
+.button-theme-row input[type="color"] { width: 100%; min-height: 32px; padding: 3px; }
+.button-theme-preview { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); color: var(--foreground); }
+.button-theme-preview > .button { pointer-events: auto; }
+@media (max-width: 540px) { .button-theme-row { display: flex; flex-wrap: wrap; } .button-theme-row strong { width: 100%; } }
+@media (forced-colors: active) { .button { forced-color-adjust: auto; } }
 .studio {
   @apply [height:100dvh];
   @apply min-h-0;
@@ -778,6 +833,18 @@ button.function-menu-id:focus-visible {
   @apply [font-size:12px];
   @apply [font-weight:500];
 }
+.search-tree-folder::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  transform: rotate(-45deg);
+}
+.project-file-tree details[open] > .search-tree-folder::before { transform: rotate(45deg); }
+.search-tree-folder > svg, .search-tree-filename > svg { flex: none; }
+.search-tree-filename { display: flex; align-items: center; gap: 6px; }
 .search-hit span {
   @apply [color:var(--muted)];
   @apply [font-size:12px];

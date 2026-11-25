@@ -319,7 +319,7 @@ export function AdvanceNote({
         <div className="advance-note-toolbar">
           <div><h2>{selected.title || "Yêu cầu chưa đặt tên"}</h2><small>Cập nhật {new Date(selected.updatedAt).toLocaleString("vi-VN")}</small></div>
           <div className="advance-note-actions">
-            <Button className="danger" onClick={remove}><Trash2 size={14} />Xóa</Button>
+            <Button variant="destructive" onClick={remove}><Trash2 size={14} />Xóa</Button>
             <Button disabled={generating || saving} onClick={() => void generateUpdate()}>
               <PackageOpen size={14} />{generating ? "Đang tạo…" : "Generate Update"}
             </Button>

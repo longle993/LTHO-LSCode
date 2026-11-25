@@ -79,6 +79,7 @@ import {
 } from "./editor";
 import type { EditorDiagnostic, EditorHandle } from "./editor";
 import { Button, IconButton, Select, Modal, DataGrid, WorkbenchNotice } from "./ui";
+import { applyButtonTheme } from "./buttonTheme";
 import {
   ToolDialog,
   ProjectDialog,
@@ -168,13 +169,13 @@ function SearchResultTree({ hits, root, onOpen }: { hits: Hit[]; root: string; o
     return <>
       {[...folder.folders].map(([name, child]) => (
         <details key={name} open>
-          <summary className="tree-row folder-row">{name}</summary>
+          <summary className="tree-row folder-row search-tree-folder"><Folder size={15} aria-hidden="true" /><span>{name}</span></summary>
           <div className="tree-children">{render(child)}</div>
         </details>
       ))}
       {folder.files.map(hit => (
         <button key={hit.path} className="search-hit" title={hit.path} onClick={() => onOpen(hit)}>
-          <strong>{hit.path.split(/[\\/]/).at(-1)}{hit.line > 0 ? `:${hit.line}` : ""}</strong>
+          <strong className="search-tree-filename"><FileIcon path={hit.path} />{hit.path.split(/[\\/]/).at(-1)}{hit.line > 0 ? `:${hit.line}` : ""}</strong>
           {hit.preview && <span>{hit.preview}</span>}
         </button>
       ))}
@@ -410,22 +411,39 @@ export default function App({
   const [historySearch, setHistorySearch] = useState("");
   const historyResults = useMemo(() => {
     const query = historySearch.trim().toLowerCase();
-    if (!query) return history;
-    return history?.flatMap((entry) => {
+    const current = history?.filter(entry => entry.projectId === project?.id);
+    if (!query) return current;
+    return current?.flatMap((entry) => {
       const files = entry.files.filter((path) =>
         path.split(/[\\/]/).slice(-2).some((part) => part.toLowerCase().includes(query)));
       return files.length ? [{ ...entry, files }] : [];
     });
-  }, [history, historySearch]);
+  }, [history, historySearch, project?.id]);
   const switchingHistoryProject = useRef(false);
   const [projectActionBusy, setProjectActionBusy] = useState(false);
   const [structureClear, setStructureClear] = useState<{ id: string; path: string; count: number }>();
   const [searchFolder, setSearchFolder] = useState("");
+  const [searchScope, setSearchScope] = useState<{ workspace: string; appData?: Entry }>();
+  useEffect(() => {
+    if (!workspace || nav !== "search" || !side) return;
+    let active = true;
+    request<Entry[]>("workspace.list", { path: workspace }).then(entries => {
+      const appData = entries.find(entry => entry.directory && entry.name.toLowerCase() === "app_data")
+        ?? entries.find(entry => entry.directory && entry.name.toLowerCase() === "appdata");
+      if (active) setSearchScope({ workspace, appData });
+    }).catch(() => {
+      if (active) setSearchScope({ workspace });
+    });
+    return () => { active = false; };
+  }, [workspace, nav, side]);
   const searchFolders = useMemo(() => [...new Set(controller?.files.flatMap((path) => {
     const separator = Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/"));
     return separator > 0 ? [path.slice(0, separator)] : [];
   }) ?? [])].sort(), [controller]);
-  const searchRoot = searchFolders.includes(searchFolder) ? searchFolder : workspace;
+  const appData = searchScope?.workspace === workspace ? searchScope.appData : undefined;
+  const defaultSearchRoot = searchScope?.workspace === workspace ? appData?.path ?? workspace : "";
+  const searchRoot = searchFolder === "project" ? workspace
+    : searchFolders.includes(searchFolder) ? searchFolder : defaultSearchRoot;
   const [unsavedPrompt, setUnsavedPrompt] = useState<{
     names: string[];
     resolve: (choice: "save" | "discard" | "cancel") => void;
@@ -545,6 +563,12 @@ export default function App({
   const setSelectedCommand = (id: string) => setSelectedCommands((current) => ({ ...current, [menuKind]: id }));
   const [menuEditor, setMenuEditor] = useState<{ command: CommandNode; target: Target; appTarget?: Target; root: string }>();
   const [menuContext, setMenuContext] = useState<{ command: CommandNode; x: number; y: number }>();
+  const [menuScriptChoice, setMenuScriptChoice] = useState<CommandNode>();
+  const [expandedMenus, setExpandedMenus] = useState({ web: new Set<string>(), mobile: new Set<string>() });
+  const menuScroll = useRef({ web: 0, mobile: 0 });
+  const restoreMenuScroll = useCallback((element: HTMLDivElement | null) => {
+    if (element) element.scrollTop = menuScroll.current[menuKind];
+  }, [menuKind]);
   const [catalogTemplate, setCatalogTemplate] = useState("");
   const menuDirty = useRef(false);
   const menuBusy = useRef(false);
@@ -566,12 +590,17 @@ export default function App({
     setMenuEditor({ command, target: sys, appTarget: app?.id === sys.id ? undefined : app, root: workspace });
     setSelectedTool("menu-editor");
   }
-  function openMenuInsertScript(command: CommandNode) {
+  function openMenuInsertScript(command: CommandNode, includeChildren?: boolean) {
     const sysTarget = projectSysTarget.current;
     if (!sysTarget) { setStatus("Dự án chưa có kết nối Sys."); return; }
     setMenuContext(undefined);
+    if (command.children.length && includeChildren === undefined) {
+      setMenuScriptChoice(command);
+      return;
+    }
+    setMenuScriptChoice(undefined);
     void guard(async () => {
-      const script = await request<string>("project.menu.insertScript", { targetId: sysTarget.id, wmenuId: command.entry.id });
+      const script = await request<string>("project.menu.insertScript", { targetId: sysTarget.id, wmenuId: command.entry.id, includeChildren });
       newDocument(script, command.entry.id.replaceAll(".", "-") + "-menu.sql", sysTarget);
       setStatus("Đã tạo script INSERT cho wcommand và command.");
     });
@@ -909,6 +938,7 @@ export default function App({
     disposeModel(t);
     if (native) await request("document.close", { id: t.id });
   }
+  const closingSession = useRef(false);
   const persistRecovery = useCallback(
     () =>
       request("recovery.save", {
@@ -923,6 +953,7 @@ export default function App({
     [],
   );
   const closeWindow = useCallback(async () => {
+    if (closingSession.current) return;
     if (watchBusy.current) { setStatus("Dừng Watch trước khi đóng ứng dụng."); return; }
     if (menuBusy.current) { setStatus("Menu đang xử lý. Thử đóng lại khi hoàn tất."); return; }
     if (menuDirty.current && !window.confirm("Menu ERP còn thay đổi chưa lưu. Đóng ứng dụng?")) return;
@@ -945,23 +976,14 @@ export default function App({
         await new Promise(requestAnimationFrame);
       }
     }
+    closingSession.current = true;
     try {
-      await persistRecovery();
-    } catch (e) {
-      if (
-        latest.current.tabs.some(dirty) &&
-        !window.confirm(
-          "Không tạo được bản khôi phục: " +
-            (e as Error).message +
-            " Đóng và bỏ nội dung chưa lưu?",
-        )
-      ) {
-        setError((e as Error).message);
-        return;
-      }
+      await request("recovery.save", { documents: [] });
+      await request("window.close");
+    } finally {
+      closingSession.current = false;
     }
-    await request("window.close");
-  }, [persistRecovery]);
+  }, []);
   useEffect(
     () =>
       subscribe((e) => {
@@ -1069,6 +1091,9 @@ export default function App({
     }
   }, [settings.theme, settings.accentColor]);
   useEffect(() => {
+    applyButtonTheme(settings.buttonColors?.[settings.theme]);
+  }, [settings.theme, settings.buttonColors]);
+  useEffect(() => {
     const currentResult = resultsByTab.current.get(activeId);
     setResult(currentResult);
     setQueryElapsedMs(queryDurationByTab.current.get(activeId) ?? currentResult?.durationMs ?? null);
@@ -1077,7 +1102,9 @@ export default function App({
   useEffect(() => () => window.clearInterval(queryTimer.current), []);
   useEffect(() => {
     if (!native || !ready) return;
-    const timer = setInterval(() => void guard(persistRecovery), 8000);
+    const timer = setInterval(() => {
+      if (!closingSession.current) void guard(persistRecovery);
+    }, 8000);
     return () => clearInterval(timer);
   }, [ready, guard, persistRecovery]);
   useEffect(() => {
@@ -2006,7 +2033,7 @@ export default function App({
       void guard(() => openController(node.entry.link, false, node.entry.sysId, false, true));
       return;
     }
-    void guard(() => openController(node.entry.link, false, node.entry.sysId));
+    void guard(() => openController(node.entry.link, false, node.entry.sysId, true));
   }
   function exportCsv() {
     if (!result?.tables[resultIndex]) return;
@@ -2025,7 +2052,6 @@ export default function App({
     if (closingProjectFiles.current) return;
     if (running) { setStatus("Dừng query đang chạy trước khi đóng nhóm file."); return; }
     closingProjectFiles.current = true;
-    const closed = new Set<string>();
     try {
       const ownerIds = new Set((owner ? [owner] : projects).map(item => item.id));
       const pathKey = (path: string) => path.replaceAll("\\", "/").toLowerCase();
@@ -2056,21 +2082,27 @@ export default function App({
         if (choice === "cancel") return;
         if (choice === "save") for (const tab of edited) if (!(await save(tab))) return;
       }
+      if (!closing.length) {
+        setStatus("Không có tab dự án đang mở.");
+        return;
+      }
+      const closed = new Set(closing.map(tab => tab.id));
+      const nextId = latest.current.tabs.filter(tab => !closed.has(tab.id)).at(-1)?.id ?? "";
+      setTabs(current => current.filter(tab => !closed.has(tab.id)));
+      setActiveIdRaw(current => closed.has(current) ? nextId : current);
+      setPaneIds(current => current.map(id => closed.has(id) ? nextId : id));
       for (const tab of closing) {
-        if (native) await request("document.close", { id: tab.id });
-        closed.add(tab.id);
         disposeModel(tab);
         resultsByTab.current.delete(tab.id);
         queryDurationByTab.current.delete(tab.id);
       }
-      setStatus(closing.length ? "Đã đóng " + closing.length + " tab của " + (owner?.name ?? "tất cả dự án") : "Không có tab dự án đang mở.");
-    } finally {
-      if (closed.size) {
-        const remaining = latest.current.tabs.filter(tab => !closed.has(tab.id));
-        setTabs(current => current.filter(tab => !closed.has(tab.id)));
-        setActiveIdRaw(current => closed.has(current) ? remaining.at(-1)?.id ?? "" : current);
-        setPaneIds(current => current.map(id => closed.has(id) ? remaining.at(-1)?.id ?? "" : id));
+      if (native) {
+        const released = await Promise.allSettled(closing.map(tab => request("document.close", { id: tab.id })));
+        const failure = released.find(result => result.status === "rejected");
+        if (failure) throw failure.reason;
       }
+      setStatus("Đã đóng " + closing.length + " tab của " + (owner?.name ?? "tất cả dự án"));
+    } finally {
       closingProjectFiles.current = false;
     }
   }
@@ -2131,6 +2163,9 @@ export default function App({
     setCommandsByKind({ web: [], mobile: [] });
     setMenuLoaded({ web: false, mobile: false });
     setMenuKind("web");
+    setExpandedMenus({ web: new Set(), mobile: new Set() });
+    menuScroll.current = { web: 0, mobile: 0 };
+    setMenuScriptChoice(undefined);
     setMenuQueries({ web: "", mobile: "" });
     setSelectedCommands({ web: "", mobile: "" });
     setMenuLoadErrors({ web: "", mobile: "" });
@@ -2295,7 +2330,7 @@ export default function App({
             setStatus("Đã lưu lại web.config");
           });
         }}><RefreshCw size={15} /></IconButton>
-        <IconButton label="Xóa Structure/App" disabled={!project || projectActionBusy} onClick={() => {
+        <IconButton destructive label="Xóa Structure/App" disabled={!project || projectActionBusy} onClick={() => {
           if (!project) return;
           runProjectAction(async () => {
             const preview = await request<{ path: string; count: number }>("project.structure.preview", { id: project.id });
@@ -2486,7 +2521,7 @@ export default function App({
                     onCloseAllProjects={() => void guard(() => closeProjectFiles())}
                     onOpen={(path) => void guard(() => openHistoryFile(owner, path))}
                     onRemove={(path) => queueHistoryRemoval(projectId, path)} />;
-                }) : <div className="explorer-message">{!history ? "Đang tải lịch sử…" : history.length && historySearch.trim()
+                }) : <div className="explorer-message">{!project ? "Chọn dự án để xem lịch sử." : !history ? "Đang tải lịch sử…" : history.some(entry => entry.projectId === project.id) && historySearch.trim()
                   ? "Không tìm thấy file hoặc thư mục." : "Chưa có file trong lịch sử."}</div>}
               </div>
               </>
@@ -2580,8 +2615,10 @@ export default function App({
                   </div>
                   <input type="search" aria-label="Tên file" placeholder="Tìm theo tên file"
                     value={fileName} onChange={event => setFileName(event.target.value)} />
-                  <Select label="Phạm vi tìm kiếm" value={searchRoot === workspace ? "" : searchRoot}
-                    options={[{ value: "", label: "Toàn dự án" }, ...searchFolders.map((folder) => ({
+                  <Select label="Phạm vi tìm kiếm" value={searchFolder === "project" && appData ? "project"
+                    : searchFolders.includes(searchFolder) ? searchFolder : ""}
+                    options={[{ value: "", label: appData?.name ?? "Toàn dự án" },
+                      ...(appData ? [{ value: "project", label: "Toàn dự án" }] : []), ...searchFolders.map((folder) => ({
                       value: folder, label: folder.slice(workspace.length).replace(/^[\\/]+/, "") || folder,
                     }))]}
                     onChange={setSearchFolder} />
@@ -2623,7 +2660,7 @@ export default function App({
                         : hits.length ? `${hits.length === 2000 ? "Ít nhất " : ""}${hits.length} tệp khớp`
                           : "Không tìm thấy tệp khớp.")}
                   </div>
-                  <SearchResultTree hits={hits} root={searchRoot}
+                  <SearchResultTree hits={hits} root={workspace}
                     onOpen={hit => void guard(() => open(hit.path, hit.line || undefined, hit.column || undefined))} />
                 </div>
               </>
@@ -2744,16 +2781,19 @@ export default function App({
                   />
 
                 </div>
-                <div className="side-content side-wide loading-region" aria-busy={menuLoading}>
+                <div ref={restoreMenuScroll} className="side-content side-wide loading-region" aria-busy={menuLoading}
+                  onScroll={event => { menuScroll.current[menuKind] = event.currentTarget.scrollTop; }}>
                   <LoadingLine busy={menuLoading} label={`Đang tải chức năng ${menuKind === "web" ? "Web" : "Mobile"}…`} />
                   {menuLoadError && <div className="tree-message error-text">{menuLoadError}</div>}
                   {!menuQuery && (
                     <FunctionTree
                       nodes={commands}
+                      expanded={expandedMenus[menuKind]}
+                      setExpanded={update => setExpandedMenus(current => ({ ...current, [menuKind]: update(current[menuKind]) }))}
                       selected={selectedCommand}
                       onSelect={setSelectedCommand}
                       onOpen={openFunctionController}
-                      onOpenSource={(node) => void guard(() => openController(node.entry.link, false, node.entry.sysId))}
+                      onOpenSource={(node) => void guard(() => openController(node.entry.link, false, node.entry.sysId, true))}
                       onEdit={openMenuEditor}
                       onScript={openMenuInsertScript}
                       onContext={(node, x, y) => setMenuContext({ command: node, x, y })}
@@ -2767,8 +2807,11 @@ export default function App({
                         aria-current={
                           selectedCommand === n.entry.id || (menuQuery && i === menuIndex) ? "page" : undefined
                         }
-                        onClick={() => {
+                        onClick={(event) => {
                           setSelectedCommand(n.entry.id);
+                          if (event.detail === 0 && (n.entry.link || n.entry.sysId)) openFunctionController(n);
+                        }}
+                        onDoubleClick={() => {
                           if (n.entry.link || n.entry.sysId) openFunctionController(n);
                         }}
                         onFocus={() => setSelectedCommand(n.entry.id)}
@@ -2798,7 +2841,7 @@ export default function App({
                         onClick={(event) => {
                           event.stopPropagation();
                           setSelectedCommand(n.entry.id);
-                          void guard(() => openController(n.entry.link, false, n.entry.sysId));
+                          void guard(() => openController(n.entry.link, false, n.entry.sysId, true));
                         }}
                       >{n.entry.id}</button> : <small className="function-menu-id">{n.entry.id}</small>}
                     </div>
@@ -2820,6 +2863,14 @@ export default function App({
             }} />
           </aside>
         )}
+        {menuScriptChoice && <Modal title="Tạo script menu" onClose={() => setMenuScriptChoice(undefined)}>
+          <div className="modal-copy"><p>Bạn có muốn tạo script cho các menu con của “{menuScriptChoice.entry.caption}” không?</p></div>
+          <div className="modal-footer" style={{ flexWrap: "wrap" }}>
+            <Button onClick={() => setMenuScriptChoice(undefined)}>Hủy</Button>
+            <Button onClick={() => openMenuInsertScript(menuScriptChoice, false)}>Chỉ menu cha</Button>
+            <Button variant="primary" onClick={() => openMenuInsertScript(menuScriptChoice, true)}>Cả menu con</Button>
+          </div>
+        </Modal>}
         {menuContext && <div className="table-action-menu explorer-action-menu" role="menu"
           style={{ left: Math.max(8, Math.min(menuContext.x, window.innerWidth - 248)), top: Math.max(8, Math.min(menuContext.y, window.innerHeight - 136)) }}
           onPointerDown={(event) => event.stopPropagation()}>
@@ -3574,7 +3625,7 @@ export default function App({
             <p className="break-all">{structureClear.path}</p>
             <div className="inline-checks">
               <Button disabled={projectActionBusy} onClick={() => setStructureClear(undefined)}>Hủy</Button>
-              <Button disabled={projectActionBusy} onClick={() => runProjectAction(async () => {
+              <Button variant="destructive" disabled={projectActionBusy} onClick={() => runProjectAction(async () => {
                 const count = await request<number>("project.structure.clear", { id: structureClear.id, path: structureClear.path });
                 controllerCache.current.clear();
                 setControllers((current) => current.map((entry) => ({
@@ -3748,6 +3799,8 @@ type CommandNode = {
 };
 function FunctionTree({
   nodes,
+  expanded,
+  setExpanded,
   selected,
   onSelect,
   onOpen,
@@ -3758,6 +3811,8 @@ function FunctionTree({
   allowMenuActions,
 }: {
   nodes: CommandNode[];
+  expanded: Set<string>;
+  setExpanded: (update: (previous: Set<string>) => Set<string>) => void;
   selected: string;
   onSelect: (id: string) => void;
   onOpen: (node: CommandNode) => void;
@@ -3767,7 +3822,6 @@ function FunctionTree({
   onContext: (node: CommandNode, x: number, y: number) => void;
   allowMenuActions: boolean;
 }) {
-  const [expanded, setExpanded] = useState(new Set<string>());
   return (
     <ul className="file-tree">
       {nodes.map((node) =>
@@ -3794,7 +3848,7 @@ function FunctionTree({
                 ]
                   .filter(Boolean)
                   .join(" · ")}
-                onClick={() => {
+                onClick={(event) => {
                   onSelect(node.entry.id);
                   if (node.children.length)
                     setExpanded((old) => {
@@ -3803,8 +3857,11 @@ function FunctionTree({
                       else next.add(node.entry.id);
                       return next;
                     });
-                  else if (node.entry.link || node.entry.sysId)
+                  else if (event.detail === 0 && (node.entry.link || node.entry.sysId))
                     onOpen(node);
+                }}
+                onDoubleClick={() => {
+                  if (!node.children.length && (node.entry.link || node.entry.sysId)) onOpen(node);
                 }}
                 onKeyDown={(event) => {
                   if (allowMenuActions && event.key === "F3") {
@@ -3849,6 +3906,8 @@ function FunctionTree({
               <div className="tree-children">
                 <FunctionTree
                   nodes={node.children}
+                  expanded={expanded}
+                  setExpanded={setExpanded}
                   selected={selected}
                   onSelect={onSelect}
                   onOpen={onOpen}

@@ -192,7 +192,7 @@ export function ProjectDialog({ projects, lastAccess, onProjects, onOpen, onClos
               </span><ArrowRight size={16} />
             </button>
             <IconButton label={`Đồng bộ lại ${project.code}`} disabled={task.busy} onClick={() => startSync(project)}><RefreshCw size={15} /></IconButton>
-            <IconButton label={`Xóa profile ${project.code}`} disabled={task.busy} onClick={() => { setDeleting(project); setMode("delete"); }}><Trash2 size={15} /></IconButton>
+            <IconButton destructive label={`Xóa profile ${project.code}`} disabled={task.busy} onClick={() => { setDeleting(project); setMode("delete"); }}><Trash2 size={15} /></IconButton>
           </div>)}
           {filtered.length === 0 && <div className="empty">{projects.length ? "Không tìm thấy dự án phù hợp." : "Chưa có dự án. Hãy đồng bộ hoặc tạo profile."}</div>}
         </div>
@@ -216,7 +216,7 @@ export function ProjectDialog({ projects, lastAccess, onProjects, onOpen, onClos
         })} />}
 
       {mode === "delete" && deleting && <div className="project-confirm"><p>Xóa profile <strong>{deleting.code}</strong> khỏi danh sách? Thư mục và database vẫn được giữ.</p>
-        <div className="form-actions"><Button onClick={back}>Hủy</Button><Button className="table-drop-action" disabled={task.busy}
+        <div className="form-actions"><Button onClick={back}>Hủy</Button><Button variant="destructive" disabled={task.busy}
           onClick={() => void task.run(async () => { await request("project.delete", { id: deleting.id }); onProjects(await request<Project[]>("project.list")); setDeleting(undefined); setMode("list"); })}>Xóa profile</Button></div></div>}
 
       {mode === "import" && importPreview && <div className="project-import-summary">

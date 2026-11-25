@@ -41,7 +41,7 @@ export function ConfirmDialog({ title, message, confirmLabel = "Tiếp tục", d
       </div>
       <div className="modal-footer">
         <Button onClick={onClose}>Hủy</Button>
-        <Button variant={danger ? "outline" : "primary"} className={danger ? "danger-action" : undefined}
+        <Button variant={danger ? "destructive" : "primary"}
           onClick={onConfirm}>{confirmLabel}</Button>
       </div>
     </Modal>,
@@ -53,7 +53,7 @@ export function Button({
   variant = "outline",
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: "outline" | "primary" | "secondary" | "ghost";
+  variant?: "outline" | "primary" | "secondary" | "ghost" | "destructive";
 }) {
   return (
     <button {...props} className={`button ${variant} ${props.className ?? ""}`}>
@@ -64,13 +64,15 @@ export function Button({
 export function IconButton({
   label,
   children,
+  destructive = false,
+  className,
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { label: string }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & { label: string; destructive?: boolean }) {
   return (
     <Button
       {...props}
-      variant="ghost"
-      className="icon-button"
+      variant={destructive ? "destructive" : "ghost"}
+      className={`icon-button ${className ?? ""}`}
       title={label}
       aria-label={label}
     >

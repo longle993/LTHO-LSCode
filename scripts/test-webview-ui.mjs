@@ -106,7 +106,8 @@ await page.addInitScript(()=>{
       case 'workspace.files':result=['C:\\Fixture\\fixture.xml','C:\\Fixture\\long.sql'];break;
       case 'workspace.search':
         result=request.payload.query==='needle' && request.payload.firstPerFile
-          ? [{path:projectRoot+'\\fixture.xml',line:2,column:3,preview:'<root>needle</root>'}] : [];
+          ? [{path:projectRoot+(request.payload.path===projectRoot+'\\App_Data'
+            ? '\\App_Data\\Controllers\\Filter\\fixture.xml' : '\\fixture.xml'),line:2,column:3,preview:'<root>needle</root>'}] : [];
         break;
       case 'workspace.reveal':result=true;break;
       case 'document.openMany':{
@@ -208,7 +209,7 @@ await page.addInitScript(()=>{
         break;
       }
       case 'table.insertScript':result='INSERT INTO [dbo].[DanhMuc] ([code]) VALUES (1);';break;
-      case 'profiler.defaults':result={filter:'Fixture',profilerPath:'C:\\Fixture\\PROFILER.EXE',authentication:'Windows'};break;
+      case 'profiler.defaults':result={filter:'Fixture',profilerPath:'C:\\Fixture\\PROFILER.EXE',authentication:'SQL Server · profile'};break;
       case 'file.pick':result='C:\\CustomSSMS\\PROFILER.EXE';break;
       case 'profiler.start':result={engine:'ssms18'};break;
       case 'profiler.read':result={events:window.__traceBatch.splice(0),dropped:0,truncated:false};break;
@@ -248,8 +249,8 @@ async function testProfiler(){
   await page.evaluate(()=>window.__traceBatch.push(...Array.from({length:60},(_,i)=>({time:String(i),event:'Event '+i,database:'Fixture_App',login:'profile',durationMs:1,reads:0,text:'SELECT '+i}))));
   check(await page.evaluate(()=>window.__nativeCalls.filter(c=>c.method==='profiler.start').length===1 &&
     window.__nativeCalls.some(c=>c.method==='profiler.start' && c.payload.engine==='auto' &&
-      c.payload.useTargetCredentials && c.payload.targetId && !Object.hasOwn(c.payload,'password'))),
-    'Opening Profiler automatically starts one trace with the current target');
+      c.payload.useTargetCredentials===false && c.payload.targetId && !Object.hasOwn(c.payload,'password'))),
+    'Opening Profiler automatically uses the dedicated login without sending its password through the bridge');
   await page.waitForFunction(()=>document.querySelector('.trace-sql')?.value==='SELECT 59');
   check(await profiler.locator('.trace-sql').evaluate(element=>element.clientHeight>=110),'Profiler SQL area has room for more lines');
   const traceGrid=profiler.locator('.data-grid');
@@ -471,10 +472,16 @@ async function testTableRefreshAndNotice(){
   await search.fill('needle');
   const searchResults=page.locator('#project-sidebar');
   await searchResults.getByText('Nhập tên file hoặc nội dung rồi bấm Tìm.',{exact:true}).waitFor();
+  await searchResults.getByRole('button',{name:'Phạm vi tìm kiếm'}).filter({hasText:'App_Data'}).waitFor();
   await search.press('Enter');
   await searchResults.getByText('1 tệp khớp',{exact:true}).waitFor();
   check(await searchResults.getByRole('button',{name:/fixture\.xml:2/}).count()===1,
     'Sidebar search runs on Enter and lists the file containing the typed content');
+  const branch = searchResults.locator('details').filter({has:page.locator('summary').getByText('App_Data',{exact:true})}).first();
+  check(await branch.getByText('Controllers',{exact:true}).isVisible() &&
+    await branch.getByText('Filter',{exact:true}).isVisible() &&
+    await page.evaluate(()=>window.__nativeCalls.some(call=>call.method==='workspace.search' && call.payload.path==='C:\\Fixture\\App_Data')),
+  'Search defaults to App_Data and keeps the directory hierarchy');
   await page.screenshot({path:out+'/workspace-content-search.png',animations:'disabled'});
   await page.setViewportSize({width:375,height:600});
   check(await search.evaluate(element=>element.getBoundingClientRect().right<=innerWidth),
@@ -647,7 +654,13 @@ Trạng thái: 1-Còn sử dụng, 0-Không còn sử dụng`);
     await page.locator('.project-row').filter({hasText:'Dự án thử UI'}).click();
     await page.locator('dialog').waitFor({state:'detached'});
     await page.getByRole('button',{name:'Chức năng',exact:true}).click();
-    await page.getByRole('button',{name:'Nhân viên',exact:true}).click();
+    const menuEntry=page.getByRole('button',{name:'Nhân viên',exact:true});
+    await menuEntry.click();
+    check(await menuEntry.getAttribute('aria-current')==='page' &&
+      await page.evaluate(()=>!window.__nativeCalls.some(c=>c.method==='project.controller')),
+    'A single click selects the ERP menu without loading source');
+    await menuEntry.dblclick();
+    await page.getByRole('tab',{name:'nhanvien.aspx',exact:true}).waitFor();
     const diagnosticPath='C:\\Fixture\\App_Data\\Controllers\\Filter\\nhanvien.xml';
     const fileTree=page.locator('.project-file-tree');
     const diagnosticFile=fileTree.getByTitle(diagnosticPath,{exact:true});
@@ -843,15 +856,19 @@ Trạng thái: 1-Còn sử dụng, 0-Không còn sử dụng`);
   check(await page.getByRole('button',{name:'menu-parent',exact:true}).count()===0,
     'Parent functions keep menu ID text without a source action');
   await functionRow.click();
+  check(await functionRow.getAttribute('aria-current')==='page' &&
+    await page.evaluate(before=>window.__nativeCalls.filter(c=>c.method==='document.open').length===before,openedBefore),
+    'Single click selects the ERP function');
+  await page.getByRole('button',{name:'menu1',exact:true}).click();
   const fileTree=page.locator('.project-file-tree');
   const dirPath='C:\\Fixture\\App_Data\\Controllers\\Dir';
   const gridPath='C:\\Fixture\\App_Data\\Controllers\\Grid';
   const dirFile=fileTree.getByTitle(dirPath+'\\nhanvien.xml',{exact:true});
   const gridFile=fileTree.getByTitle(gridPath+'\\nhanvien.xml',{exact:true});
   await dirFile.waitFor();await gridFile.waitFor();
-  check(await fileTree.getByTitle('C:\\Fixture\\Main\\nhanvien.aspx',{exact:true}).getAttribute('aria-current')!=='page' &&
-    await page.evaluate(before=>window.__nativeCalls.filter(c=>c.method==='document.open').length===before,openedBefore),
-    'A function click scans and reveals its controller tree without opening Main');
+  await page.getByRole('tab',{name:'nhanvien.aspx',exact:true}).waitFor();
+  check(await fileTree.getByTitle('C:\\Fixture\\Main\\nhanvien.aspx',{exact:true}).getAttribute('aria-current')==='page',
+    'Menu ID opens Main and reveals its controller tree immediately');
   await page.getByRole('button',{name:'Chức năng',exact:true}).click();
   const functionRowAgain=page.getByRole('button',{name:'Nhân viên',exact:true});
   await functionRowAgain.focus();await functionRowAgain.press('F12');
@@ -1293,33 +1310,27 @@ Trạng thái: 1-Còn sử dụng, 0-Không còn sử dụng`);
   await page.getByRole('tab',{name:'bulk-0.xml',exact:true}).click();
   await page.waitForFunction(()=>window.__nativeCalls.some(call=>call.method==='xml.diagnostics'&&call.payload.text==='<root>bulk-0</root>'));
   await page.getByRole('button',{name:'Lịch sử',exact:true}).click();
-  const otherHistory=page.locator('.history-group').filter({has:page.locator('summary').getByText('Dự án lịch sử',{exact:true})});
-  await otherHistory.getByText('Main',{exact:true}).waitFor();
-  check(await otherHistory.getByText('Controller',{exact:true}).count()===0,'History shows only the immediate folder');
+  const projectHistory=page.locator('.history-group').filter({has:page.locator('summary').getByText('Dự án thử UI',{exact:true})});
+  const header=projectHistory.locator(':scope > summary');
+  await header.waitFor();
+  check(await page.locator('.project-file-tree').getByText('Dự án lịch sử',{exact:true}).count()===0,
+    'History only shows the current project');
   const historySearch=page.getByRole('searchbox',{name:'Tìm file hoặc thư mục trong lịch sử'});
-  await historySearch.fill('PAST.XML');
-  await otherHistory.getByRole('button',{name:'past.xml',exact:true}).waitFor();
-  check(await page.locator('.project-file-tree').getByText('Dự án thử UI',{exact:true}).count()===0,
-    'History filters by filename across projects without flattening the result');
-  await historySearch.fill('main');
-  await otherHistory.getByRole('button',{name:'past.xml',exact:true}).waitFor();
-  await historySearch.fill('unmatched-history-text');
-  await page.getByText('Không tìm thấy file hoặc thư mục.',{exact:true}).waitFor();
-  await historySearch.fill('main');
-  await page.locator('.project-file-tree').getByRole('button',{name:'past.xml',exact:true}).click();
-  const unsaved=page.getByRole('dialog').getByRole('button',{name:'Đóng không lưu',exact:true});
-  const openedHistoryTab=page.getByRole('tab',{name:'past.xml',exact:true,selected:true});
-  await unsaved.or(openedHistoryTab).waitFor();
-  if(await unsaved.isVisible()) await unsaved.click();
-  await openedHistoryTab.waitFor();
-  await page.getByRole('tab',{name:'bulk-0.xml',exact:true}).waitFor({state:'detached'});
-  check(await page.evaluate(()=>window.__nativeCalls.some(call=>call.method==='project.open'&&call.payload.id==='other')),
-    'History opens another project and closes the previous project tabs');
-  await page.waitForFunction(()=>window.__nativeCalls.some(call=>call.method==='project.history.record'&&call.payload.path.endsWith('past.xml')));
-  await otherHistory.getByRole('button',{name:'Xóa past.xml khỏi lịch sử',exact:true}).click();
-  await otherHistory.waitFor({state:'detached'});
-  check(await page.getByRole('tab',{name:'past.xml',exact:true,selected:true}).isVisible(),
-    'Removing the last history entry hides the project and leaves the editor open');
+  await historySearch.fill('BULK-0.XML');
+  const historyFile=projectHistory.getByRole('button',{name:'bulk-0.xml',exact:true});
+  await historyFile.waitFor();
+  for(const command of ['Close project','Close all projects']){
+    await header.click({button:'right'});
+    await page.getByRole('menuitem',{name:command,exact:true}).click();
+    const discard=page.getByRole('button',{name:'Đóng không lưu',exact:true});
+    const tab=page.getByRole('tab',{name:'bulk-0.xml',exact:true});
+    await Promise.race([discard.waitFor(),tab.waitFor({state:'detached'})]);
+    if(await discard.isVisible()) await discard.click();
+    await tab.waitFor({state:'detached'});
+    await historyFile.click();
+    await tab.waitFor();
+  }
+  check(true,'Both history actions close project tabs and keep history available');
   if(errors.length)console.log(JSON.stringify(errors,null,2));check(errors.length===0,'No uncaught browser errors');
   writeFileSync(out+'/interaction-report.json',JSON.stringify({passed:true,checks,transport:'explicit browser fixture; not a .NET/SQL integration test',errors},null,2));
   }

@@ -200,7 +200,7 @@ Phạm vi: `MenuEditor.NextCommandId` trong `src/LSCode.Infrastructure/MenuEdito
 
 - Bỏ nhãn `WebView`, `.NET Desktop` trên thanh tiêu đề.
 - **Chức năng ERP** chỉ giữ ô tìm kiếm và cây menu; bỏ hai nút Tải chức năng / Đồng bộ. Nút tải lại ở góc trên sidebar vẫn nạp lại cây chức năng. Nút tải lại trong tab sửa menu là thao tác riêng, vẫn giữ để đọc lại bản ghi.
-- Chuột phải vào **tên dự án cấp trên cùng** trong Lịch sử: **Close project** đóng các tab thuộc dự án đó; **Close all projects** đóng tab thuộc tất cả dự án. File được nhận diện theo dự án gắn với tab hoặc thư mục dự án gần nhất chứa file; SQL chưa lưu không thuộc dự án được giữ lại. Các thao tác này không xóa file, profile hay lịch sử.
+- Lịch sử chỉ hiển thị file của dự án đang mở. Chuột phải vào **tên dự án** rồi chọn **Close project** để đóng các tab thuộc dự án đó hoặc **Close all projects** để đóng tab của mọi dự án. LSCode hỏi cách xử lý khi có tab chưa lưu. Các mục lịch sử vẫn có thể dùng để mở lại file.
 - Bấm **×** ở nhiều file liên tiếp sẽ ẩn từng mục ngay. LSCode gom các lần xóa gần nhau theo dự án rồi ghi file lịch sử một lần; file nguồn và tab đang mở không bị xóa. Nếu lần lưu nền thất bại, danh sách được tải lại từ dữ liệu đã lưu và lỗi xuất hiện trên giao diện.
 - Bản nháp được hỏi một lần cho cả nhóm: Lưu thay đổi / Đóng không lưu / Hủy. Hủy lưu hoặc lưu lỗi giữ các tab mở. Khi query editor đang chạy, dừng query trước khi đóng nhóm.
 

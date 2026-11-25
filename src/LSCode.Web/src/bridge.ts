@@ -38,6 +38,7 @@ export type QueryResult = {
 export type Settings = {
   theme: string;
   accentColor?: string | null;
+  buttonColors?: import("./buttonTheme").ButtonColors | null;
   explorerFontSize?: number;
   editorFontSize?: number;
   explorerWidth?: number;

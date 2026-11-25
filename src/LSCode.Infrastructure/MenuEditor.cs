@@ -49,11 +49,42 @@ internal static class MenuEditor
         return new("new", fields, values, "", true);
     }
 
-    public static async Task<string> InsertScriptAsync(SqlTarget target, string wmenuId, CancellationToken token)
+    public static async Task<string> InsertScriptAsync(SqlTarget target, string wmenuId, CancellationToken token, bool includeChildren = false)
     {
         await using var connection = new SqlConnection(target.ConnectionString);
         await connection.OpenAsync(token).ConfigureAwait(false);
-        var menu = await InsertRowScriptAsync(connection, "dbo.wcommand", "wmenu_id", wmenuId, token).ConfigureAwait(false);
+        if (!includeChildren) return await BuildScriptAsync(connection, wmenuId, new(StringComparer.OrdinalIgnoreCase), token).ConfigureAwait(false);
+
+        var parents = await ReadTreeAsync(connection, null, token).ConfigureAwait(false);
+        var children = parents.ToLookup(row => row.Value, row => row.Key, StringComparer.OrdinalIgnoreCase);
+        var pending = new Queue<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { wmenuId };
+        var commands = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var script = new StringBuilder();
+        pending.Enqueue(wmenuId);
+        while (pending.TryDequeue(out var id))
+        {
+            token.ThrowIfCancellationRequested();
+            script.AppendLine(await BuildScriptAsync(connection, id, commands, token).ConfigureAwait(false));
+            foreach (var child in children[id])
+                if (seen.Add(child)) pending.Enqueue(child);
+        }
+        return script.ToString();
+    }
+
+    private static async Task<Dictionary<string, string>> ReadTreeAsync(SqlConnection connection, SqlTransaction? transaction, CancellationToken token)
+    {
+        var parents = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        await using var command = new SqlCommand("SELECT wmenu_id, wmenu_id0 FROM dbo.wcommand ORDER BY wmenu_id", connection, transaction) { CommandTimeout = 0 };
+        await using var reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);
+        while (await reader.ReadAsync(token).ConfigureAwait(false))
+            if (!reader.IsDBNull(0)) parents.TryAdd(reader.GetString(0).Trim(), reader.IsDBNull(1) ? "" : reader.GetString(1).Trim());
+        return parents;
+    }
+
+    private static async Task<string> BuildScriptAsync(SqlConnection connection, string id, HashSet<string> commands, CancellationToken token)
+    {
+        var menu = await InsertRowScriptAsync(connection, "dbo.wcommand", "wmenu_id", id, token).ConfigureAwait(false);
         if (menu.Script is null) throw new KeyNotFoundException("Không tìm thấy menu trong dbo.wcommand.");
 
         var result = new StringBuilder();
@@ -61,7 +92,7 @@ internal static class MenuEditor
         var commandId = menu.Values.TryGetValue("menu_id", out var value) ? Convert.ToString(value, CultureInfo.InvariantCulture)?.Trim() : null;
         if (string.IsNullOrWhiteSpace(commandId))
             result.AppendLine("-- Menu không khai báo menu_id nên không có bản ghi dbo.command.");
-        else
+        else if (commands.Add(commandId))
         {
             var command = await InsertRowScriptAsync(connection, "dbo.command", "menu_id", commandId, token).ConfigureAwait(false);
             result.AppendLine("-- dbo.command");
@@ -110,17 +141,35 @@ internal static class MenuEditor
             }
             else
             {
-                if (!savedId.Equals(originalId, StringComparison.OrdinalIgnoreCase))
-                    throw new ArgumentException("Không thể đổi mã cây của menu hiện hữu.");
                 var current = await RowAsync(connection, transaction, fields, originalId, token, lockRow: true).ConfigureAwait(false)
                     ?? throw new KeyNotFoundException("Menu đã bị xóa bởi phiên khác.");
                 if (!CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(Fingerprint(current)), Encoding.UTF8.GetBytes(version)))
                     throw new InvalidOperationException("Menu đã được thay đổi bởi phiên khác. Tải lại trước khi lưu.");
-                var columns = values.Keys.Where(name => !name.Equals("wmenu_id", StringComparison.OrdinalIgnoreCase)).ToArray();
+                var renamed = !savedId.Equals(originalId.Trim(), StringComparison.Ordinal);
+                var oldParent = current.GetValueOrDefault("wmenu_id0")?.Trim() ?? "";
+                var newParent = values.TryGetValue("wmenu_id0", out var submittedParent) ? submittedParent?.Trim() ?? "" : oldParent;
+                if (renamed || !newParent.Equals(oldParent, StringComparison.OrdinalIgnoreCase))
+                {
+                    var parents = await ReadTreeAsync(connection, transaction, token).ConfigureAwait(false);
+                    if (renamed && !savedId.Equals(originalId.Trim(), StringComparison.OrdinalIgnoreCase) && parents.ContainsKey(savedId))
+                        throw new InvalidOperationException("Mã cây đã tồn tại.");
+                    var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { savedId, originalId.Trim() };
+                    for (var ancestor = newParent; ancestor.Length > 0;)
+                    {
+                        if (!seen.Add(ancestor)) throw new ArgumentException("Mã cha tạo vòng lặp trong cây menu.");
+                        if (!parents.TryGetValue(ancestor, out var next)) break;
+                        ancestor = next;
+                    }
+                }
+                values["wmenu_id"] = savedId;
+                var columns = values.Keys.Where(name => renamed || !name.Equals("wmenu_id", StringComparison.OrdinalIgnoreCase)).ToArray();
                 var sql = $"UPDATE dbo.wcommand SET {string.Join(',', columns.Select((name, i) => Quote(name) + "=@p" + i))} WHERE wmenu_id=@original";
                 var parameters = columns.Select((name, i) => Parameter("@p" + i, editable[name], values[name])).ToList();
                 parameters.Add(new SqlParameter("@original", originalId));
                 await ExecuteAsync(connection, transaction, sql, parameters.ToArray(), token).ConfigureAwait(false);
+                if (renamed)
+                    await ExecuteAsync(connection, transaction, "UPDATE dbo.wcommand SET wmenu_id0=@new WHERE wmenu_id0=@old",
+                        [Parameter("@new", editable["wmenu_id"], savedId), new SqlParameter("@old", originalId)], token).ConfigureAwait(false);
             }
             var savedValues = await RowAsync(connection, transaction, fields, savedId, token).ConfigureAwait(false)
                 ?? throw new DBConcurrencyException("Không đọc được menu vừa lưu.");
@@ -313,12 +362,12 @@ internal static class MenuEditor
 
     internal static string NextCommandId(IReadOnlySet<string> used)
     {
-        for (var number = 0; number < 10000; number++)
+        for (var number = 101; number < 10000; number++)
         {
             var candidate = $"AA.{number / 100:00}.{number % 100:00}";
             if (!used.Contains(candidate)) return candidate;
         }
-        throw new InvalidOperationException("Không còn mã command trống trong AA.00.00–AA.99.99.");
+        throw new InvalidOperationException("Không còn mã command trống trong AA.01.01–AA.99.99.");
     }
 
     private static async Task<bool> ExistsAsync(SqlConnection connection, SqlTransaction transaction, string treeId, string? commandId, CancellationToken token)

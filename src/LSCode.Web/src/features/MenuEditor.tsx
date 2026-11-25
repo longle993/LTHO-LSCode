@@ -130,7 +130,7 @@ export function MenuEditor({ target, command, root, onClose, onSaved, onOpenPath
       <span>{labels[field.name] ?? field.name} <small>{field.type}{limit ? `(${limit})` : ""}</small></span>
       <input
         value={value}
-        readOnly={field.readOnly || (model?.mode === "edit" && field.name === "wmenu_id")}
+        readOnly={field.readOnly}
         disabled={busy}
         maxLength={limit}
         onChange={(event) => change(event.target.value)}

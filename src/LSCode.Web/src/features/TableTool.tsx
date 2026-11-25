@@ -1001,7 +1001,7 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
             {task.error && <p className="form-error" role="alert">{task.error}</p>}
             <div className="flex flex-wrap justify-end gap-2">
               <Button disabled={task.busy} onClick={() => setDrop(undefined)}>Hủy</Button>
-              <Button disabled={task.busy} className="table-drop-action" onClick={() => void task.run(async () => {
+              <Button disabled={task.busy} variant="destructive" onClick={() => void task.run(async () => {
                 await request("table.dropColumns", { ...payload, columns: drop });
                 setPreview(undefined);
                 setDrop(undefined);
@@ -1031,7 +1031,7 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
               setDeleteRequest(undefined);
               pending.resolve(false);
             }}>Hủy</Button>
-            <Button className="table-drop-action" onClick={() => {
+            <Button variant="destructive" onClick={() => {
               const pending = deleteRequest;
               setDeleteRequest(undefined);
               pending.resolve(true);

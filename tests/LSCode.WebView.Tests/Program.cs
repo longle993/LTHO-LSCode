@@ -20,11 +20,11 @@ async Task Reject<T>(Func<Task> work, string name) where T : Exception { try { a
 var nextCommandMethod = typeof(DeveloperTools).Assembly.GetType("LSCode.Infrastructure.MenuEditor")!
     .GetMethod("NextCommandId", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
 string NextCommand(HashSet<string> used) => (string)nextCommandMethod.Invoke(null, [used])!;
-Check(NextCommand([]) == "AA.00.00", "New command IDs start at AA.00.00 independently of tree IDs");
-Check(NextCommand(new(StringComparer.OrdinalIgnoreCase) { "AA.00.00", "AA.00.02", "03.10.01" }) == "AA.00.01",
+Check(NextCommand([]) == "AA.01.01", "New command IDs start at AA.01.01 independently of tree IDs");
+Check(NextCommand(new(StringComparer.OrdinalIgnoreCase) { "AA.01.01", "AA.01.03", "03.10.01" }) == "AA.01.02",
     "New command IDs reuse the first free slot");
-var fullFirstGroup = Enumerable.Range(0, 100).Select(number => $"AA.00.{number:00}").ToHashSet();
-Check(NextCommand(fullFirstGroup) == "AA.01.00", "New command IDs carry from 99 to the next group");
+var fullFirstGroup = Enumerable.Range(1, 99).Select(number => $"AA.01.{number:00}").ToHashSet();
+Check(NextCommand(fullFirstGroup) == "AA.02.00", "New command IDs carry from 99 to the next group");
 var allCommandIds = Enumerable.Range(0, 10000).Select(number => $"AA.{number / 100:00}.{number % 100:00}").ToHashSet();
 try { NextCommand(allCommandIds); throw new Exception("FAIL Exhausted command IDs"); }
 catch (System.Reflection.TargetInvocationException ex) when (ex.InnerException is InvalidOperationException)

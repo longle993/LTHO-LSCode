@@ -23,6 +23,7 @@ Ranh giới module, bridge và luồng lệnh.
 Yêu cầu và tiêu chí nghiệm thu chi tiết.
 
 - [Tạo danh mục — sinh source ERP, thiết kế bảng và nhập dữ liệu](specifications/CATALOG-TABLE-DESIGNER.vi.md)
+- [Kế hoạch phân loại nút và tùy chỉnh màu theo theme](specifications/BUTTON-THEME.vi.md)
 - [LSCode — đặc tả chuyển đổi toàn bộ tính năng sang WebView](specifications/WEBVIEW-MIGRATION.vi.md)
 
 ## Lịch sử và ghi chú triển khai

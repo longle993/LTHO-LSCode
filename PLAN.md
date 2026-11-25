@@ -2,10 +2,21 @@
 
 - [x] Chèn snippet SQL giữ nguyên ký tự trong tên thủ tục và giá trị tham số. Kiểm tra bằng bộ phân tích snippet của Monaco với mẫu thủ tục phân kỳ và snippet nhập nhanh.
 
+- [x] SQL Profiler dùng tài khoản thu riêng mặc định. Trong cây ERP và kết quả lọc menu, nhấp một lần để chọn, nhấp đúp tên hoặc nhấp Menu ID để mở tệp.
+
+## Phân loại nút và tùy chỉnh màu
+
+- [x] Đối chiếu component WebView, style WPF và luồng lưu theme. Ghi [đề xuất triển khai](docs/specifications/BUTTON-THEME.vi.md).
+- [ ] Kiểm kê nút theo màn và thống nhất variant.
+- [x] Thêm token cho năm loại, lưu cấu hình màu theo theme và xem trước trong Settings WebView.
+- [ ] Chuyển các màn theo đợt, kiểm tra theme và bàn phím, sau đó ánh xạ sang WPF.
+
 ## Phân trang Cấu trúc và dữ liệu, tìm nội dung tệp — 22/11/2026
 
 - [x] Đọc theo trang SQL, giới hạn dung lượng từng trang và dựng hàng theo vùng đang xem. Chuyển trang giữ bộ lọc của lần chạy, và khóa nút chuyển trang trong lúc có bản sửa chưa lưu.
 - [x] Tìm nội dung ngay khi nhập ở thanh bên trái, hủy yêu cầu cũ và trả về vị trí khớp đầu tiên của mỗi tệp.
+- [x] Luồng hiện tại tìm theo tên tệp, theo nội dung hoặc kết hợp sau khi nhấn Enter hay bấm Tìm. Kết quả hiện dần theo cây thư mục, giữ vị trí khớp đầu tiên của mỗi tệp.
+- [x] Mặc định quét App_Data hoặc AppData nếu có trong thư mục dự án. Giữ lựa chọn Toàn dự án và hiển thị các nhánh kết quả từ gốc dự án.
 - [x] Chạy 173 kiểm tra WebView/.NET với LocalDB, gồm truy cập dòng 1.201, phân trang bản ghi có chuỗi dài, giữ dữ liệu binary/XML và tìm trong bộ đệm chưa lưu.
 - [x] Build frontend và Desktop Release. Chạy 154 kiểm tra Core và 11 kiểm tra Chrome trên bản production, gồm phân trang và tìm kiếm ở chiều rộng 375 px. Probe màn chung ghi ba điểm ngoài hai khu vực thay đổi: nút **Mở thư mục** xuống dòng và nút tìm lệnh có vùng bấm dưới 24 px ở 375 px, nút **Chức năng** xuống dòng ở 1.440 px.
 - [ ] Đo thời gian và bộ nhớ trên dữ liệu ERP thực tế. Nhánh đọc SQL Server 2008 chưa được chạy trên máy chủ phiên bản đó.
@@ -13,7 +24,6 @@
 ## Menu Tập lệnh bằng chuột phải — 23/11/2026
 
 - [x] Nhấp chuột phải trên bề mặt dữ liệu của tab Cấu trúc và dữ liệu mở đúng menu Tập lệnh hiện có với đủ bốn thao tác: thêm key vào SQL Data, tạo bảng, INSERT kết quả hiện tại và xóa bảng.
-- [x] Luồng hiện tại tìm theo tên tệp, theo nội dung hoặc kết hợp sau khi nhấn Enter hay bấm Tìm. Kết quả hiện dần theo cây thư mục, giữ vị trí khớp đầu tiên của mỗi tệp.
 - [x] Dùng chung một popover cho nút toolbar và vị trí con trỏ; giữ menu riêng của danh sách cột và không chặn menu soạn thảo khi người dùng đang nhập trong ô.
 - [x] Thêm thao tác đóng băng đến cột đang chọn vào menu toolbar và menu chuột phải. Lưới đo chiều rộng thực tế, giữ cột số dòng cùng mọi cột từ đầu đến cột đích khi cuộn ngang; chọn lại thao tác sẽ bỏ đóng băng.
 - [x] TypeScript typecheck và production build đạt. Chrome fixture `--table-regression` đạt 9 kiểm tra, gồm cuộn ngang thật, bật/tắt từ toolbar và menu chuột phải; không publish theo yêu cầu.
