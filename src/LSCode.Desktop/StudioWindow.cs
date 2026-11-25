@@ -231,7 +231,19 @@ public sealed class StudioWindow : Window
             try
             {
                 // IO-bound services retain the UI context for native pickers, while CPU/UNC scans use Task.Run in their adapters.
-                var result = await _sender.Send(new ExecuteStudioCommand(request.Method, request.Payload), cts.Token);
+                var command = new ExecuteStudioCommand(request.Method, request.Payload);
+                if (request.Method == "workspace.search" && request.Payload.TryGetProperty("stream", out var stream) &&
+                    stream.ValueKind == JsonValueKind.True)
+                {
+                    var requestId = request.RequestId;
+                    command = command with { Progress = new Progress<object>(hits =>
+                    {
+                        if (!shuttingDown)
+                            view.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(
+                                new { type = "workspace.search.progress", requestId, hits }, Protocol.Json));
+                    }) };
+                }
+                var result = await _sender.Send(command, cts.Token);
                 Reply(new(1, request.RequestId, result));
             }
             finally { operations.TryRemove(request.RequestId, out _); }

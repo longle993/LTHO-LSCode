@@ -142,6 +142,47 @@ type EntityPeek = {
     caretSide: "top" | "bottom";
   };
 };
+
+type SearchFolder = { folders: Map<string, SearchFolder>; files: Hit[] };
+
+function SearchResultTree({ hits, root, onOpen }: { hits: Hit[]; root: string; onOpen: (hit: Hit) => void }) {
+  const tree = useMemo(() => {
+    const tree: SearchFolder = { folders: new Map(), files: [] };
+    for (const hit of hits) {
+      const relative = pathIsWithin(hit.path, root)
+        ? hit.path.slice(root.replace(/[\\/]+$/, "").length + 1) : hit.path;
+      let folder = tree;
+      for (const name of relative.split(/[\\/]/).slice(0, -1)) {
+        let child = folder.folders.get(name);
+        if (!child) {
+          child = { folders: new Map(), files: [] };
+          folder.folders.set(name, child);
+        }
+        folder = child;
+      }
+      folder.files.push(hit);
+    }
+    return tree;
+  }, [hits, root]);
+  function render(folder: SearchFolder): React.ReactNode {
+    return <>
+      {[...folder.folders].map(([name, child]) => (
+        <details key={name} open>
+          <summary className="tree-row folder-row">{name}</summary>
+          <div className="tree-children">{render(child)}</div>
+        </details>
+      ))}
+      {folder.files.map(hit => (
+        <button key={hit.path} className="search-hit" title={hit.path} onClick={() => onOpen(hit)}>
+          <strong>{hit.path.split(/[\\/]/).at(-1)}{hit.line > 0 ? `:${hit.line}` : ""}</strong>
+          {hit.preview && <span>{hit.preview}</span>}
+        </button>
+      ))}
+    </>;
+  }
+  return <div className="project-file-tree">{render(tree)}</div>;
+}
+
 type EditorSearchHit = {
   line: number;
   column: number;
@@ -329,6 +370,8 @@ export default function App({
   const queryTimer = useRef<number>();
   const [hits, setHits] = useState<Hit[]>([]),
     [search, setSearch] = useState(""),
+    [fileName, setFileName] = useState(""),
+    [searchSubmitted, setSearchSubmitted] = useState(false),
     [regex, setRegex] = useState(false),
     [matchCase, setMatchCase] = useState(false),
     [searching, setSearching] = useState(false);
@@ -572,17 +615,24 @@ export default function App({
     setSearchError("");
     setSearchStopped(false);
     setSearching(false);
-    if (!side || nav !== "search" || !searchRoot || !search.trim()) return;
-    setSearching(true);
+    setSearchSubmitted(false);
+    if (!side || nav !== "search" || !searchRoot || (!search.trim() && !fileName.trim())) return;
     let pending: ReturnType<typeof operation<Hit[]>> | undefined;
+    const unsubscribe = subscribe(event => {
+      if (event.type === "workspace.search.progress" && pending && event.requestId === pending.id && event.hits) {
+        const batch = event.hits;
+        setHits(current => [...current, ...batch]);
+      }
+    });
     const find = () => {
-      window.clearTimeout(timer);
       if (pending) return;
+      setSearchSubmitted(true);
+      setHits([]);
       setSearching(true);
       setSearchError("");
       setSearchStopped(false);
       const op = operation<Hit[]>("workspace.search", {
-        path: searchRoot, query: search, regex, matchCase, firstPerFile: true,
+        path: searchRoot, query: search.trim() ? search : "", fileName: fileName.trim(), regex, matchCase, firstPerFile: true, stream: true,
         buffers: Object.fromEntries(latest.current.tabs.flatMap(tab => {
           if (!tab.path || !pathIsWithin(tab.path, searchRoot)) return [];
           const text = textOf(tab);
@@ -601,9 +651,7 @@ export default function App({
         }
       });
     };
-    const timer = window.setTimeout(find, 250);
     const cancel = () => {
-      window.clearTimeout(timer);
       void pending?.cancel().catch(() => {});
       pending = undefined;
     };
@@ -614,11 +662,12 @@ export default function App({
       setSearchStopped(true);
     };
     return () => {
+      unsubscribe();
       submitSearch.current = undefined;
       stopSearch.current = undefined;
       cancel();
     };
-  }, [side, nav, searchRoot, search, regex, matchCase]);
+  }, [side, nav, searchRoot, search, fileName, regex, matchCase]);
   useEffect(() => {
     document
       .querySelector('.sidebar [aria-current="page"]')
@@ -2529,6 +2578,8 @@ export default function App({
                     />
                     {search && <IconButton label="Xóa nội dung tìm" type="button" onClick={() => setSearch("")}><X size={14} /></IconButton>}
                   </div>
+                  <input type="search" aria-label="Tên file" placeholder="Tìm theo tên file"
+                    value={fileName} onChange={event => setFileName(event.target.value)} />
                   <Select label="Phạm vi tìm kiếm" value={searchRoot === workspace ? "" : searchRoot}
                     options={[{ value: "", label: "Toàn dự án" }, ...searchFolders.map((folder) => ({
                       value: folder, label: folder.slice(workspace.length).replace(/^[\\/]+/, "") || folder,
@@ -2551,7 +2602,7 @@ export default function App({
                       />
                       Regex
                     </label>
-                    <Button disabled={!workspace || !search.trim()} type="submit">
+                    <Button disabled={!searchRoot || searching || (!search.trim() && !fileName.trim())} type="submit">
                       Tìm
                     </Button>
                     {searching && (
@@ -2567,26 +2618,13 @@ export default function App({
                 <div className="side-content">
                   <div className="section-label" role={searchError ? "alert" : "status"}>
                     {searching
-                      ? "Đang tìm…"
-                      : searchError || (searchStopped ? "Đã dừng tìm kiếm." : !search.trim() ? "Nhập nội dung cần tìm."
+                      ? `Đang tìm… ${hits.length} tệp khớp`
+                      : searchError || (searchStopped ? "Đã dừng tìm kiếm." : !searchSubmitted ? "Nhập tên file hoặc nội dung rồi bấm Tìm."
                         : hits.length ? `${hits.length === 2000 ? "Ít nhất " : ""}${hits.length} tệp khớp`
                           : "Không tìm thấy tệp khớp.")}
                   </div>
-                  {hits.map((h) => (
-                    <button
-                      key={h.path}
-                      className="search-hit"
-                      title={h.path}
-                      onClick={() =>
-                        void guard(() => open(h.path, h.line, h.column))
-                      }
-                    >
-                      <strong>
-                        {h.path.slice(workspace.replace(/[\\/]+$/, "").length + 1)}:{h.line}
-                      </strong>
-                      <span>{h.preview}</span>
-                    </button>
-                  ))}
+                  <SearchResultTree hits={hits} root={searchRoot}
+                    onOpen={hit => void guard(() => open(hit.path, hit.line || undefined, hit.column || undefined))} />
                 </div>
               </>
             )}

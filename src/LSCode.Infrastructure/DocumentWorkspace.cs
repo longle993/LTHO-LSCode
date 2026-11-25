@@ -126,10 +126,32 @@ public sealed class DocumentWorkspace : IDocumentWorkspace
         .Select(entry => new Entry(entry.FullName, entry.Name, entry is DirectoryInfo)).OrderByDescending(e => e.Directory).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToArray(), ct);
     public Task<string[]> FilesAsync(string path, CancellationToken ct) => Task.Run(() => WorkspaceFileIndex.Files(path, ct).Take(100000).ToArray(), ct);
     public async Task<object> SearchAsync(string path, string query, bool regex, bool matchCase,
-        Dictionary<string, string> buffers, CancellationToken ct, bool firstPerFile = false)
+        Dictionary<string, string> buffers, CancellationToken ct, bool firstPerFile = false, string fileName = "", IProgress<object>? progress = null)
     {
+        var files = WorkspaceFileIndex.Files(path, ct, textOnly: query.Length > 0);
+        if (fileName.Length > 0)
+            files = files.Where(file => Path.GetFileName(file).Contains(fileName, StringComparison.OrdinalIgnoreCase));
+        if (query.Length == 0)
+        {
+            if (fileName.Length == 0) return new List<SearchHit>();
+            return await Task.Run(() =>
+            {
+                var results = new List<SearchHit>();
+                var published = 0;
+                var clock = System.Diagnostics.Stopwatch.StartNew();
+                foreach (var file in files.Take(2000))
+                {
+                    results.Add(new SearchHit(file, 0, 0, ""));
+                    if (progress is null || (published != 0 && clock.ElapsedMilliseconds < 80)) continue;
+                    progress.Report(results.GetRange(published, results.Count - published));
+                    published = results.Count;
+                    clock.Restart();
+                }
+                return results;
+            }, ct);
+        }
         var open = new Dictionary<string, string>(buffers, StringComparer.OrdinalIgnoreCase);
-        return await WorkspaceSearch.FindAsync(WorkspaceFileIndex.Files(path, ct), query, regex, matchCase, ct, open, firstPerFile);
+        return await WorkspaceSearch.FindAsync(files, query, regex, matchCase, ct, open, firstPerFile, progress);
     }
     public async Task<object> RecoverAsync(CancellationToken ct) => File.Exists(Recovery) ? JsonDocument.Parse(await File.ReadAllTextAsync(Recovery, ct)).RootElement.Clone() : Array.Empty<object>();
     public async Task StoreRecoveryAsync(JsonElement documents, CancellationToken ct)

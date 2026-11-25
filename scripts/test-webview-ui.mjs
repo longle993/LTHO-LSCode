@@ -470,15 +470,17 @@ async function testTableRefreshAndNotice(){
   const search=page.getByRole('searchbox',{name:'Nội dung tìm'});
   await search.fill('needle');
   const searchResults=page.locator('#project-sidebar');
+  await searchResults.getByText('Nhập tên file hoặc nội dung rồi bấm Tìm.',{exact:true}).waitFor();
+  await search.press('Enter');
   await searchResults.getByText('1 tệp khớp',{exact:true}).waitFor();
   check(await searchResults.getByRole('button',{name:/fixture\.xml:2/}).count()===1,
-    'Sidebar search runs on input and lists the file containing the typed content');
+    'Sidebar search runs on Enter and lists the file containing the typed content');
   await page.screenshot({path:out+'/workspace-content-search.png',animations:'disabled'});
   await page.setViewportSize({width:375,height:600});
   check(await search.evaluate(element=>element.getBoundingClientRect().right<=innerWidth),
     'Live content search fits in the sidebar at 375px');
   await searchResults.getByRole('button',{name:'Xóa nội dung tìm',exact:true}).click();
-  await searchResults.getByText('Nhập nội dung cần tìm.',{exact:true}).waitFor();
+  await searchResults.getByText('Nhập tên file hoặc nội dung rồi bấm Tìm.',{exact:true}).waitFor();
 }
 try{
   const testUrl=new URL(process.env.LSCODE_UI_URL??'http://127.0.0.1:4173');
@@ -1081,6 +1083,7 @@ Trạng thái: 1-Còn sử dụng, 0-Không còn sử dụng`);
   await page.getByRole('button',{name:'Phạm vi tìm kiếm',exact:true}).click();
   await page.getByRole('option',{name:/Controllers.*Dir$/}).click();
   await page.getByRole('searchbox',{name:'Nội dung tìm'}).fill('controller');
+  await page.locator('#project-sidebar').getByRole('button',{name:'Tìm',exact:true}).click();
   await page.waitForFunction(path=>window.__nativeCalls.some(call=>call.method==='workspace.search'&&call.payload.path===path),dirPath);
   check(true,'Folder search starts at the selected controller directory');
   await page.evaluate(()=>{window.__holdTableCatalog=true;});
