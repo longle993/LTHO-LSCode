@@ -131,7 +131,7 @@
 		<![CDATA[dbo.FastBusiness$Function$System$Split({{-}}, ',')]]>
 		</Item>
 		<Item keyword='exec Partition'>
-		<![CDATA[exec FastBusiness$Partition$Execute @q, NULL, 'a.ngay_ct', @dateFrom, @dateTo, @userID, @Admin{{-}}
+		<![CDATA[exec FastBusiness$Partition$Execute @q, NULL, 'a.ngay_ct', @dateFrom, @dateTo, 1, 1{{-}}
 		]]>
 		</Item> 
 		<Item keyword='ss511#'>

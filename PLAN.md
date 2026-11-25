@@ -1,5 +1,7 @@
 # Kế hoạch và nghiệm thu
 
+- [x] Chèn snippet SQL giữ nguyên ký tự trong tên thủ tục và giá trị tham số. Kiểm tra bằng bộ phân tích snippet của Monaco với mẫu thủ tục phân kỳ và snippet nhập nhanh.
+
 ## Phân trang Cấu trúc và dữ liệu, tìm nội dung tệp — 22/11/2026
 
 - [x] Đọc theo trang SQL, giới hạn dung lượng từng trang và dựng hàng theo vùng đang xem. Chuyển trang giữ bộ lọc của lần chạy, và khóa nút chuyển trang trong lúc có bản sửa chưa lưu.

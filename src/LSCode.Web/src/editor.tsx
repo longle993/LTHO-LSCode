@@ -282,10 +282,9 @@ monaco.languages.registerCompletionItemProvider("sql", {
 });
 function sqlSnippet(body: string) {
   let n = 0;
-  return body.replace(
-    /\{\{(?:[-|]|\d+)(?:-([^}]*))?\}\}/g,
-    (_, label) => "${" + ++n + ":" + (label ?? "") + "}",
-  );
+  const escapeLiteral = (text: string) => text.replace(/[\\$}]/g, character => "\\" + character);
+  return body.replace(/\{\{(?:[-|]|\d+)(?:-([^}]*))?\}\}|[\\$}]/g, (match, label) =>
+    match.length === 1 ? escapeLiteral(match) : "${" + ++n + ":" + escapeLiteral(label ?? "") + "}");
 }
 function userSqlSnippet(snippet: Snippet) {
   const position = Math.max(0, Math.min(snippet.position, snippet.body.length));
