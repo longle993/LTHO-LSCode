@@ -1,6 +1,6 @@
 # Kế hoạch và nghiệm thu
 
-- [x] Khi lưu hoặc lưu thành tệp XML, dùng UTF-16 LE cho tệp có BOM và UTF-8 cho tệp không BOM. Cập nhật khai báo encoding nếu có.
+- [x] Khi lưu hoặc lưu thành tệp XML, dùng UTF-8 có BOM. Cập nhật khai báo encoding nếu có.
 
 - [x] Tách tải kết nối khỏi mở dự án. SQL chưa chọn kết nối riêng chờ App của dự án trước khi chạy. Hai lệnh Close trong Lịch sử chỉ xóa lịch sử, còn đóng cửa sổ dọn phiên khôi phục sau khi xử lý tab chưa lưu.
 

@@ -56,7 +56,7 @@ try
         var loaded = await DocumentStore.OpenAsync(file);
         await DocumentStore.SaveAsync(file, loaded.Text, loaded);
         var after = await File.ReadAllBytesAsync(file);
-        Encoding expected = loaded.Bom ? new UnicodeEncoding(false, true, true) : new UTF8Encoding(false, true);
+        var expected = new UTF8Encoding(true, true);
         Assert(expected.GetPreamble().Concat(expected.GetBytes(content)).SequenceEqual(after),
             "XML saves in " + expected.WebName + " from " + encoding.WebName + " BOM=" + loaded.Bom);
     }

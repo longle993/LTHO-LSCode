@@ -169,17 +169,18 @@ await Reject<InvalidOperationException>(() => AdvanceNoteUpdateGenerator.Generat
 var workspace = new DocumentWorkspace();
 var path = Path.Combine(root, "unicode.xml");
 var encoding = new UnicodeEncoding(false, true, true);
+var utf8Bom = new UTF8Encoding(true, true);
 await File.WriteAllBytesAsync(path, encoding.GetPreamble().Concat(encoding.GetBytes("<root>Tiếng Việt</root>\r\n")).ToArray());
 var document = await workspace.OpenAsync(path, default);
 Check(document.Bom && document.Encoding == "utf-16" && document.Newline == "CRLF", "Open retains UTF16/BOM/newline");
-var saved = await workspace.SaveAsync(document.Id, path, "<?xml version='1.0' encoding='UTF-8'?><root>Đã sửa</root>\r\n", 2, default);
-Check(saved.Encoding == "utf-16" && saved.Text.Contains("encoding='utf-16'") &&
-    (await File.ReadAllBytesAsync(path)).AsSpan().StartsWith(encoding.GetPreamble()) &&
-    await File.ReadAllTextAsync(path, encoding) == saved.Text, "Native XML save keeps UTF-16 BOM and synchronizes the encoding declaration");
+var saved = await workspace.SaveAsync(document.Id, path, "<?xml version='1.0' encoding='UTF-16'?><root>Đã sửa</root>\r\n", 2, default);
+Check(saved.Encoding == "utf-8" && saved.Text.Contains("encoding='utf-8'") &&
+    (await File.ReadAllBytesAsync(path)).AsSpan().StartsWith(utf8Bom.GetPreamble()) &&
+    await File.ReadAllTextAsync(path, utf8Bom) == saved.Text, "Native XML save writes UTF-8 BOM and synchronizes the encoding declaration");
 await Reject<InvalidOperationException>(() => workspace.SaveAsync(document.Id, path, "stale", 1, default), "Reject stale save version");
 var copy = Path.Combine(root, "copy.xml");
 await workspace.SaveAsync(document.Id, copy, "<root>Bản sao</root>", 4, default);
-Check((await File.ReadAllBytesAsync(copy)).AsSpan().StartsWith(encoding.GetPreamble()), "XML Save As writes UTF-16 with BOM");
+Check((await File.ReadAllBytesAsync(copy)).AsSpan().StartsWith(utf8Bom.GetPreamble()), "XML Save As writes UTF-8 with BOM");
 await File.WriteAllTextAsync(copy, "external");
 Check(await workspace.ChangedAsync(document.Id, default), "Detect external modification");
 await Reject<LSCode.Core.FileConflictException>(() => workspace.SaveAsync(document.Id, copy, "overwrite", 8, default), "Conflict stops external overwrite");
@@ -198,8 +199,8 @@ var renamedPath = Path.Combine(renamedFolder, Path.GetFileName(renamedFile));
 Check(!File.Exists(renameSource) && !Directory.Exists(renameFolder) && File.Exists(renamedPath) &&
     !await workspace.ChangedAsync(renameDocument.Id, default), "Rename rebinds an open document through both file and folder moves");
 var savedAfterRename = await workspace.SaveAsync(renameDocument.Id, renamedPath, "<root>Dirty buffer</root>", 2, default);
-Check(savedAfterRename.Bom && savedAfterRename.Encoding == "utf-16" &&
-    (await File.ReadAllTextAsync(renamedPath)).Contains("Dirty buffer"), "Dirty XML document saves to its renamed path in UTF-16 with BOM");
+Check(savedAfterRename.Bom && savedAfterRename.Encoding == "utf-8" &&
+    (await File.ReadAllTextAsync(renamedPath)).Contains("Dirty buffer"), "Dirty XML document saves to its renamed path in UTF-8 with BOM");
 var caseRenamed = await workspace.RenameAsync(renamedPath, "Changed.xml", default);
 Check(File.Exists(caseRenamed) && Directory.EnumerateFiles(renamedFolder).Single() == caseRenamed, "Case-only rename changes the on-disk name");
 await File.WriteAllTextAsync(Path.Combine(renamedFolder, "occupied.xml"), "keep");
@@ -229,7 +230,7 @@ try
 finally { File.SetAttributes(readOnlyPath, FileAttributes.Normal); }
 var restored = workspace.Restore(document with { Path = null, Text = "Khôi phục" });
 var restoredPath = Path.Combine(root, "restored.xml"); await workspace.SaveAsync(restored.Id, restoredPath, restored.Text, 2, default);
-Check((await File.ReadAllBytesAsync(restoredPath)).AsSpan().StartsWith(encoding.GetPreamble()), "Recovered XML saves as UTF-16 with BOM");
+Check((await File.ReadAllBytesAsync(restoredPath)).AsSpan().StartsWith(utf8Bom.GetPreamble()), "Recovered XML saves as UTF-8 with BOM");
 using var cancelled = new CancellationTokenSource(); cancelled.Cancel();
 await Reject<OperationCanceledException>(() => workspace.FilesAsync(root, cancelled.Token), "Workspace scan cancellation");
 var sql = CatalogDefinition.Build("dbo", "DanhMuc", true, [new("ma", "nvarchar", "20", Key: true), new("ten", Default: "O'Brien")], [], false, false);

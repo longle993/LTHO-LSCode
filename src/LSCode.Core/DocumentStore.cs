@@ -68,10 +68,9 @@ public static class DocumentStore
             if (!File.Exists(path) || Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(path, ct))) != expected.Hash)
                 throw new FileConflictException(path);
         }
-        var bom = expected?.Bom == true;
         var xml = System.IO.Path.GetExtension(path).Equals(".xml", StringComparison.OrdinalIgnoreCase);
-        var encoding = xml && bom ? new UnicodeEncoding(false, true, true)
-            : xml ? new UTF8Encoding(false, true) : expected?.Encoding ?? new UTF8Encoding(false, true);
+        var bom = xml || expected?.Bom == true;
+        var encoding = xml ? new UTF8Encoding(true, true) : expected?.Encoding ?? new UTF8Encoding(false, true);
         if (xml)
             text = XmlDeclarationEncoding.Replace(text, "$1$2" + encoding.WebName + "$2", 1);
         var data = encoding.GetBytes(text);
