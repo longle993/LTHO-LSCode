@@ -41,7 +41,7 @@ public sealed class DocumentWorkspace : IDocumentWorkspace
             var fullPath = Path.GetFullPath(path);
             if (!string.Equals(previous?.Snapshot.Path, fullPath, StringComparison.OrdinalIgnoreCase) && snapshots.Any(pair => pair.Key != id && string.Equals(pair.Value.Snapshot.Path, fullPath, StringComparison.OrdinalIgnoreCase)))
                 throw new IOException("File này đang mở trong tab khác.");
-            // Save As carries the original encoding/BOM, while DocumentStore only checks hash for the same path.
+            // DocumentStore applies the destination format and only checks the hash for the same path.
             if (File.Exists(path) && (File.GetAttributes(path) & FileAttributes.ReadOnly) != 0 && !overwriteReadOnly) throw new DocumentReadOnlyException(path);
             var saved = await DocumentStore.SaveAsync(path, text, previous?.Snapshot, ct, overwriteReadOnly);
             var next = new State(saved, version + 1); snapshots[id] = next;

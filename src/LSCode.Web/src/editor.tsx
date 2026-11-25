@@ -132,6 +132,12 @@ export const modelFor = (d: DocumentInfo) => {
 export const textOf = (d: DocumentInfo) =>
   monaco.editor.getModel(monaco.Uri.parse("lscode://document/" + d.id))
     ?.getValue(monaco.editor.EndOfLinePreference.TextDefined) ?? d.text;
+export function syncSavedText(saved: DocumentInfo, submittedText: string) {
+  if (saved.text === submittedText) return;
+  const model = monaco.editor.getModel(monaco.Uri.parse("lscode://document/" + saved.id));
+  if (model?.getValue() !== submittedText) return;
+  model.pushEditOperations(null, [{ range: model.getFullModelRange(), text: saved.text }], () => null);
+}
 export const disposeModel = (d: DocumentInfo) => {
   const uri = monaco.Uri.parse("lscode://document/" + d.id);
   targetByModel.delete(uri.toString());

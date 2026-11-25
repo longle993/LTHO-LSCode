@@ -32,11 +32,11 @@ function normalizeTable(value: unknown, label: string): Table {
 }
 function normalizePreview(value: unknown): Preview {
   if (!value || typeof value !== "object") throw new Error("Kết quả đọc bảng không đúng định dạng.");
-  const candidate = value as { data?: unknown; snapshotId?: unknown; hasMore?: unknown };
+  const candidate = value as { data?: unknown; snapshotId?: unknown; hasMore?: unknown; shortenedText?: unknown };
   if (typeof candidate.snapshotId !== "string" || !candidate.snapshotId)
     throw new Error("Kết quả đọc bảng thiếu mã snapshot.");
   return { data: normalizeTable(candidate.data, "đọc bảng"), snapshotId: candidate.snapshotId,
-    hasMore: candidate.hasMore === true };
+    hasMore: candidate.hasMore === true, shortenedText: candidate.shortenedText === true };
 }
 function normalizeMetadata(value: unknown): TableColumn[] {
   if (!Array.isArray(value)) throw new Error("Metadata bảng trả về không đúng định dạng.");
@@ -62,7 +62,7 @@ const tableNames = (result: unknown) => {
   return result.rows.flatMap(([schema, table]) =>
     schema && table ? [{ schema, table }] : []);
 };
-type Preview = { data: Table; snapshotId: string; hasMore: boolean };
+type Preview = { data: Table; snapshotId: string; hasMore: boolean; shortenedText: boolean };
 type TableFilters = { where: string; select: string; orderBy: string };
 type PreviewPage = { key: string; result: Preview; filters: TableFilters; offsets: number[] };
 type ColumnMenu = { x: number; y: number; columns: string[] };
@@ -576,6 +576,8 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
       if (!table || !schema || !targetId) return;
       if (kind === "insert") {
         if (!currentPreview?.data.rows.length) return;
+        if (currentPreview.shortenedText)
+          throw new Error("Bỏ cột chuỗi dài khỏi SELECT trước khi tạo script INSERT từ trang này.");
         const script = await request<string>("table.insertScript", { scope, snapshotId: currentPreview.snapshotId });
         onText(script, table + "-insert.sql");
         return;
@@ -630,7 +632,7 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
     });
   }
   async function commitRows(drafts: [number, (string | null)[]][]) {
-    if (readonly || !currentPreview || !currentMetadata || !name || !targetId) return;
+    if (readonly || !currentPreview || currentPreview.shortenedText || !currentMetadata || !name || !targetId) return;
     return task.run<{ saved: true } | { saved: false; row: number }>(async () => {
       const visibleColumns = currentPreview.data.columns;
       const writes = drafts.flatMap(([rowIndex, values]) => {
@@ -676,7 +678,7 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
     });
   }
   async function deleteRows(rowIndexes: number[]) {
-    if (readonly || !currentPreview || !currentMetadata || !name || !targetId || !rowIndexes.length) return;
+    if (readonly || !currentPreview || currentPreview.shortenedText || !currentMetadata || !name || !targetId || !rowIndexes.length) return;
     const visibleColumns = currentPreview.data.columns;
     const primary = currentMetadata.filter((column) => column.primaryKey);
     if (!primary.length || primary.some((column) => !visibleColumns.some((name) => name.toLowerCase() === column.name.toLowerCase()))) {
@@ -896,6 +898,7 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
           </div>
         </aside>
         <section className="table-inspection-content" onContextMenu={openScriptMenuAt}>
+          {currentPreview?.shortenedText && <div role="status">Trang chỉ đọc vì có chuỗi dài đang hiển thị bản xem trước.</div>}
           {currentPreview?.data && currentMetadata ? <TableDataGrid
             saveSlot={saveSlot}
             rowOffset={rowOffset}
@@ -903,7 +906,7 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
             focusColumn={goToRequest}
             frozenThrough={frozenColumn}
             onActiveColumnChange={setActiveColumn}
-            table={currentPreview.data} metadata={currentMetadata} readonly={readonly} busy={task.busy || previewPending} onCommit={commitRows}
+            table={currentPreview.data} metadata={currentMetadata} readonly={readonly || currentPreview.shortenedText} busy={task.busy || previewPending} onCommit={commitRows}
             onDelete={deleteRows}
             emptyMessage={filterField && (filterOperator === "IS NULL" || filterOperator === "IS NOT NULL" || filterValue.trim())
               ? "Không tìm thấy dữ liệu phù hợp."

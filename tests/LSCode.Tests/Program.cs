@@ -53,10 +53,12 @@ try
         var file = Path.Combine(root, Guid.NewGuid() + ".xml");
         var content = "<?xml version=\"1.0\"?><root>Tiếng Việt <![CDATA[a < b]]></root>\r\n";
         await File.WriteAllTextAsync(file, content, encoding);
-        var before = await File.ReadAllBytesAsync(file);
         var loaded = await DocumentStore.OpenAsync(file);
         await DocumentStore.SaveAsync(file, loaded.Text, loaded);
-        var after = await File.ReadAllBytesAsync(file); Assert(before.SequenceEqual(after), "Byte round-trip " + encoding.WebName + " BOM=" + loaded.Bom);
+        var after = await File.ReadAllBytesAsync(file);
+        Encoding expected = loaded.Bom ? new UnicodeEncoding(false, true, true) : new UTF8Encoding(false, true);
+        Assert(expected.GetPreamble().Concat(expected.GetBytes(content)).SequenceEqual(after),
+            "XML saves in " + expected.WebName + " from " + encoding.WebName + " BOM=" + loaded.Bom);
     }
     if (OperatingSystem.IsWindows())
     {

@@ -71,6 +71,7 @@ import {
   CodeEditor,
   modelFor,
   textOf,
+  syncSavedText,
   disposeModel,
   language,
   markSqlErrors,
@@ -423,27 +424,29 @@ export default function App({
   const [projectActionBusy, setProjectActionBusy] = useState(false);
   const [structureClear, setStructureClear] = useState<{ id: string; path: string; count: number }>();
   const [searchFolder, setSearchFolder] = useState("");
-  const [searchScope, setSearchScope] = useState<{ workspace: string; appData?: Entry }>();
+  const [searchScope, setSearchScope] = useState<{ workspace: string; folders: Entry[] }>();
   useEffect(() => {
     if (!workspace || nav !== "search" || !side) return;
     let active = true;
-    request<Entry[]>("workspace.list", { path: workspace }).then(entries => {
-      const appData = entries.find(entry => entry.directory && entry.name.toLowerCase() === "app_data")
-        ?? entries.find(entry => entry.directory && entry.name.toLowerCase() === "appdata");
-      if (active) setSearchScope({ workspace, appData });
+    const list = (path: string) => request<Entry[]>("workspace.list", { path });
+    void list(workspace).then(async entries => {
+      const appData = entries.filter(entry => entry.directory && /^app_?data$/i.test(entry.name));
+      const controllers = (await Promise.allSettled(appData.map(entry => list(entry.path))))
+        .flatMap(result => result.status === "fulfilled" ? result.value : [])
+        .filter(entry => entry.directory && /^controllers?$/i.test(entry.name));
+      const folders = (await Promise.allSettled(controllers.map(entry => list(entry.path))))
+        .flatMap(result => result.status === "fulfilled" ? result.value : [])
+        .filter(entry => entry.directory)
+        .sort((left, right) => left.name.localeCompare(right.name) || left.path.localeCompare(right.path));
+      if (active) setSearchScope({ workspace, folders });
     }).catch(() => {
-      if (active) setSearchScope({ workspace });
+      if (active) setSearchScope({ workspace, folders: [] });
     });
     return () => { active = false; };
   }, [workspace, nav, side]);
-  const searchFolders = useMemo(() => [...new Set(controller?.files.flatMap((path) => {
-    const separator = Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/"));
-    return separator > 0 ? [path.slice(0, separator)] : [];
-  }) ?? [])].sort(), [controller]);
-  const appData = searchScope?.workspace === workspace ? searchScope.appData : undefined;
-  const defaultSearchRoot = searchScope?.workspace === workspace ? appData?.path ?? workspace : "";
-  const searchRoot = searchFolder === "project" ? workspace
-    : searchFolders.includes(searchFolder) ? searchFolder : defaultSearchRoot;
+  const searchFolders = searchScope?.workspace === workspace ? searchScope.folders : [];
+  const selectedSearchFolder = searchFolders.find(entry => entry.path === searchFolder);
+  const searchRoot = selectedSearchFolder?.path ?? workspace;
   const [unsavedPrompt, setUnsavedPrompt] = useState<{
     names: string[];
     resolve: (choice: "save" | "discard" | "cancel") => void;
@@ -483,7 +486,7 @@ export default function App({
   }, [peeks.length > 0]);
   const scriptToFocus = useRef<string>();
   const editor = useRef<EditorHandle>(),
-    latest = useRef({ tabs, activeId, settings }),
+    latest = useRef({ tabs, activeId, settings, projectId: project?.id }),
     runRef = useRef<ReturnType<typeof operation<QueryResult>>>(),
     menuLast = useRef("");
   const toolDirty = useRef(false),
@@ -512,7 +515,7 @@ export default function App({
     projectSysTarget = useRef<Target>(),
     projectTargetIds = useRef<string[]>([]),
     pendingOpens = useRef(new Map<string, Promise<void>>());
-  latest.current = { tabs, activeId, settings };
+  latest.current = { tabs, activeId, settings, projectId: project?.id };
   const active = tabs.find((t) => t.id === activeId),
     target = active?.target ?? defaultTarget.current,
     diagnostics = active ? diagnosticsByDocument[active.id] ?? [] : [];
@@ -806,11 +809,11 @@ export default function App({
           bom: false,
           newline: "CRLF",
           version: 1,
+          project: latest.current.projectId,
         },
-        connection ?? defaultTarget.current ??
-          latest.current.tabs.find((t) => t.id === latest.current.activeId)
-            ?.target ??
-          targets[0],
+        connection ?? defaultTarget.current ?? (latest.current.projectId
+          ? undefined
+          : latest.current.tabs.find((t) => t.id === latest.current.activeId)?.target ?? targets[0]),
       ),
     [addDocument, targets],
   );
@@ -832,7 +835,8 @@ export default function App({
           } else {
             lastId = document.id;
             if (key) byPath.set(key, document.id);
-            added.push({ ...document, saved: document.text, target: defaultTarget.current ?? targets[0] });
+            added.push({ ...document, saved: document.text, target: defaultTarget.current ??
+              (latest.current.projectId ? undefined : targets[0]) });
           }
         }
         if (added.length) setTabs((old) => [...old, ...added]);
@@ -854,7 +858,8 @@ export default function App({
           const d = await request<DocumentInfo | null>("document.open", {
             path,
           });
-          if (d) addDocument({ ...d, project: projectId }, defaultTarget.current ?? (projectId ? undefined : targets[0]));
+          if (d) addDocument({ ...d, project: projectId }, defaultTarget.current ??
+            (projectId || latest.current.projectId ? undefined : targets[0]));
         })();
         pendingOpens.current.set(key, work);
         try {
@@ -909,15 +914,16 @@ export default function App({
       });
     }
     if (!saved) return false;
+    syncSavedText(saved, text);
     setTabs((old) =>
       old.map((t) =>
         t.id === saved.id
           ? {
               ...t,
               ...saved,
-              text: textOf(t),
+              text: textOf(saved),
               version: Math.max(t.version, saved.version),
-              saved: text,
+              saved: saved.text,
             }
           : t,
       ),
@@ -1267,16 +1273,39 @@ export default function App({
       delete window.lscodeSmoke;
     };
   }, [ready, newDocument, workspace, addDocument]);
+  const projectConnectionLoad = useRef<Promise<Target | undefined>>();
+  const projectOpeningVersion = useRef(0);
+  const waitingForSqlApp = useRef<number>();
   async function runSql() {
-    if (!active) return;
-    if (!active.target) {
-      setDialog("connection");
+    const version = projectOpeningVersion.current;
+    if (!active || runRef.current || waitingForSqlApp.current === version || closingSession.current) return;
+    if (!active.target && active.project && active.project !== project?.id) {
+      setStatus("Hãy chọn kết nối cho tab SQL thuộc dự án khác.");
       return;
     }
     const selection = editor.current?.getSelection();
     const selected = selection
       ? editor.current?.getModel()?.getValueInRange(selection)
       : "";
+    const sql = selected || textOf(active);
+    let sqlTarget = active.target ?? defaultTarget.current;
+    if (!sqlTarget && projectConnectionLoad.current) {
+      waitingForSqlApp.current = version;
+      setStatus("Đang chờ kết nối SQL App…");
+      try { sqlTarget = await projectConnectionLoad.current; }
+      finally {
+        if (waitingForSqlApp.current === version) waitingForSqlApp.current = undefined;
+      }
+      if (version !== projectOpeningVersion.current || latest.current.activeId !== active.id || closingSession.current) return;
+      sqlTarget = latest.current.tabs.find(tab => tab.id === active.id)?.target ?? sqlTarget;
+    }
+    if (!sqlTarget) {
+      if (project) setStatus("Chưa kết nối được SQL App của dự án. Kiểm tra cấu hình kết nối.");
+      else setDialog("connection");
+      return;
+    }
+    if (!active.target)
+      setTabs(current => current.map(tab => tab.id === active.id ? { ...tab, target: sqlTarget } : tab));
     const startedAt = performance.now();
     setRunning(true);
     setQueryElapsedMs(0);
@@ -1288,11 +1317,11 @@ export default function App({
     setError("");
     markSqlErrors(active, []);
     const queryDocument = active;
-    const targetId = active.target.id;
+    const targetId = sqlTarget.id;
     queryDurationByTab.current.delete(queryDocument.id);
     const op = operation<QueryResult>("sql.execute", {
       targetId,
-      sql: selected || textOf(active),
+      sql,
     });
     runRef.current = op;
     try {
@@ -2047,64 +2076,11 @@ export default function App({
       await request("text.export", { name: "results.csv", text: csv });
     });
   }
-  const closingProjectFiles = useRef(false);
-  async function closeProjectFiles(owner?: Project) {
-    if (closingProjectFiles.current) return;
-    if (running) { setStatus("Dừng query đang chạy trước khi đóng nhóm file."); return; }
-    closingProjectFiles.current = true;
-    try {
-      const ownerIds = new Set((owner ? [owner] : projects).map(item => item.id));
-      const pathKey = (path: string) => path.replaceAll("\\", "/").toLowerCase();
-      const historyOwners = new Map<string, Set<string>>();
-      for (const entry of history ?? []) {
-        for (const file of entry.files) {
-          const key = pathKey(file);
-          const ids = historyOwners.get(key) ?? new Set<string>();
-          ids.add(entry.projectId);
-          historyOwners.set(key, ids);
-        }
-      }
-      const closing = latest.current.tabs.filter(tab => {
-        if (tab.project && projects.some(item => item.id === tab.project)) return ownerIds.has(tab.project);
-        const path = tab.path;
-        const projectId = path && projects.filter(item => item.sourcePath && pathIsWithin(path, item.sourcePath))
-          .sort((left, right) => right.sourcePath.length - left.sourcePath.length)[0]?.id;
-        if (projectId) return ownerIds.has(projectId);
-        if (path && project && workspace && pathIsWithin(path, workspace)) return ownerIds.has(project.id);
-        const recorded = path ? historyOwners.get(pathKey(path)) : undefined;
-        if (recorded?.size === 1) return ownerIds.has(recorded.values().next().value!);
-        if (!owner && recorded) return [...recorded].some(id => ownerIds.has(id));
-        return !!(project && tab.target && projectTargetIds.current.includes(tab.target.id) && ownerIds.has(project.id));
-      });
-      const edited = closing.filter(dirty);
-      if (edited.length) {
-        const choice = await askUnsaved(edited.map(tab => tab.name));
-        if (choice === "cancel") return;
-        if (choice === "save") for (const tab of edited) if (!(await save(tab))) return;
-      }
-      if (!closing.length) {
-        setStatus("Không có tab dự án đang mở.");
-        return;
-      }
-      const closed = new Set(closing.map(tab => tab.id));
-      const nextId = latest.current.tabs.filter(tab => !closed.has(tab.id)).at(-1)?.id ?? "";
-      setTabs(current => current.filter(tab => !closed.has(tab.id)));
-      setActiveIdRaw(current => closed.has(current) ? nextId : current);
-      setPaneIds(current => current.map(id => closed.has(id) ? nextId : id));
-      for (const tab of closing) {
-        disposeModel(tab);
-        resultsByTab.current.delete(tab.id);
-        queryDurationByTab.current.delete(tab.id);
-      }
-      if (native) {
-        const released = await Promise.allSettled(closing.map(tab => request("document.close", { id: tab.id })));
-        const failure = released.find(result => result.status === "rejected");
-        if (failure) throw failure.reason;
-      }
-      setStatus("Đã đóng " + closing.length + " tab của " + (owner?.name ?? "tất cả dự án"));
-    } finally {
-      closingProjectFiles.current = false;
-    }
+  async function clearProjectHistory(owner?: Project) {
+    await request("project.history.clear", { id: owner?.id });
+    setHistory(current => owner ? current?.filter(entry => entry.projectId !== owner.id) : []);
+    setHistoryRevision(version => version + 1);
+    setStatus(owner ? "Đã xóa lịch sử của " + owner.name : "Đã xóa lịch sử của tất cả dự án");
   }
   async function openHistoryFile(p: Project, path: string) {
     if (switchingHistoryProject.current) return;
@@ -2139,14 +2115,19 @@ export default function App({
     }
   }
   async function openProject(p: Project, closingTargets: string[] = []) {
+    const version = ++projectOpeningVersion.current;
     const opened = await operation<{
       project: Project;
       targets: Target[];
-    }>("project.open", { id: p.id }, 31_000).promise;
+      targetsDeferred?: boolean;
+    }>("project.open", { id: p.id, deferTargets: true }, 31_000).promise;
+    if (version !== projectOpeningVersion.current) return;
     setProject(opened.project);
     setActiveId("");
-    defaultTarget.current = opened.targets[0];
-    projectTargetIds.current = opened.targets.map((t) => t.id);
+    const oldTargetIds = [...projectTargetIds.current, ...closingTargets];
+    defaultTarget.current = undefined;
+    projectSysTarget.current = undefined;
+    projectTargetIds.current = [];
     setSettings((old) => ({
       ...old,
       activeProjectId: p.id,
@@ -2159,7 +2140,7 @@ export default function App({
       }),
     }));
     setWorkspace(opened.project.sourcePath);
-    setTargets((old) => [...old.filter((target) => !closingTargets.includes(target.id)), ...opened.targets]);
+    setTargets(old => old.filter(target => !oldTargetIds.includes(target.id)));
     setCommandsByKind({ web: [], mobile: [] });
     setMenuLoaded({ web: false, mobile: false });
     setMenuKind("web");
@@ -2170,51 +2151,68 @@ export default function App({
     setSelectedCommands({ web: "", mobile: "" });
     setMenuLoadErrors({ web: "", mobile: "" });
     setMenuLoadingByKind({ web: false, mobile: false });
-    const sys =
-      opened.targets.find((t) => /_S(?:ys)?$/i.test(t.database)) ??
-      opened.targets[1];
-    projectSysTarget.current = sys;
-    if (sys) {
-      void request<CommandNode[]>("project.commands", {
-        targetId: sys.id,
-        appDatabase: opened.targets[0]?.database ?? "",
-        kind: "mobile",
-        context: p.id,
-      }).then((loaded) => {
-        if (projectTargetIds.current.includes(sys.id)) {
-          setCommandsByKind((current) => ({ ...current, mobile: loaded }));
-          setMenuLoaded((current) => ({ ...current, mobile: true }));
-        }
-      }).catch(() => {
-        // Mobile is optional. Web loading reports its own connection errors.
-      });
-      setMenuLoadingByKind((current) => ({ ...current, web: true }));
-      void request<CommandNode[]>("project.commands", {
-        targetId: sys.id,
-        appDatabase: opened.targets[0]?.database ?? "",
-        kind: "web",
-        context: p.id,
-      })
-        .then((loaded) => {
-          if (projectTargetIds.current.includes(sys.id)) {
-            setCommandsByKind((current) => ({ ...current, web: loaded }));
-            setMenuLoaded((current) => ({ ...current, web: true }));
-          }
-        })
-        .catch((e) => {
-          setMenuLoadErrors((current) => ({ ...current, web: e.message }));
-          setError(e.message);
-        })
-        .finally(() => {
-          if (projectTargetIds.current.includes(sys.id))
-            setMenuLoadingByKind((current) => ({ ...current, web: false }));
-        });
-    }
     setObjects(undefined);
     controllerRequest.current++;
     setControllers([]);
     setExpandedController(undefined);
     setDialog("");
+    const loading = opened.targetsDeferred
+      ? operation<Target[]>("project.targets", { id: p.id }, 31_000).promise
+      : Promise.resolve(opened.targets);
+    projectConnectionLoad.current = loading.then(loadedTargets => {
+      if (version !== projectOpeningVersion.current) return undefined;
+      const app = loadedTargets[0];
+      const sys = loadedTargets[1];
+      defaultTarget.current = app;
+      projectTargetIds.current = loadedTargets.map(item => item.id);
+      setTargets(old => [...old, ...loadedTargets]);
+      if (app) setSettings(old => ({ ...old, database: app.database }));
+      projectSysTarget.current = sys;
+      if (sys) {
+        void request<CommandNode[]>("project.commands", {
+          targetId: sys.id,
+          appDatabase: app?.database ?? "",
+          kind: "mobile",
+          context: p.id,
+        }).then((loaded) => {
+          if (version === projectOpeningVersion.current) {
+            setCommandsByKind((current) => ({ ...current, mobile: loaded }));
+            setMenuLoaded((current) => ({ ...current, mobile: true }));
+          }
+        }).catch(() => {
+          // Mobile is optional. Web loading reports its own connection errors.
+        });
+        setMenuLoadingByKind((current) => ({ ...current, web: true }));
+        void request<CommandNode[]>("project.commands", {
+          targetId: sys.id,
+          appDatabase: app?.database ?? "",
+          kind: "web",
+          context: p.id,
+        })
+          .then((loaded) => {
+            if (version === projectOpeningVersion.current) {
+              setCommandsByKind((current) => ({ ...current, web: loaded }));
+              setMenuLoaded((current) => ({ ...current, web: true }));
+            }
+          })
+          .catch((e) => {
+            if (version !== projectOpeningVersion.current) return;
+            setMenuLoadErrors((current) => ({ ...current, web: e.message }));
+            setError(e.message);
+          })
+          .finally(() => {
+            if (version === projectOpeningVersion.current)
+              setMenuLoadingByKind((current) => ({ ...current, web: false }));
+          });
+      }
+      return app;
+    }).catch((error: Error) => {
+      if (version === projectOpeningVersion.current) {
+        setError(error.message);
+        setStatus("Không tải được kết nối SQL App.");
+      }
+      return undefined;
+    });
   }
   function runProjectAction(work: () => Promise<void>) {
     setProjectActionBusy(true);
@@ -2517,8 +2515,8 @@ export default function App({
                   const owner = projects.find((entry) => entry.id === projectId);
                   return owner && <ProjectHistory key={projectId} name={owner.name}
                     root={owner.sourcePath} files={files} activePath={active?.path}
-                    onCloseProject={() => void guard(() => closeProjectFiles(owner))}
-                    onCloseAllProjects={() => void guard(() => closeProjectFiles())}
+                    onCloseProject={() => void guard(() => clearProjectHistory(owner))}
+                    onCloseAllProjects={() => void guard(() => clearProjectHistory())}
                     onOpen={(path) => void guard(() => openHistoryFile(owner, path))}
                     onRemove={(path) => queueHistoryRemoval(projectId, path)} />;
                 }) : <div className="explorer-message">{!project ? "Chọn dự án để xem lịch sử." : !history ? "Đang tải lịch sử…" : history.some(entry => entry.projectId === project.id) && historySearch.trim()
@@ -2615,11 +2613,12 @@ export default function App({
                   </div>
                   <input type="search" aria-label="Tên file" placeholder="Tìm theo tên file"
                     value={fileName} onChange={event => setFileName(event.target.value)} />
-                  <Select label="Phạm vi tìm kiếm" value={searchFolder === "project" && appData ? "project"
-                    : searchFolders.includes(searchFolder) ? searchFolder : ""}
-                    options={[{ value: "", label: appData?.name ?? "Toàn dự án" },
-                      ...(appData ? [{ value: "project", label: "Toàn dự án" }] : []), ...searchFolders.map((folder) => ({
-                      value: folder, label: folder.slice(workspace.length).replace(/^[\\/]+/, "") || folder,
+                  <Select label="Phạm vi tìm kiếm" value={selectedSearchFolder?.path ?? ""} floating
+                    searchOptions="Tìm thư mục"
+                    options={[{ value: "", label: "Toàn dự án" }, ...searchFolders.map(folder => ({
+                      value: folder.path,
+                      label: searchFolders.some(entry => entry !== folder && entry.name.toLowerCase() === folder.name.toLowerCase())
+                        ? folder.path.slice(workspace.length).replace(/^[\\/]+/, "") : folder.name,
                     }))]}
                     onChange={setSearchFolder} />
                   <div className="inline-checks">

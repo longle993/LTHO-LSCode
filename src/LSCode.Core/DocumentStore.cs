@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace LSCode.Core;
 
@@ -12,6 +13,9 @@ public sealed class FileConflictException(string path) : IOException($"File đã
 
 public static class DocumentStore
 {
+    private static readonly Regex XmlDeclarationEncoding = new(
+        """\A(<\?xml\s+version\s*=\s*['"][^'"]+['"]\s+encoding\s*=\s*)(['"])[^'"]+\2(?=[^?]*\?>)""",
+        RegexOptions.CultureInvariant);
     public const int MaximumFileBytes = 16 * 1024 * 1024;
     public static async Task<FileSnapshot> OpenAsync(string path, CancellationToken ct = default)
     {
@@ -64,9 +68,14 @@ public static class DocumentStore
             if (!File.Exists(path) || Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(path, ct))) != expected.Hash)
                 throw new FileConflictException(path);
         }
-        var encoding = expected?.Encoding ?? new UTF8Encoding(false, true);
+        var bom = expected?.Bom == true;
+        var xml = System.IO.Path.GetExtension(path).Equals(".xml", StringComparison.OrdinalIgnoreCase);
+        var encoding = xml && bom ? new UnicodeEncoding(false, true, true)
+            : xml ? new UTF8Encoding(false, true) : expected?.Encoding ?? new UTF8Encoding(false, true);
+        if (xml)
+            text = XmlDeclarationEncoding.Replace(text, "$1$2" + encoding.WebName + "$2", 1);
         var data = encoding.GetBytes(text);
-        var preamble = expected?.Bom == true ? encoding.GetPreamble() : [];
+        var preamble = bom ? encoding.GetPreamble() : [];
         var bytes = preamble.Concat(data).ToArray();
         var sameFile = expected != null && string.Equals(expected.Path, path, StringComparison.OrdinalIgnoreCase);
         // Open without truncating and deny concurrent writers during conflict checking and saving.
@@ -83,7 +92,7 @@ public static class DocumentStore
         await target.WriteAsync(bytes, CancellationToken.None);
         target.SetLength(bytes.Length);
         await target.FlushAsync(CancellationToken.None);
-        return new(path, text, encoding, expected?.Bom ?? false, Convert.ToHexString(SHA256.HashData(bytes)));
+        return new(path, text, encoding, bom, Convert.ToHexString(SHA256.HashData(bytes)));
     }
     private static (Encoding, int) DetectEncoding(byte[] bytes)
     {

@@ -78,6 +78,7 @@ internal static class TableInspection
         var bytes = 0L;
         var skipped = supportsOffset ? 0 : offset;
         var row = new object[reader.FieldCount];
+        var textLimit = Math.Min(MaximumCellUnits, Math.Max(1, (PageBytes / Math.Max(1, row.Length) - 48) / 6));
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
             if (skipped > 0)
@@ -91,9 +92,16 @@ internal static class TableInspection
                 return (data, true);
             }
             var rowBytes = 0L;
+            var shortened = false;
             for (var i = 0; i < row.Length; i++)
             {
-                row[i] = await ReadCellAsync(reader, i, types[i], ct).ConfigureAwait(false);
+                var cell = await ReadCellAsync(reader, i, types[i], textLimit, ct).ConfigureAwait(false);
+                if (cell is ShortenedText text)
+                {
+                    shortened = true;
+                    cell = text.Value;
+                }
+                row[i] = cell;
                 rowBytes += row[i] switch
                 {
                     string value => 32L + value.Length * 6L,
@@ -114,12 +122,17 @@ internal static class TableInspection
                 return (data, true);
             }
             data.Rows.Add(row);
+            if (shortened) data.ExtendedProperties["ShortenedText"] = true;
             bytes += rowBytes;
         }
         return (data, false);
     }
 
-    private static async Task<object> ReadCellAsync(SqlDataReader reader, int column, string? type, CancellationToken ct)
+    private sealed record ShortenedText(string Value);
+
+    public static bool HasShortenedText(DataTable data) => data.ExtendedProperties["ShortenedText"] is true;
+
+    private static async Task<object> ReadCellAsync(SqlDataReader reader, int column, string? type, int textLimit, CancellationToken ct)
     {
         if (await reader.IsDBNullAsync(column, ct).ConfigureAwait(false)) return DBNull.Value;
         switch (type)
@@ -137,7 +150,12 @@ internal static class TableInspection
                         int count;
                         while ((count = await text.ReadAsync(buffer.AsMemory(), ct).ConfigureAwait(false)) > 0)
                         {
-                            if (value.Length + count > MaximumCellUnits) throw LargeValue();
+                            if (value.Length + count > textLimit)
+                            {
+                                value.Append(buffer, 0, textLimit - value.Length);
+                                if (value.Length > 0 && char.IsHighSurrogate(value[value.Length - 1])) value.Length--;
+                                return new ShortenedText(value.ToString());
+                            }
                             value.Append(buffer, 0, count);
                         }
                         return value.ToString();
@@ -510,6 +528,8 @@ internal static class TableInspection
     public static async Task<string> InsertScriptAsync(SqlTarget target, string qualified, DataTable data, CancellationToken ct,
         bool useTableDateFormats = false)
     {
+        if (HasShortenedText(data))
+            throw new InvalidOperationException("Trang có chuỗi dài chỉ được xem trước. Bỏ cột đó khỏi SELECT trước khi tạo script INSERT.");
         if (data.Rows.Count == 0) return "";
         var metadata = await TableDefinition.ColumnsAsync(target, qualified, ct).ConfigureAwait(false);
         var byName = metadata.Rows.Cast<DataRow>().ToDictionary(r => (string)r["name"], StringComparer.Ordinal);

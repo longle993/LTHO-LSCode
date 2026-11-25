@@ -41,7 +41,14 @@ internal sealed class ExecuteStudioCommandHandler(
                 return dialogs.SaveFile(Text("name", "projects.xml"), "LSCode Project Catalog (*.xml)|*.xml");
             case "document.save":
                 var path = Text("path");
-                if (Flag("saveAs") || path.Length == 0) path = dialogs.SaveFile(Text("name", path));
+                if (Flag("saveAs") || path.Length == 0)
+                {
+                    var fileName = Text("name", path);
+                    var sqlFilter = Path.GetExtension(fileName).Equals(".sql", StringComparison.OrdinalIgnoreCase)
+                        ? "Tệp SQL (*.sql)|*.sql|Tất cả file (*.*)|*.*"
+                        : null;
+                    path = dialogs.SaveFile(fileName, sqlFilter);
+                }
                 return string.IsNullOrEmpty(path)
                     ? null
                     : await documents.SaveAsync(Text("id"), path, Text("text"), payload.GetProperty("version").GetInt64(), cancellationToken, Flag("overwriteReadOnly"));

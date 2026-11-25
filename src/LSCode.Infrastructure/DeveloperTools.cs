@@ -234,6 +234,16 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                     EnsureUniqueProject(all.Where(item => item.Id != previous.Id), updated);
                     ProjectStore.Save(all.Select(x => x.Id == previous.Id ? updated : x).ToList()); return Project(updated);
                 } finally { persistenceGate.Release(); }
+            case "project.history.clear":
+                await persistenceGate.WaitAsync(ct);
+                try
+                {
+                    var historyProjectId = S("id");
+                    foreach (var historyProject in ProjectStore.Load().Where(item => historyProjectId.Length == 0 || item.Id == historyProjectId))
+                        ProjectFileActions.ClearHistory(historyProject);
+                    return true;
+                }
+                finally { persistenceGate.Release(); }
             case "project.history.list":
                 await persistenceGate.WaitAsync(ct);
                 try
@@ -288,15 +298,18 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                 } else if (uri.Scheme is not ("http" or "https")) throw new InvalidOperationException("Chỉ hỗ trợ đường dẫn file, thư mục hoặc HTTP(S).");
                 Process.Start(new ProcessStartInfo(programPath) { UseShellExecute = true }); return true;
             case "project.open":
+            case "project.targets":
                 var project = ProjectStore.Load().First(x => x.Id == S("id"));
                 var available = new List<TargetInfo>();
-                if (!string.IsNullOrWhiteSpace(project.Field("SysConnectionString")) || !string.IsNullOrWhiteSpace(project.Field("WebConfigPath")))
+                var deferTargets = method == "project.open" && B("deferTargets");
+                if (!deferTargets && (!string.IsNullOrWhiteSpace(project.Field("SysConnectionString")) || !string.IsNullOrWhiteSpace(project.Field("WebConfigPath"))))
                     available.AddRange((await ProjectDatabase.ConfiguredTargetsAsync(project).WaitAsync(TimeSpan.FromSeconds(30), ct))
                         .Select((target, index) => Register(target, isProjectSys: index == 1)));
-                else if (!string.IsNullOrWhiteSpace(project.Server) && !string.IsNullOrWhiteSpace(project.Database)) {
+                else if (!deferTargets && !string.IsNullOrWhiteSpace(project.Server) && !string.IsNullOrWhiteSpace(project.Database)) {
                     var legacyConnection = new SqlConnectionStringBuilder { DataSource = project.Server, InitialCatalog = project.Database, IntegratedSecurity = string.IsNullOrWhiteSpace(project.User), UserID = project.User, Password = project.Field("Password"), Encrypt = SqlConnectionEncryptOption.Optional, ConnectTimeout = 12, ApplicationName = "LS Code" };
                     available.Add(Register(new(project.Server, project.Database, legacyConnection.ConnectionString)));
                 }
+                if (method == "project.targets") return available;
                 await persistenceGate.WaitAsync(ct);
                 try
                 {
@@ -304,7 +317,7 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                     state.Workspace = project.SourcePath; SettingsStore.Save(state);
                 }
                 finally { persistenceGate.Release(); }
-                return new { project = Project(project), targets = available };
+                return new { project = Project(project), targets = available, targetsDeferred = deferTargets };
             case "workspace.reveal":
                 var path = S("path");
                 if (!Path.IsPathFullyQualified(path))
@@ -597,12 +610,17 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                 var offset = p.TryGetProperty("offset", out var offsetElement) ? offsetElement.GetInt64() : 0;
                 if (offset < 0) throw new ArgumentOutOfRangeException(nameof(offset));
                 var (data, hasMore) = await TableInspection.ReadPageAsync(readTarget, qualified, readSql, offset, ct).ConfigureAwait(false);
-                if (method == "table.read") return Table(data);
+                if (method == "table.read")
+                {
+                    if (TableInspection.HasShortenedText(data))
+                        throw new InvalidOperationException("Dữ liệu chuỗi vượt giới hạn đọc đầy đủ. Hãy thu hẹp SELECT hoặc WHERE.");
+                    return Table(data);
+                }
                 var preview = TableInspection.Preview(data);
                 ct.ThrowIfCancellationRequested();
                 var snapshotId = Guid.NewGuid().ToString("N");
                 tableSnapshots[S("scope")] = new(snapshotId, readTarget, qualified, data);
-                return new { data = preview, snapshotId, hasMore };
+                return new { data = preview, snapshotId, hasMore, shortenedText = TableInspection.HasShortenedText(data) };
             case "project.commands": return await ProjectDatabase.CommandsAsync(Target(p), ct, S("appDatabase"), S("kind"), B("refresh"), S("context"));
             case "catalogDescription.preview":
             case "catalogDescription.apply":

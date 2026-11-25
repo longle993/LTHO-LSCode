@@ -4,6 +4,8 @@ Bản chạy nằm tại `artifacts/publish-webview-project-history/LSCode.WebVi
 
 ## Lịch sử file
 
+- **Close project** xóa danh sách lịch sử của dự án đang chọn. **Close all projects** xóa danh sách lịch sử của tất cả dự án. Các thao tác này chỉ xóa mục lịch sử, giữ nguyên tệp trên đĩa và tab đang mở.
+
 - Chọn **Lịch sử** ở thanh bên. Cây hiển thị tên dự án, thư mục trực tiếp chứa file và tên file. Ví dụ, `Controller/Dir/abc.xml` xuất hiện dưới **Dự án → Dir → abc.xml**. File ở thư mục gốc nằm ngay dưới tên dự án.
 - Gõ vào ô **Tìm tên file hoặc thư mục** để lọc ngay trên tất cả dự án. Kết quả giữ cây **dự án → thư mục → file**. Ô tìm khớp một phần tên file hoặc thư mục trực tiếp, bỏ qua chữ hoa và chữ thường.
 - Một file được ghi nhận sau khi editor hiển thị nội dung. Khi mở hàng loạt, các tab nền được ghi nhận khi bạn chuyển sang xem từng tab.

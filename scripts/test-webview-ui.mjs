@@ -31,13 +31,21 @@ await page.addInitScript(()=>{
     ...['Dir','Filter','Grid','Report','Templates'].flatMap(folder=>['f','xml'].map(ext=>projectRoot+'\\App_Data\\Controllers\\'+folder+'\\'+name+'.'+ext)),
     projectRoot+'\\App_Data\\Controllers\\Templates\\Upload\\'+name+'.xml',
   ];
-  let workspaceFiles=[projectRoot+'\\fixture.xml',projectRoot+'\\long.sql',...controllerFiles('nhanvien'),...controllerFiles('bophan')];
+  let workspaceFiles=[projectRoot+'\\fixture.xml',projectRoot+'\\long.sql',
+    projectRoot+'\\App_Data\\Controllers\\Dashboard\\Template\\unused.xml',
+    projectRoot+'\\App_Data\\Controllers\\About.xml',...controllerFiles('nhanvien'),...controllerFiles('bophan')];
   const settings={theme:'Light',workspace:'C:\\Fixture',server:'.',database:'Fixture_App',integratedSecurity:true,sqlUser:'',trustCertificate:true,crystalPath:'',profiler18Path:'',shortcuts:{},activityCommands:null,projectLastAccess:{other:'2026-11-12T03:00:00Z'}};
   const native={addEventListener:(_,fn)=>listeners.push(fn),postMessage:request=>{window.__nativeCalls.push(request);let result,error;
     switch(request.method){
       case 'studio.bootstrap':result={settings,projects:[fixtureProject,otherProject],snippets:[{key:'select',category:'SQL',body:'SELECT * FROM {{table}};',description:'Mẫu SELECT',position:0,param:''}],version:'ui-test'};break;
-      case 'project.open':result=request.payload.id==='other'?{project:otherProject,targets:[]}:
+      case 'project.open':result=window.__holdProjectTargets
+        ? {project:fixtureProject,targets:[],targetsDeferred:true}
+        : request.payload.id==='other'?{project:otherProject,targets:[]}:
         {project:fixtureProject,targets:[{id:'project-app',server:'.',database:'Fixture_App'},{id:'project-sys',server:'.',database:'Fixture_Sys'}]};break;
+      case 'project.targets':result=[{id:'project-app',server:'.',database:'Fixture_App'}];break;
+      case 'project.history.clear':
+        if(request.payload.id)history.delete(request.payload.id);else history.clear();
+        result=true;break;
       case 'project.history':result=history.get(request.payload.id)??[];break;
       case 'project.history.list':result=[...history].filter(([,files])=>files.length).map(([projectId,files])=>({projectId,files}));break;
       case 'project.history.remove':{
@@ -106,7 +114,7 @@ await page.addInitScript(()=>{
       case 'workspace.files':result=['C:\\Fixture\\fixture.xml','C:\\Fixture\\long.sql'];break;
       case 'workspace.search':
         result=request.payload.query==='needle' && request.payload.firstPerFile
-          ? [{path:projectRoot+(request.payload.path===projectRoot+'\\App_Data'
+          ? [{path:projectRoot+(request.payload.path.endsWith('\\Filter')
             ? '\\App_Data\\Controllers\\Filter\\fixture.xml' : '\\fixture.xml'),line:2,column:3,preview:'<root>needle</root>'}] : [];
         break;
       case 'workspace.reveal':result=true;break;
@@ -140,7 +148,7 @@ await page.addInitScript(()=>{
       case 'document.changed':result=false;break;
       case 'clipboard.read':result=clipboard;break;
       case 'clipboard.write':clipboard=request.payload.text;result=true;break;
-      case 'document.close':case 'recovery.save':case 'settings.save':case 'operation.cancel':case 'profiler.stop':result=true;break;
+      case 'window.close':case 'document.close':case 'recovery.save':case 'settings.save':case 'operation.cancel':case 'profiler.stop':result=true;break;
       case 'sql.connect':result={id:'target-'+(++serial),server:request.payload.server,database:request.payload.database};break;
       case 'sql.execute':
         if(window.__failSql){error={code:'sql_error',message:'Lỗi SQL fixture'};break;}
@@ -222,7 +230,11 @@ await page.addInitScript(()=>{
       default:error={code:'fixture',message:'Fixture không hỗ trợ '+request.method};
     }
     const reply=()=>listeners.forEach(fn=>fn({data:{protocolVersion:1,requestId:request.requestId,result,error}}));
-    if (request.method==='project.menu.resources'&&window.__holdMenuResources) window.__releaseMenuResources=reply;
+    if (request.method==='workspace.search'&&window.__holdSearchResults) {
+      window.__releaseSearchResults=reply;
+      setTimeout(()=>listeners.forEach(fn=>fn({data:{type:'workspace.search.progress',requestId:request.requestId,hits:result}})),10);
+    } else if (request.method==='project.targets'&&window.__holdProjectTargets) window.__releaseProjectTargets=reply;
+    else if (request.method==='project.menu.resources'&&window.__holdMenuResources) window.__releaseMenuResources=reply;
     else if (request.method==='table.catalog'&&window.__holdTableCatalog) window.__releaseTableCatalog=reply;
     else setTimeout(reply,10);
   }};
@@ -472,16 +484,29 @@ async function testTableRefreshAndNotice(){
   await search.fill('needle');
   const searchResults=page.locator('#project-sidebar');
   await searchResults.getByText('Nhập tên file hoặc nội dung rồi bấm Tìm.',{exact:true}).waitFor();
-  await searchResults.getByRole('button',{name:'Phạm vi tìm kiếm'}).filter({hasText:'App_Data'}).waitFor();
+  const scopeButton=searchResults.getByRole('button',{name:'Phạm vi tìm kiếm'});
+  check((await scopeButton.textContent()).includes('Toàn dự án'),'Search defaults to the whole project');
+  await scopeButton.click();
+  await page.getByRole('option',{name:'Dashboard',exact:true}).waitFor();
+  check(await page.getByRole('option',{name:'Template',exact:true}).count()===0 &&
+    await page.getByRole('option',{name:'About.xml',exact:true}).count()===0,
+    'Search offers first-level controller folders even without opening a function');
+  await page.screenshot({path:out+'/controller-search-scope.png',animations:'disabled'});
+  await page.getByRole('option',{name:'Filter',exact:true}).click();
+  check(await page.evaluate(()=>!window.__nativeCalls.some(call=>call.method==='workspace.search')),
+    'Opening and selecting the scope do not submit the search form');
+  await page.evaluate(()=>window.__holdSearchResults=true);
   await search.press('Enter');
-  await searchResults.getByText('1 tệp khớp',{exact:true}).waitFor();
-  check(await searchResults.getByRole('button',{name:/fixture\.xml:2/}).count()===1,
-    'Sidebar search runs on Enter and lists the file containing the typed content');
+  await searchResults.getByRole('button',{name:/fixture\.xml:2/}).waitFor();
+  check(await searchResults.getByRole('button',{name:'Dừng',exact:true}).isVisible(),
+    'Sidebar displays streamed results before search completes');
   const branch = searchResults.locator('details').filter({has:page.locator('summary').getByText('App_Data',{exact:true})}).first();
   check(await branch.getByText('Controllers',{exact:true}).isVisible() &&
     await branch.getByText('Filter',{exact:true}).isVisible() &&
-    await page.evaluate(()=>window.__nativeCalls.some(call=>call.method==='workspace.search' && call.payload.path==='C:\\Fixture\\App_Data')),
-  'Search defaults to App_Data and keeps the directory hierarchy');
+    await page.evaluate(()=>window.__nativeCalls.some(call=>call.method==='workspace.search' && call.payload.path==='C:\\Fixture\\App_Data\\Controllers\\Filter')),
+    'Folder scope searches Filter and keeps the directory hierarchy');
+  await page.evaluate(()=>{window.__holdSearchResults=false;window.__releaseSearchResults();});
+  await searchResults.getByText('1 tệp khớp',{exact:true}).waitFor();
   await page.screenshot({path:out+'/workspace-content-search.png',animations:'disabled'});
   await page.setViewportSize({width:375,height:600});
   check(await search.evaluate(element=>element.getBoundingClientRect().right<=innerWidth),
@@ -714,6 +739,45 @@ Trạng thái: 1-Còn sử dụng, 0-Không còn sử dụng`);
     await page.getByRole('button',{name:'Chức năng',exact:true}).click();
     await testMenuEditor(page.getByRole('button',{name:'Nhân viên',exact:true}));
     check(errors.length===0,'No uncaught browser errors');
+  } else if(process.argv.includes('--project-target-regression')){
+    await page.evaluate(()=>window.__holdProjectTargets=true);
+    await page.locator('.project-row').filter({hasText:'Dự án thử UI'}).click();
+    await page.getByRole('dialog',{name:'Dự án của bạn'}).waitFor({state:'detached'});
+    await page.waitForFunction(()=>window.__releaseProjectTargets);
+    await page.getByRole('button',{name:'SQL mới',exact:true}).click();
+    await page.getByRole('button',{name:'Chạy SQL',exact:true}).click();
+    await page.getByText('Đang chờ kết nối SQL App…',{exact:true}).waitFor();
+    check(await page.getByRole('dialog').count()===0 &&
+      await page.evaluate(()=>!window.__nativeCalls.some(call=>call.method==='sql.execute')),
+      'Project appears before SQL App is ready and Run waits without showing a login dialog');
+    await page.screenshot({path:out+'/project-wait-for-app.png',animations:'disabled'});
+    await page.evaluate(()=>window.__releaseProjectTargets());
+    await page.waitForFunction(()=>window.__nativeCalls.some(call=>call.method==='sql.execute'&&call.payload.targetId==='project-app'));
+    check(true,'The queued SQL runs on the App target');
+    await page.keyboard.press('Control+o');
+    const keptTab=page.getByRole('tab',{name:'fixture.xml',exact:true});
+    await keptTab.waitFor();
+    await page.waitForFunction(()=>window.__nativeCalls.some(call=>call.method==='project.history.record'));
+    await page.getByRole('button',{name:'Lịch sử',exact:true}).click();
+    const historyHeader=page.locator('.history-group > summary').filter({hasText:'Dự án thử UI'});
+    const recordCount=await page.evaluate(()=>window.__nativeCalls.filter(call=>call.method==='project.history.record').length);
+    await historyHeader.click({button:'right'});
+    await page.getByRole('menuitem',{name:'Close project',exact:true}).click();
+    await historyHeader.waitFor({state:'detached'});
+    check(await keptTab.isVisible() && await page.evaluate(()=>window.__nativeCalls.some(call=>
+      call.method==='project.history.clear'&&call.payload.id==='fixture')), 'Close project clears only the current project history');
+    await page.getByRole('tab',{name:/Untitled-.*\.sql/}).click();
+    await keptTab.click();
+    await page.waitForFunction(count=>window.__nativeCalls.filter(call=>call.method==='project.history.record').length>count,recordCount);
+    await historyHeader.click({button:'right'});
+    await page.getByRole('menuitem',{name:'Close all projects',exact:true}).click();
+    await historyHeader.waitFor({state:'detached'});
+    check(await keptTab.isVisible() && await page.evaluate(()=>window.__nativeCalls.some(call=>
+      call.method==='project.history.clear'&&!call.payload.id)), 'Close all projects clears history and keeps editor tabs open');
+    await page.getByRole('button',{name:'Đóng cửa sổ',exact:true}).click();
+    await page.waitForFunction(()=>window.__nativeCalls.some(call=>call.method==='window.close'));
+    check(await page.evaluate(()=>window.__nativeCalls.filter(call=>call.method==='recovery.save').at(-1)?.payload.documents.length===0),
+      'Closing the window clears session recovery');
   } else if(process.argv.includes('--table-regression')){
     await testTableRefreshAndNotice();
     check(errors.length===0,'No uncaught browser errors');
@@ -1098,7 +1162,7 @@ Trạng thái: 1-Còn sử dụng, 0-Không còn sử dụng`);
   check(await functionTabs.count()===0,'Employee tabs hide when a different ERP function is selected');
   await page.keyboard.press('Control+Shift+f');
   await page.getByRole('button',{name:'Phạm vi tìm kiếm',exact:true}).click();
-  await page.getByRole('option',{name:/Controllers.*Dir$/}).click();
+  await page.getByRole('option',{name:'Dir',exact:true}).click();
   await page.getByRole('searchbox',{name:'Nội dung tìm'}).fill('controller');
   await page.locator('#project-sidebar').getByRole('button',{name:'Tìm',exact:true}).click();
   await page.waitForFunction(path=>window.__nativeCalls.some(call=>call.method==='workspace.search'&&call.payload.path===path),dirPath);
@@ -1319,18 +1383,12 @@ Trạng thái: 1-Còn sử dụng, 0-Không còn sử dụng`);
   await historySearch.fill('BULK-0.XML');
   const historyFile=projectHistory.getByRole('button',{name:'bulk-0.xml',exact:true});
   await historyFile.waitFor();
-  for(const command of ['Close project','Close all projects']){
-    await header.click({button:'right'});
-    await page.getByRole('menuitem',{name:command,exact:true}).click();
-    const discard=page.getByRole('button',{name:'Đóng không lưu',exact:true});
-    const tab=page.getByRole('tab',{name:'bulk-0.xml',exact:true});
-    await Promise.race([discard.waitFor(),tab.waitFor({state:'detached'})]);
-    if(await discard.isVisible()) await discard.click();
-    await tab.waitFor({state:'detached'});
-    await historyFile.click();
-    await tab.waitFor();
-  }
-  check(true,'Both history actions close project tabs and keep history available');
+  await header.click({button:'right'});
+  await page.getByRole('menuitem',{name:'Close project',exact:true}).click();
+  await historyFile.waitFor({state:'detached'});
+  check(await page.getByRole('tab',{name:'bulk-0.xml',exact:true}).isVisible() &&
+    await page.evaluate(()=>window.__nativeCalls.some(call=>call.method==='project.history.clear'&&call.payload.id==='fixture')),
+    'Close project clears history and keeps editor tabs open');
   if(errors.length)console.log(JSON.stringify(errors,null,2));check(errors.length===0,'No uncaught browser errors');
   writeFileSync(out+'/interaction-report.json',JSON.stringify({passed:true,checks,transport:'explicit browser fixture; not a .NET/SQL integration test',errors},null,2));
   }

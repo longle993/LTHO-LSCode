@@ -172,12 +172,14 @@ var encoding = new UnicodeEncoding(false, true, true);
 await File.WriteAllBytesAsync(path, encoding.GetPreamble().Concat(encoding.GetBytes("<root>Tiếng Việt</root>\r\n")).ToArray());
 var document = await workspace.OpenAsync(path, default);
 Check(document.Bom && document.Encoding == "utf-16" && document.Newline == "CRLF", "Open retains UTF16/BOM/newline");
-var saved = await workspace.SaveAsync(document.Id, path, "<root>Đã sửa</root>\r\n", 2, default);
-Check((await File.ReadAllBytesAsync(path)).AsSpan().StartsWith(encoding.GetPreamble()), "Native save preserves BOM");
+var saved = await workspace.SaveAsync(document.Id, path, "<?xml version='1.0' encoding='UTF-8'?><root>Đã sửa</root>\r\n", 2, default);
+Check(saved.Encoding == "utf-16" && saved.Text.Contains("encoding='utf-16'") &&
+    (await File.ReadAllBytesAsync(path)).AsSpan().StartsWith(encoding.GetPreamble()) &&
+    await File.ReadAllTextAsync(path, encoding) == saved.Text, "Native XML save keeps UTF-16 BOM and synchronizes the encoding declaration");
 await Reject<InvalidOperationException>(() => workspace.SaveAsync(document.Id, path, "stale", 1, default), "Reject stale save version");
 var copy = Path.Combine(root, "copy.xml");
 await workspace.SaveAsync(document.Id, copy, "<root>Bản sao</root>", 4, default);
-Check((await File.ReadAllBytesAsync(copy)).AsSpan().StartsWith(encoding.GetPreamble()), "Save As preserves original encoding");
+Check((await File.ReadAllBytesAsync(copy)).AsSpan().StartsWith(encoding.GetPreamble()), "XML Save As writes UTF-16 with BOM");
 await File.WriteAllTextAsync(copy, "external");
 Check(await workspace.ChangedAsync(document.Id, default), "Detect external modification");
 await Reject<LSCode.Core.FileConflictException>(() => workspace.SaveAsync(document.Id, copy, "overwrite", 8, default), "Conflict stops external overwrite");
@@ -197,7 +199,7 @@ Check(!File.Exists(renameSource) && !Directory.Exists(renameFolder) && File.Exis
     !await workspace.ChangedAsync(renameDocument.Id, default), "Rename rebinds an open document through both file and folder moves");
 var savedAfterRename = await workspace.SaveAsync(renameDocument.Id, renamedPath, "<root>Dirty buffer</root>", 2, default);
 Check(savedAfterRename.Bom && savedAfterRename.Encoding == "utf-16" &&
-    (await File.ReadAllTextAsync(renamedPath)).Contains("Dirty buffer"), "Dirty document saves to its renamed path with original encoding and BOM");
+    (await File.ReadAllTextAsync(renamedPath)).Contains("Dirty buffer"), "Dirty XML document saves to its renamed path in UTF-16 with BOM");
 var caseRenamed = await workspace.RenameAsync(renamedPath, "Changed.xml", default);
 Check(File.Exists(caseRenamed) && Directory.EnumerateFiles(renamedFolder).Single() == caseRenamed, "Case-only rename changes the on-disk name");
 await File.WriteAllTextAsync(Path.Combine(renamedFolder, "occupied.xml"), "keep");
@@ -227,7 +229,7 @@ try
 finally { File.SetAttributes(readOnlyPath, FileAttributes.Normal); }
 var restored = workspace.Restore(document with { Path = null, Text = "Khôi phục" });
 var restoredPath = Path.Combine(root, "restored.xml"); await workspace.SaveAsync(restored.Id, restoredPath, restored.Text, 2, default);
-Check((await File.ReadAllBytesAsync(restoredPath)).AsSpan().StartsWith(encoding.GetPreamble()), "Recovered document retains original BOM on Save As");
+Check((await File.ReadAllBytesAsync(restoredPath)).AsSpan().StartsWith(encoding.GetPreamble()), "Recovered XML saves as UTF-16 with BOM");
 using var cancelled = new CancellationTokenSource(); cancelled.Cancel();
 await Reject<OperationCanceledException>(() => workspace.FilesAsync(root, cancelled.Token), "Workspace scan cancellation");
 var sql = CatalogDefinition.Build("dbo", "DanhMuc", true, [new("ma", "nvarchar", "20", Key: true), new("ten", Default: "O'Brien")], [], false, false);
@@ -1001,6 +1003,17 @@ if (args.Contains("--sql"))
             largeRows[0][1].GetString()!.Length == 300000 &&
             nextLargePage.GetProperty("data").GetProperty("rows")[0][0].GetString() == "3",
             "Table viewer bounds large pages and resumes without dropping the complete text values");
+        await Call("sql.execute", new
+        {
+            targetId = target.Id,
+            sql = "UPDATE dbo.paged_fixture SET label=N'MAX filter ' + REPLICATE(CONVERT(nvarchar(max), N'X'), 600000) WHERE id=5;",
+        });
+        var shortenedPage = await ReadFixturePage(0, "label, id", "label LIKE N'MAX filter %'");
+        var shortenedRow = shortenedPage.GetProperty("data").GetProperty("rows")[0];
+        Check(shortenedPage.GetProperty("shortenedText").GetBoolean() &&
+            shortenedRow[0].GetString()!.StartsWith("MAX filter ", StringComparison.Ordinal) &&
+            shortenedRow[0].GetString()!.Length < 600000 && shortenedRow[1].GetString() == "5",
+            "Table viewer keeps filtered rows and later columns when an nvarchar(max) value exceeds the preview budget");
         var pagePastThousand = await ReadFixturePage(1000, "id, payload, detail");
         var pageEnd = await ReadFixturePage(1200, "id, payload, detail");
         Check(pagePastThousand.GetProperty("hasMore").GetBoolean() &&

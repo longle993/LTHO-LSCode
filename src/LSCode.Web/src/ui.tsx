@@ -195,6 +195,7 @@ export function Select({
     >
       <button
         ref={trigger}
+        type="button"
         className="select-trigger"
         disabled={disabled}
         aria-label={label}
@@ -219,10 +220,12 @@ export function Select({
           className={floating ? "select-options select-options-floating" : "select-options"}
         >
           {searchOptions && <input type="search" aria-label={searchOptions} placeholder={searchOptions}
+            onKeyDown={event => { if (event.key === "Enter") event.preventDefault(); }}
             autoFocus={!floating} value={filter} onChange={event => setFilter(event.target.value)} />}
           <div role="listbox" aria-label={label}>
           {visible.map((o) => (
             <button
+              type="button"
               role="option"
               aria-selected={o.value === value}
               key={o.value}
