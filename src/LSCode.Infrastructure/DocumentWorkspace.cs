@@ -41,7 +41,7 @@ public sealed class DocumentWorkspace : IDocumentWorkspace
             var fullPath = Path.GetFullPath(path);
             if (!string.Equals(previous?.Snapshot.Path, fullPath, StringComparison.OrdinalIgnoreCase) && snapshots.Any(pair => pair.Key != id && string.Equals(pair.Value.Snapshot.Path, fullPath, StringComparison.OrdinalIgnoreCase)))
                 throw new IOException("File này đang mở trong tab khác.");
-            // Save As carries the original encoding/BOM, while DocumentStore only checks hash for the same path.
+            // DocumentStore applies the destination format and only checks the hash for the same path.
             if (File.Exists(path) && (File.GetAttributes(path) & FileAttributes.ReadOnly) != 0 && !overwriteReadOnly) throw new DocumentReadOnlyException(path);
             var saved = await DocumentStore.SaveAsync(path, text, previous?.Snapshot, ct, overwriteReadOnly);
             var next = new State(saved, version + 1); snapshots[id] = next;
@@ -125,22 +125,33 @@ public sealed class DocumentWorkspace : IDocumentWorkspace
         .Where(entry => { ct.ThrowIfCancellationRequested(); return (entry.Attributes & FileAttributes.ReparsePoint) == 0 && !WorkspaceSearch.IgnoredDirectories.Contains(entry.Name); })
         .Select(entry => new Entry(entry.FullName, entry.Name, entry is DirectoryInfo)).OrderByDescending(e => e.Directory).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToArray(), ct);
     public Task<string[]> FilesAsync(string path, CancellationToken ct) => Task.Run(() => WorkspaceFileIndex.Files(path, ct).Take(100000).ToArray(), ct);
-    public async Task<object> SearchAsync(string path, string query, bool regex, bool matchCase, Dictionary<string, string> buffers, CancellationToken ct)
+    public async Task<object> SearchAsync(string path, string query, bool regex, bool matchCase,
+        Dictionary<string, string> buffers, CancellationToken ct, bool firstPerFile = false, string fileName = "", IProgress<object>? progress = null)
     {
-        var open=new Dictionary<string,string>(buffers,StringComparer.OrdinalIgnoreCase);
-        var hits=await WorkspaceSearch.FindAsync(path,query,regex,matchCase,ct,open);
-        if(query.Length==0||hits.Count>=2000)return hits;
-        await Task.Run(async()=>{
-            var pattern=new System.Text.RegularExpressions.Regex(regex?query:System.Text.RegularExpressions.Regex.Escape(query),matchCase?System.Text.RegularExpressions.RegexOptions.None:System.Text.RegularExpressions.RegexOptions.IgnoreCase,TimeSpan.FromMilliseconds(200));
-            foreach(var file in WorkspaceFileIndex.Files(path,ct).Where(f=>WorkspaceFileIndex.ExtraTextExtensions.Contains(Path.GetExtension(f))))
+        var files = WorkspaceFileIndex.Files(path, ct, textOnly: query.Length > 0);
+        if (fileName.Length > 0)
+            files = files.Where(file => Path.GetFileName(file).Contains(fileName, StringComparison.OrdinalIgnoreCase));
+        if (query.Length == 0)
+        {
+            if (fileName.Length == 0) return new List<SearchHit>();
+            return await Task.Run(() =>
             {
-                ct.ThrowIfCancellationRequested();string text;
-                try{text=open.TryGetValue(file,out var buffer)?buffer:(await DocumentStore.OpenAsync(file,ct)).Text;}catch(Exception ex)when(ex is IOException or UnauthorizedAccessException or System.Text.DecoderFallbackException){continue;}
-                using var reader=new StringReader(text);var line=0;
-                while(reader.ReadLine() is {} content){ct.ThrowIfCancellationRequested();line++;var match=pattern.Match(content);if(match.Success)hits.Add(new(file,line,match.Index+1,content.Length>220?content[..220]:content));if(hits.Count>=2000)return;}
-            }
-        },ct);
-        return hits;
+                var results = new List<SearchHit>();
+                var published = 0;
+                var clock = System.Diagnostics.Stopwatch.StartNew();
+                foreach (var file in files.Take(2000))
+                {
+                    results.Add(new SearchHit(file, 0, 0, ""));
+                    if (progress is null || (published != 0 && clock.ElapsedMilliseconds < 80)) continue;
+                    progress.Report(results.GetRange(published, results.Count - published));
+                    published = results.Count;
+                    clock.Restart();
+                }
+                return results;
+            }, ct);
+        }
+        var open = new Dictionary<string, string>(buffers, StringComparer.OrdinalIgnoreCase);
+        return await WorkspaceSearch.FindAsync(files, query, regex, matchCase, ct, open, firstPerFile, progress);
     }
     public async Task<object> RecoverAsync(CancellationToken ct) => File.Exists(Recovery) ? JsonDocument.Parse(await File.ReadAllTextAsync(Recovery, ct)).RootElement.Clone() : Array.Empty<object>();
     public async Task StoreRecoveryAsync(JsonElement documents, CancellationToken ct)

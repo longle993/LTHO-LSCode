@@ -1,5 +1,32 @@
 # Kế hoạch và nghiệm thu
 
+- [x] Khi lưu hoặc lưu thành tệp XML, dùng UTF-8 có BOM. Cập nhật khai báo encoding nếu có.
+
+- [x] Tách tải kết nối khỏi mở dự án. SQL chưa chọn kết nối riêng chờ App của dự án trước khi chạy. Hai lệnh Close trong Lịch sử chỉ xóa lịch sử, còn đóng cửa sổ dọn phiên khôi phục sau khi xử lý tab chưa lưu.
+
+- [x] Khi lọc bảng có chuỗi vượt giới hạn hiển thị, vẫn trả dòng và các cột còn lại. Trang có dữ liệu rút gọn được đánh dấu chỉ đọc và chặn xuất INSERT.
+
+- [x] Chèn snippet SQL giữ nguyên ký tự trong tên thủ tục và giá trị tham số. Kiểm tra bằng bộ phân tích snippet của Monaco với mẫu thủ tục phân kỳ và snippet nhập nhanh.
+
+- [x] SQL Profiler dùng tài khoản thu riêng mặc định. Trong cây ERP và kết quả lọc menu, nhấp một lần để chọn, nhấp đúp tên hoặc nhấp Menu ID để mở tệp.
+
+## Phân loại nút và tùy chỉnh màu
+
+- [x] Đối chiếu component WebView, style WPF và luồng lưu theme. Ghi [đề xuất triển khai](docs/specifications/BUTTON-THEME.vi.md).
+- [ ] Kiểm kê nút theo màn và thống nhất variant.
+- [x] Thêm token cho năm loại, lưu cấu hình màu theo theme và xem trước trong Settings WebView.
+- [ ] Chuyển các màn theo đợt, kiểm tra theme và bàn phím, sau đó ánh xạ sang WPF.
+
+## Phân trang Cấu trúc và dữ liệu, tìm nội dung tệp — 22/11/2026
+
+- [x] Đọc theo trang SQL, giới hạn dung lượng từng trang và dựng hàng theo vùng đang xem. Chuyển trang giữ bộ lọc của lần chạy, và khóa nút chuyển trang trong lúc có bản sửa chưa lưu.
+- [x] Tìm nội dung ngay khi nhập ở thanh bên trái, hủy yêu cầu cũ và trả về vị trí khớp đầu tiên của mỗi tệp.
+- [x] Luồng hiện tại tìm theo tên tệp, theo nội dung hoặc kết hợp sau khi nhấn Enter hay bấm Tìm. Kết quả hiện dần theo cây thư mục, giữ vị trí khớp đầu tiên của mỗi tệp.
+- [x] Mặc định tìm trong Toàn dự án. Liệt kê các thư mục con trực tiếp trong AppData hoặc App_Data, bên dưới Controller hoặc Controllers. Kết quả tiếp tục hiện dần theo cây từ gốc dự án.
+- [x] Chạy 173 kiểm tra WebView/.NET với LocalDB, gồm truy cập dòng 1.201, phân trang bản ghi có chuỗi dài, giữ dữ liệu binary/XML và tìm trong bộ đệm chưa lưu.
+- [x] Build frontend và Desktop Release. Chạy 154 kiểm tra Core và 11 kiểm tra Chrome trên bản production, gồm phân trang và tìm kiếm ở chiều rộng 375 px. Probe màn chung ghi ba điểm ngoài hai khu vực thay đổi: nút **Mở thư mục** xuống dòng và nút tìm lệnh có vùng bấm dưới 24 px ở 375 px, nút **Chức năng** xuống dòng ở 1.440 px.
+- [ ] Đo thời gian và bộ nhớ trên dữ liệu ERP thực tế. Nhánh đọc SQL Server 2008 chưa được chạy trên máy chủ phiên bản đó.
+
 ## Menu Tập lệnh bằng chuột phải — 23/11/2026
 
 - [x] Nhấp chuột phải trên bề mặt dữ liệu của tab Cấu trúc và dữ liệu mở đúng menu Tập lệnh hiện có với đủ bốn thao tác: thêm key vào SQL Data, tạo bảng, INSERT kết quả hiện tại và xóa bảng.
@@ -155,6 +182,7 @@ Chi tiết và tiêu chí: [ERP-MENU-PERFORMANCE-MOBILE](docs/specifications/ERP
 
 - [x] Mở rộng FileSections theo mẫu hai danh sách của Fcode: nhóm thẻ và mục con có tên/id/controller. Lấy vị trí từ nội dung đang sửa, hỗ trợ tìm nhanh, phím mũi tên, Enter, Esc và trả focus về editor.
 - [x] Đăng ký Ctrl+Alt+C để mở ô lệnh riêng. Nhập `@@` rồi Enter mở QLYC. Từ QLYC, **View All** mở **Request Processing Statistics** dưới dạng bảng chỉ đọc. Hỗ trợ cấu hình `Qlcv` cũ của FCode và kết nối SQL đang mở trong LSCode; không ghi tài khoản hay danh sách nhân viên cá nhân vào mã nguồn.
+- [x] Sửa lớp hiển thị tiêu đề ghim và thanh cuộn của bảng QLYC. Import Excel ghi đè theo mã và thông báo số nhân viên vừa nhập. Đã kiểm tra bằng Chromium với bảng mẫu 60 dòng, gồm trường hợp tệp chứa mã trùng.
 - [x] Rà provider Monaco theo vùng XML, SQL và JavaScript. Xác nhận gợi ý biến FAST trong SQL nhúng và tên field trong chuỗi của f./g. đã chạy qua provider tách vùng, giới hạn phân tích XML 1 MB và bỏ kết quả completion khi Monaco hủy yêu cầu.
 - [x] Build/publish frontend và Desktop; 155 WebView checks với SQL fixture, 146 Core checks và 12 smoke WebView2 đạt. Còn smoke trực tiếp Ctrl+Alt+C với cơ sở dữ liệu QLYC thật vì máy kiểm thử hiện không có cấu hình `HKCU\\Software\\FCoder\\Qlcv`.
 - [x] Chuyển publish mặc định sang `win-x64 --self-contained true`; chạy chính EXE self-contained qua 12 smoke WebView2 để xác nhận không phụ thuộc .NET Desktop Runtime cài trên máy.

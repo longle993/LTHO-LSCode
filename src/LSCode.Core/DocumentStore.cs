@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace LSCode.Core;
 
@@ -12,16 +13,37 @@ public sealed class FileConflictException(string path) : IOException($"File đã
 
 public static class DocumentStore
 {
+    private static readonly Regex XmlDeclarationEncoding = new(
+        """\A(<\?xml\s+version\s*=\s*['"][^'"]+['"]\s+encoding\s*=\s*)(['"])[^'"]+\2(?=[^?]*\?>)""",
+        RegexOptions.CultureInvariant);
     public const int MaximumFileBytes = 16 * 1024 * 1024;
     public static async Task<FileSnapshot> OpenAsync(string path, CancellationToken ct = default)
     {
         path = System.IO.Path.GetFullPath(path);
-        if (new FileInfo(path).Length > MaximumFileBytes) throw new IOException("File vượt giới hạn editor 16 MB.");
-        var bytes = await File.ReadAllBytesAsync(path, ct);
+        var bytes = await ReadBytesAsync(path, ct);
         var (encoding, skip) = DetectEncoding(bytes);
+        var text = DecodeText(bytes, encoding, skip);
+        return new(path, text, encoding, skip > 0, Convert.ToHexString(SHA256.HashData(bytes)));
+    }
+
+    internal static async Task<string> ReadTextAsync(string path, CancellationToken ct)
+    {
+        var bytes = await ReadBytesAsync(path, ct);
+        var (encoding, skip) = DetectEncoding(bytes);
+        return DecodeText(bytes, encoding, skip);
+    }
+
+    private static Task<byte[]> ReadBytesAsync(string path, CancellationToken ct)
+    {
+        if (new FileInfo(path).Length > MaximumFileBytes) throw new IOException("File vượt giới hạn editor 16 MB.");
+        return File.ReadAllBytesAsync(path, ct);
+    }
+
+    private static string DecodeText(byte[] bytes, Encoding encoding, int skip)
+    {
         var text = encoding.GetString(bytes, skip, bytes.Length - skip);
         if (text.Contains('\0')) throw new IOException("File binary hoặc encoding không được hỗ trợ.");
-        return new(path, text, encoding, skip > 0, Convert.ToHexString(SHA256.HashData(bytes)));
+        return text;
     }
 
     public static async Task<FileSnapshot> SaveAsync(string path, string text, FileSnapshot? expected, CancellationToken ct = default, bool overwriteReadOnly = false)
@@ -46,9 +68,13 @@ public static class DocumentStore
             if (!File.Exists(path) || Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(path, ct))) != expected.Hash)
                 throw new FileConflictException(path);
         }
-        var encoding = expected?.Encoding ?? new UTF8Encoding(false, true);
+        var xml = System.IO.Path.GetExtension(path).Equals(".xml", StringComparison.OrdinalIgnoreCase);
+        var bom = xml || expected?.Bom == true;
+        var encoding = xml ? new UTF8Encoding(true, true) : expected?.Encoding ?? new UTF8Encoding(false, true);
+        if (xml)
+            text = XmlDeclarationEncoding.Replace(text, "$1$2" + encoding.WebName + "$2", 1);
         var data = encoding.GetBytes(text);
-        var preamble = expected?.Bom == true ? encoding.GetPreamble() : [];
+        var preamble = bom ? encoding.GetPreamble() : [];
         var bytes = preamble.Concat(data).ToArray();
         var sameFile = expected != null && string.Equals(expected.Path, path, StringComparison.OrdinalIgnoreCase);
         // Open without truncating and deny concurrent writers during conflict checking and saving.
@@ -65,7 +91,7 @@ public static class DocumentStore
         await target.WriteAsync(bytes, CancellationToken.None);
         target.SetLength(bytes.Length);
         await target.FlushAsync(CancellationToken.None);
-        return new(path, text, encoding, expected?.Bom ?? false, Convert.ToHexString(SHA256.HashData(bytes)));
+        return new(path, text, encoding, bom, Convert.ToHexString(SHA256.HashData(bytes)));
     }
     private static (Encoding, int) DetectEncoding(byte[] bytes)
     {

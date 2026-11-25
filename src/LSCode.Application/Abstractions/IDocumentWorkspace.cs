@@ -12,7 +12,7 @@ public interface IDocumentWorkspace
     DocumentInfo Restore(DocumentInfo document);
     Task<Entry[]> ListAsync(string path, CancellationToken cancellationToken);
     Task<string[]> FilesAsync(string path, CancellationToken cancellationToken);
-    Task<object> SearchAsync(string path, string query, bool regex, bool matchCase, Dictionary<string, string> buffers, CancellationToken cancellationToken);
+    Task<object> SearchAsync(string path, string query, bool regex, bool matchCase, Dictionary<string, string> buffers, CancellationToken cancellationToken, bool firstPerFile = false, string fileName = "", IProgress<object>? progress = null);
     Task<object> RecoverAsync(CancellationToken cancellationToken);
     Task StoreRecoveryAsync(JsonElement documents, CancellationToken cancellationToken);
     Task<string> RenameAsync(string path, string name, CancellationToken cancellationToken);

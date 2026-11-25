@@ -19,7 +19,8 @@ Các mục bên dưới lưu thiết kế và kết quả của bản triển kh
 
 - Bản chạy trực tiếp để nghiệm thu: `artifacts/publish-webview-menu-editor/LSCode.WebView.exe` (giữ nguyên cả thư mục khi sao chép).
 - Chọn một dòng trong cây Chức năng và nhấn `F3` để mở form; chuột phải trên dòng menu cũng mở form này.
-- Form đọc schema `dbo.wcommand` rồi chỉ hiển thị/cập nhật các cột có thật. Mã cây chỉ đọc khi sửa, còn New tự đề xuất mã mới.
+- Form đọc schema `dbo.wcommand` rồi chỉ hiển thị/cập nhật các cột có thật. Khi sửa mã cây, LSCode cập nhật mã cha của các menu con trực tiếp trong cùng giao dịch. Thêm mới đề xuất mã command từ `AA.01.01`.
+- Cây Chức năng giữ trạng thái bung nhánh theo Web/Mobile khi chuyển tab. Khi tạo script cho nhánh cha bằng F12 hoặc menu chuột phải, chọn xuất riêng mục cha hoặc kèm toàn bộ hậu duệ.
 - Lưu dùng transaction `SERIALIZABLE`, khóa bản ghi/tập mã, kiểm tra trùng `wcommand.wmenu_id`, `wcommand.menu_id` và `command.menu_id` nếu các cột/bảng này tồn tại.
 - Bản sửa dùng fingerprint của dữ liệu gốc để phát hiện thay đổi từ phiên khác, không ghi đè âm thầm.
 - Panel tài nguyên resolve Main từ link, đọc controller trong ASPX, quét đúng basename ở App_Data/AppData và phân loại Dir/Filter/Grid/Main. `.f` và `.xml` đều được tính; file có thể bấm để mở.

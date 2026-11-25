@@ -1,10 +1,29 @@
 import { useMemo, useState } from "react";
-import { Search } from "lucide-react";
-import { Button, Modal, Select } from "../ui";
+import { RefreshCw, Search } from "lucide-react";
+import { Button, IconButton, Modal, Select } from "../ui";
 import { request } from "../bridge";
 import type { Settings } from "../bridge";
 import { keyboardGesture, shortcutGroupFor, shortcutGroups } from "../commands";
 import { useTask } from "./useTask";
+import { buttonRoles, buttonThemeStyle, colorParts, isButtonColor, luminance, type ButtonRole } from "../buttonTheme";
+
+const roleNames = { primary: "Primary", secondary: "Secondary", ghost: "Tertiary / Ghost", destructive: "Destructive", icon: "Icon Button" };
+const partNames = { background: "Nền", foreground: "Chữ / icon", border: "Viền" };
+
+function defaultColors(theme: string, accent: string | null | undefined, role: ButtonRole) {
+  const light = theme === "Light";
+  const high = theme === "High Contrast";
+  const surface = light ? "#ffffff" : high ? "#000000" : "#1e2025";
+  const foreground = light ? "#2c2c2c" : high ? "#ffffff" : "#e5e5e7";
+  const primary = isButtonColor(accent) ? accent : light ? "#2563a6" : high ? "#ffff00" : "#88b9ef";
+  return {
+    background: role === "primary" ? primary : role === "destructive" ? light ? "#fef2f2" : high ? "#330000" : "#3b2229" : surface,
+    foreground: role === "primary" ? luminance(primary) > .179 ? "#000000" : "#ffffff"
+      : role === "destructive" ? light ? "#c10007" : high ? "#ffb6b6" : "#ff9aa4"
+      : role === "ghost" ? light ? "#707070" : high ? "#dddddd" : "#a3a5ac" : foreground,
+    border: light ? "#e0e0e5" : high ? "#ffffff" : "#3d4049",
+  };
+}
 export function SettingsDialog({
   settings,
   commands,
@@ -23,6 +42,20 @@ export function SettingsDialog({
     [section, setSection] = useState("general"),
     [shortcutQuery, setShortcutQuery] = useState("");
   const task = useTask();
+  const palette = draft.buttonColors?.[draft.theme] ?? {};
+  const invalidRoles = Object.entries(draft.buttonColors ?? {}).flatMap(([theme, colors]) =>
+    buttonRoles.flatMap(role => {
+      const setting = colors[role];
+      if (!setting?.background && !setting?.foreground) return [];
+      const defaults = defaultColors(theme, draft.accentColor, role);
+      const levels = [luminance(setting.background ?? defaults.background), luminance(setting.foreground ?? defaults.foreground)];
+      const ratio = (Math.max(...levels) + .05) / (Math.min(...levels) + .05);
+      return ratio < (role === "icon" ? 3 : 4.5) ? [`${theme} · ${roleNames[role]}`] : [];
+    }));
+  function updatePalette(next: typeof palette) {
+    setDraft(current => ({ ...current, buttonColors: { ...current.buttonColors, [current.theme]: next } }));
+  }
+  const previewPrimary = defaultColors(draft.theme, draft.accentColor, "primary");
   const groupedShortcuts = useMemo(() => {
     const query = shortcutQuery.trim().toLocaleLowerCase();
     return shortcutGroups.map(group => ({
@@ -100,6 +133,38 @@ export function SettingsDialog({
               <Button type="button" variant="ghost" disabled={!draft.accentColor}
                 onClick={() => setDraft({ ...draft, accentColor: null })}>Màu mặc định</Button>
             </div>
+            <section className="button-theme-settings" aria-labelledby="button-theme-heading">
+              <h3 id="button-theme-heading">Màu nút · {draft.theme}</h3>
+              {buttonRoles.map(role => <div className="button-theme-row" key={role}>
+                <strong>{roleNames[role]}</strong>
+                {colorParts.map(part => <label key={part}>{partNames[part]}
+                  <input type="color" aria-label={`${roleNames[role]} · ${partNames[part]}`}
+                    value={palette[role]?.[part] ?? defaultColors(draft.theme, draft.accentColor, role)[part]}
+                    onChange={event => updatePalette({ ...palette, [role]: { ...palette[role], [part]: event.target.value } })} />
+                  <Button type="button" variant="ghost" disabled={!palette[role]?.[part]} onClick={() => {
+                    const colors = { ...palette[role] };
+                    delete colors[part];
+                    updatePalette({ ...palette, [role]: colors });
+                  }}>Mặc định</Button>
+                </label>)}
+                <Button type="button" disabled={!Object.keys(palette[role] ?? {}).length} onClick={() => {
+                  const next = { ...palette };
+                  delete next[role];
+                  updatePalette(next);
+                }}>Đặt lại loại</Button>
+              </div>)}
+              <div><Button type="button" onClick={() => updatePalette({})}>Đặt lại màu của theme</Button></div>
+              <div className="button-theme-preview" data-theme={draft.theme} aria-label="Xem trước màu nút"
+                style={{ ...buttonThemeStyle(palette, true), "--primary": previewPrimary.background, "--primary-foreground": previewPrimary.foreground } as React.CSSProperties}>
+                <Button type="button" variant="primary">Lưu</Button>
+                <Button type="button">Xem trước</Button>
+                <Button type="button" variant="ghost">Quay lại</Button>
+                <Button type="button" variant="destructive">Xóa</Button>
+                <IconButton type="button" label="Tải lại mẫu"><RefreshCw size={15} /></IconButton>
+                <Button type="button" variant="primary" disabled>Đang xử lý</Button>
+              </div>
+              {invalidRoles.length > 0 && <p role="alert" className="error-text">Cần tăng độ tương phản cho {invalidRoles.join(", ")}.</p>}
+            </section>
             <label>
               Cỡ chữ Không gian dự án
               <Select label="Cỡ chữ Không gian dự án" value={String(draft.explorerFontSize ?? 12)}
@@ -202,7 +267,7 @@ export function SettingsDialog({
         <Button onClick={onClose}>Hủy</Button>
         <Button
           variant="primary"
-          disabled={task.busy}
+          disabled={task.busy || invalidRoles.length > 0}
           onClick={() =>
             void task.run(async () => {
               validate();

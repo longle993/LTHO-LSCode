@@ -226,6 +226,7 @@ public partial class MainWindow : Window
             return answer == MessageBoxResult.Yes && await SaveAsync(doc, true);
         }
         doc.Snapshot = snapshot; doc.Path = path; doc.Name = Path.GetFileName(path);
+        if (doc.Buffer.Text == text && snapshot.Text != text) doc.Buffer.Text = snapshot.Text;
         if (File.Exists(path)) { var info = new FileInfo(path); externalFileStamps[path] = (info.LastWriteTimeUtc, info.Length); externalWarnings.Remove(path); }
         doc.RefreshHighlighting(settings.Theme);
         RefreshDocumentHeaders();

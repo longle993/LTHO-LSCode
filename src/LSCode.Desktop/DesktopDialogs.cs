@@ -8,13 +8,14 @@ internal sealed class DesktopDialogs(System.Windows.Window owner) : IDesktopDial
     public string? OpenFolder() { var d = new OpenFolderDialog(); return d.ShowDialog(owner) == true ? d.FolderName : null; }
     public string? SaveFile(string? name, string? filter = null)
     {
-        var xml = filter?.Contains("*.xml", StringComparison.OrdinalIgnoreCase) == true;
+        var extension = filter?.Contains("*.sql", StringComparison.OrdinalIgnoreCase) == true ? ".sql"
+            : filter?.Contains("*.xml", StringComparison.OrdinalIgnoreCase) == true ? ".xml" : "";
         var d = new SaveFileDialog
         {
             FileName = System.IO.Path.GetFileName(name ?? "Untitled.sql"),
             Filter = filter ?? "Tất cả file|*.*",
-            AddExtension = xml,
-            DefaultExt = xml ? ".xml" : ""
+            AddExtension = extension.Length > 0,
+            DefaultExt = extension
         };
         return d.ShowDialog(owner) == true ? d.FileName : null;
     }

@@ -1,14 +1,221 @@
+using System.Buffers;
 using System.Data;
 using System.Globalization;
 using System.Text;
+using System.Xml;
 using LSCode.Domain;
 using LSCode.Shell.Services;
 using Microsoft.Data.SqlClient;
+using Microsoft.SqlServer.TransactSql.ScriptDom;
+using TableDefinition = LSCode.Shell.Services.TableDefinition;
 
 namespace LSCode.Infrastructure;
 
 internal static class TableInspection
 {
+    private const int PageRows = 200;
+    private const int PageBytes = 4 * 1024 * 1024;
+    private const int MaximumCellUnits = 512 * 1024;
+
+    public static async Task<(DataTable Data, bool HasMore)> ReadPageAsync(
+        SqlTarget target, string qualified, string sql, long offset, CancellationToken ct)
+    {
+        var select = ReadOnlyQuery.Parse(sql);
+        var query = select.QueryExpression;
+        if (query.OffsetClause != null || query is QuerySpecification { TopRowFilter: not null })
+            throw new ArgumentException("Cửa sổ xem bảng tự phân trang. Bỏ TOP, OFFSET và FETCH khỏi truy vấn.");
+
+        if (query.OrderByClause == null)
+        {
+            string[] key = [];
+            if (query is QuerySpecification { UniqueRowFilter: UniqueRowFilter.NotSpecified, GroupByClause: null } simple &&
+                simple.SelectElements.All(column => column is SelectStarExpression or SelectScalarExpression { Expression: ColumnReferenceExpression }))
+            {
+                var keys = await ProjectDatabase.ReadAsync(target, """
+                    SELECT c.name FROM sys.index_columns ic
+                    JOIN sys.columns c ON c.object_id=ic.object_id AND c.column_id=ic.column_id
+                    WHERE ic.object_id=OBJECT_ID(@object) AND ic.key_ordinal>0 AND ic.index_id=(
+                        SELECT TOP (1) index_id FROM sys.indexes
+                        WHERE object_id=OBJECT_ID(@object) AND is_unique=1 AND has_filter=0
+                            AND is_disabled=0 AND is_hypothetical=0
+                        ORDER BY is_primary_key DESC, index_id)
+                    ORDER BY ic.key_ordinal
+                    """, ct, new SqlParameter("@object", qualified)).ConfigureAwait(false);
+                key = keys.Rows.Cast<DataRow>().Select(row => qualified + "." + ProjectDatabase.Quote((string)row[0])).ToArray();
+            }
+            var order = key.Length > 0 ? string.Join(", ", key)
+                : query is BinaryQueryExpression or QuerySpecification { UniqueRowFilter: UniqueRowFilter.Distinct } ? "1"
+                : "(SELECT NULL)";
+            query.OrderByClause = ReadOnlyQuery.Parse("SELECT 1 ORDER BY " + order).QueryExpression.OrderByClause;
+        }
+        await using var connection = new SqlConnection(target.ConnectionString);
+        await connection.OpenAsync(ct).ConfigureAwait(false);
+        // SQL Server 2008 lacks OFFSET/FETCH. Its reader skips rows without buffering them.
+        var supportsOffset = !Version.TryParse(connection.ServerVersion, out var version) || version.Major >= 11;
+        if (supportsOffset)
+        {
+            query.OffsetClause = new OffsetClause
+            {
+                OffsetExpression = new VariableReference { Name = "@lscode_offset" },
+                FetchExpression = new IntegerLiteral { Value = (PageRows + 1).ToString(CultureInfo.InvariantCulture) },
+            };
+        }
+        new Sql150ScriptGenerator().GenerateScript(select, out var pagedSql);
+        using var command = new SqlCommand(pagedSql, connection) { CommandTimeout = 0 };
+        if (supportsOffset) command.Parameters.Add("@lscode_offset", SqlDbType.BigInt).Value = offset;
+        await using var reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct).ConfigureAwait(false);
+        var data = new DataTable();
+        var types = reader.GetColumnSchema().Select(column =>
+            column.ColumnSize is >= 0 and <= 8000 && column.DataTypeName != "xml" ? "" : column.DataTypeName).ToArray();
+        for (var i = 0; i < reader.FieldCount; i++)
+        {
+            var original = reader.GetName(i);
+            var name = string.IsNullOrEmpty(original) ? "Column" + i : original;
+            while (data.Columns.Contains(name)) name += "_";
+            data.Columns.Add(name, reader.GetFieldType(i)).ExtendedProperties["OriginalName"] = original;
+        }
+
+        var bytes = 0L;
+        var skipped = supportsOffset ? 0 : offset;
+        var row = new object[reader.FieldCount];
+        var textLimit = Math.Min(MaximumCellUnits, Math.Max(1, (PageBytes / Math.Max(1, row.Length) - 48) / 6));
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            if (skipped > 0)
+            {
+                skipped--;
+                continue;
+            }
+            if (data.Rows.Count == PageRows)
+            {
+                command.Cancel();
+                return (data, true);
+            }
+            var rowBytes = 0L;
+            var shortened = false;
+            for (var i = 0; i < row.Length; i++)
+            {
+                var cell = await ReadCellAsync(reader, i, types[i], textLimit, ct).ConfigureAwait(false);
+                if (cell is ShortenedText text)
+                {
+                    shortened = true;
+                    cell = text.Value;
+                }
+                row[i] = cell;
+                rowBytes += row[i] switch
+                {
+                    string value => 32L + value.Length * 6L,
+                    byte[] value => 32L + value.Length * 4L,
+                    _ => 48L,
+                };
+                if (rowBytes <= PageBytes) continue;
+                if (data.Rows.Count > 0)
+                {
+                    command.Cancel();
+                    return (data, true);
+                }
+                throw LargeValue();
+            }
+            if (bytes + rowBytes > PageBytes)
+            {
+                command.Cancel();
+                return (data, true);
+            }
+            data.Rows.Add(row);
+            if (shortened) data.ExtendedProperties["ShortenedText"] = true;
+            bytes += rowBytes;
+        }
+        return (data, false);
+    }
+
+    private sealed record ShortenedText(string Value);
+
+    public static bool HasShortenedText(DataTable data) => data.ExtendedProperties["ShortenedText"] is true;
+
+    private static async Task<object> ReadCellAsync(SqlDataReader reader, int column, string? type, int textLimit, CancellationToken ct)
+    {
+        if (await reader.IsDBNullAsync(column, ct).ConfigureAwait(false)) return DBNull.Value;
+        switch (type)
+        {
+            case "varchar":
+            case "nvarchar":
+            case "text":
+            case "ntext":
+                using (var text = reader.GetTextReader(column))
+                {
+                    var buffer = ArrayPool<char>.Shared.Rent(4096);
+                    try
+                    {
+                        var value = new StringBuilder();
+                        int count;
+                        while ((count = await text.ReadAsync(buffer.AsMemory(), ct).ConfigureAwait(false)) > 0)
+                        {
+                            if (value.Length + count > textLimit)
+                            {
+                                value.Append(buffer, 0, textLimit - value.Length);
+                                if (value.Length > 0 && char.IsHighSurrogate(value[value.Length - 1])) value.Length--;
+                                return new ShortenedText(value.ToString());
+                            }
+                            value.Append(buffer, 0, count);
+                        }
+                        return value.ToString();
+                    }
+                    finally { ArrayPool<char>.Shared.Return(buffer); }
+                }
+            case "varbinary":
+            case "image":
+                await using (var source = reader.GetStream(column))
+                {
+                    var buffer = ArrayPool<byte>.Shared.Rent(4096);
+                    try
+                    {
+                        using var value = new MemoryStream();
+                        int count;
+                        while ((count = await source.ReadAsync(buffer.AsMemory(), ct).ConfigureAwait(false)) > 0)
+                        {
+                            if (value.Length + count > MaximumCellUnits) throw LargeValue();
+                            value.Write(buffer, 0, count);
+                        }
+                        return value.ToArray();
+                    }
+                    finally { ArrayPool<byte>.Shared.Return(buffer); }
+                }
+            case "xml":
+                using (var xml = reader.GetXmlReader(column))
+                using (var text = new BoundedXmlText())
+                {
+                    using (var writer = XmlWriter.Create(text, new XmlWriterSettings { ConformanceLevel = ConformanceLevel.Fragment }))
+                    {
+                        xml.Read();
+                        while (!xml.EOF)
+                        {
+                            ct.ThrowIfCancellationRequested();
+                            writer.WriteNode(xml, false);
+                        }
+                    }
+                    return text.ToString();
+                }
+            default:
+                return await reader.GetFieldValueAsync<object>(column, ct).ConfigureAwait(false);
+        }
+    }
+
+    private static InvalidOperationException LargeValue() =>
+        new("Dữ liệu của một ô hoặc một dòng quá lớn để hiển thị an toàn. Hãy thu hẹp SELECT hoặc WHERE.");
+
+    private sealed class BoundedXmlText : StringWriter
+    {
+        public override void Write(char[] buffer, int index, int count) => Write(buffer.AsSpan(index, count));
+        public override void Write(ReadOnlySpan<char> buffer)
+        {
+            var body = GetStringBuilder();
+            if (body.Length + buffer.Length > MaximumCellUnits) throw LargeValue();
+            body.Append(buffer);
+        }
+        public override void Write(string? value) => Write(value.AsSpan());
+        public override void Write(char value) => Write(new ReadOnlySpan<char>(in value));
+    }
+
     public static async Task<object[]> MetadataAsync(SqlTarget target, string qualified, CancellationToken ct)
     {
         var columns = await TableDefinition.ColumnsAsync(target, qualified, ct).ConfigureAwait(false);
@@ -321,6 +528,8 @@ internal static class TableInspection
     public static async Task<string> InsertScriptAsync(SqlTarget target, string qualified, DataTable data, CancellationToken ct,
         bool useTableDateFormats = false)
     {
+        if (HasShortenedText(data))
+            throw new InvalidOperationException("Trang có chuỗi dài chỉ được xem trước. Bỏ cột đó khỏi SELECT trước khi tạo script INSERT.");
         if (data.Rows.Count == 0) return "";
         var metadata = await TableDefinition.ColumnsAsync(target, qualified, ct).ConfigureAwait(false);
         var byName = metadata.Rows.Cast<DataRow>().ToDictionary(r => (string)r["name"], StringComparer.Ordinal);

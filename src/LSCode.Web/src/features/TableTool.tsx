@@ -1,7 +1,7 @@
 import { Component, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
 import type { ChangeEvent, ErrorInfo, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode, SyntheticEvent } from "react";
 import { createPortal } from "react-dom";
-import { ChevronRight, CircleAlert, Copy, KeyRound, Play, RefreshCw, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, CircleAlert, Copy, KeyRound, Play, RefreshCw, X } from "lucide-react";
 import { Button, IconButton, Modal, Select, WorkbenchNotice } from "../ui";
 import { operation, quoteSqlName, request, writeClipboard } from "../bridge";
 import type { Table, Target } from "../bridge";
@@ -32,10 +32,11 @@ function normalizeTable(value: unknown, label: string): Table {
 }
 function normalizePreview(value: unknown): Preview {
   if (!value || typeof value !== "object") throw new Error("Kết quả đọc bảng không đúng định dạng.");
-  const candidate = value as { data?: unknown; snapshotId?: unknown };
+  const candidate = value as { data?: unknown; snapshotId?: unknown; hasMore?: unknown; shortenedText?: unknown };
   if (typeof candidate.snapshotId !== "string" || !candidate.snapshotId)
     throw new Error("Kết quả đọc bảng thiếu mã snapshot.");
-  return { data: normalizeTable(candidate.data, "đọc bảng"), snapshotId: candidate.snapshotId };
+  return { data: normalizeTable(candidate.data, "đọc bảng"), snapshotId: candidate.snapshotId,
+    hasMore: candidate.hasMore === true, shortenedText: candidate.shortenedText === true };
 }
 function normalizeMetadata(value: unknown): TableColumn[] {
   if (!Array.isArray(value)) throw new Error("Metadata bảng trả về không đúng định dạng.");
@@ -61,7 +62,9 @@ const tableNames = (result: unknown) => {
   return result.rows.flatMap(([schema, table]) =>
     schema && table ? [{ schema, table }] : []);
 };
-type Preview = { data: Table; snapshotId: string };
+type Preview = { data: Table; snapshotId: string; hasMore: boolean; shortenedText: boolean };
+type TableFilters = { where: string; select: string; orderBy: string };
+type PreviewPage = { key: string; result: Preview; filters: TableFilters; offsets: number[] };
 type ColumnMenu = { x: number; y: number; columns: string[] };
 type ScriptPreview = { title: string; script: string };
 type ColumnDialog = { mode: "add" | "alter"; column?: string };
@@ -238,7 +241,8 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
     [carets, setCarets] = useState<Record<Clause, number>>({ select: 0, where: 0, orderBy: 0 }),
     [metadata, setMetadata] = useState<{ key: string; columns: TableColumn[] }>(),
     [metadataRevision, setMetadataRevision] = useState(0),
-    [preview, setPreview] = useState<{ key: string; result: Preview }>(),
+    [preview, setPreview] = useState<PreviewPage>(),
+    [pageDirty, setPageDirty] = useState(false),
     [columnMenu, setColumnMenu] = useState<ColumnMenu>(),
     [drop, setDrop] = useState<string[]>(),
     [scriptPreview, setScriptPreview] = useState<ScriptPreview>(),
@@ -294,7 +298,9 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
     return ranked.flat().slice(0, 40);
   }, [candidates, query]);
   const currentMetadata = metadata?.key === key && Array.isArray(metadata.columns) ? metadata.columns : undefined;
-  const currentPreview = preview?.key === key ? preview.result : undefined;
+  const currentPage = preview?.key === key ? preview : undefined;
+  const currentPreview = currentPage?.result;
+  const rowOffset = currentPage?.offsets.at(-1) ?? 0;
   const canReadMetadata = knownTable || !!currentPreview;
   const fieldNames = currentMetadata?.map((column) => column.name) ?? [];
   const filteredMetadata = (currentMetadata ?? []).filter((column) =>
@@ -500,21 +506,37 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
     const pattern = filterOperator === "LIKE" || filterOperator === "NOT LIKE" ? "%" + value + "%" : value;
     return field + " " + filterOperator + " N'" + pattern + "'";
   };
-  const readDataRequest = async (chosen = name, filters = { where: [where.trim(), generatedWhere()].filter(Boolean).join(" AND "), select: columns || "*", orderBy: orderBy.trim() }) => {
+  const inputFilters = () => ({
+    where: [where.trim(), generatedWhere()].filter(Boolean).join(" AND "),
+    select: columns || "*",
+    orderBy: orderBy.trim(),
+  });
+  const readDataRequest = async (chosen = name, filters = inputFilters(), offsets = [0], returnFromEmptyPage = false): Promise<void> => {
     if (!chosen || !targetId) return;
-    const op = operation<Preview>("table.view", { scope, targetId, ...chosen, ...filters });
+    const op = operation<Preview>("table.view", { scope, targetId, ...chosen, ...filters, offset: offsets.at(-1) });
     reading.current = op;
     try {
       const result = normalizePreview(await op.promise);
+      if (returnFromEmptyPage && !result.data.rows.length && offsets.length > 1) {
+        await readDataRequest(chosen, filters, offsets.slice(0, -1), true);
+        return;
+      }
       startPreviewTransition(() => {
-        setPreview({ key: JSON.stringify([targetId, chosen.schema, chosen.table]), result });
+        setPreview({ key: JSON.stringify([targetId, chosen.schema, chosen.table]), result, filters, offsets });
         reportTableChange(chosen);
         setDataError("");
       });
     }
     finally { if (reading.current === op) reading.current = undefined; }
   };
-  const readData = (chosen = name, filters = { where: [where.trim(), generatedWhere()].filter(Boolean).join(" AND "), select: columns || "*", orderBy: orderBy.trim() }) => task.run(() => readDataRequest(chosen, filters));
+  const readData = (chosen = name, filters = inputFilters()) => task.run(() => readDataRequest(chosen, filters));
+  const readCurrentPage = () => readDataRequest(name, currentPage?.filters, currentPage?.offsets, true);
+  function movePage(next: boolean) {
+    if (!currentPage || !canRead || previewPending || pageDirty) return;
+    const { filters, offsets, result } = currentPage;
+    const nextOffsets = next ? [...offsets, rowOffset + result.data.rows.length] : offsets.slice(0, -1);
+    void task.run(() => readDataRequest(name, filters, nextOffsets));
+  }
   useEffect(() => {
     const chosen = initialTable ? parseTable(initialTable) : undefined;
     if (!visible || !chosen || !knownTable || !targetId || input !== initialTable || preview?.key === key || autoReadKey.current === key) return;
@@ -554,6 +576,8 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
       if (!table || !schema || !targetId) return;
       if (kind === "insert") {
         if (!currentPreview?.data.rows.length) return;
+        if (currentPreview.shortenedText)
+          throw new Error("Bỏ cột chuỗi dài khỏi SELECT trước khi tạo script INSERT từ trang này.");
         const script = await request<string>("table.insertScript", { scope, snapshotId: currentPreview.snapshotId });
         onText(script, table + "-insert.sql");
         return;
@@ -608,7 +632,7 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
     });
   }
   async function commitRows(drafts: [number, (string | null)[]][]) {
-    if (readonly || !currentPreview || !currentMetadata || !name || !targetId) return;
+    if (readonly || !currentPreview || currentPreview.shortenedText || !currentMetadata || !name || !targetId) return;
     return task.run<{ saved: true } | { saved: false; row: number }>(async () => {
       const visibleColumns = currentPreview.data.columns;
       const writes = drafts.flatMap(([rowIndex, values]) => {
@@ -645,7 +669,7 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
       if (result.conflict != null) return { saved: false, row: writes[result.conflict].rowIndex };
       setStatus("Đã lưu dữ liệu.");
       try {
-        await readDataRequest();
+        await readCurrentPage();
       } catch (error) {
         setDataError((error as Error).message);
         setPreview(undefined);
@@ -654,7 +678,7 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
     });
   }
   async function deleteRows(rowIndexes: number[]) {
-    if (readonly || !currentPreview || !currentMetadata || !name || !targetId || !rowIndexes.length) return;
+    if (readonly || !currentPreview || currentPreview.shortenedText || !currentMetadata || !name || !targetId || !rowIndexes.length) return;
     const visibleColumns = currentPreview.data.columns;
     const primary = currentMetadata.filter((column) => column.primaryKey);
     if (!primary.length || primary.some((column) => !visibleColumns.some((name) => name.toLowerCase() === column.name.toLowerCase()))) {
@@ -681,7 +705,7 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
       }));
       await request("table.writeBatch", { ...payload, rows });
       setStatus(`Đã xóa ${rows.length} dòng.`);
-      await readDataRequest();
+      await readCurrentPage();
     });
   }
   function selectColumns(names: string[]) {
@@ -874,17 +898,35 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
           </div>
         </aside>
         <section className="table-inspection-content" onContextMenu={openScriptMenuAt}>
+          {currentPreview?.shortenedText && <div role="status">Trang chỉ đọc vì có chuỗi dài đang hiển thị bản xem trước.</div>}
           {currentPreview?.data && currentMetadata ? <TableDataGrid
             saveSlot={saveSlot}
+            rowOffset={rowOffset}
+            onPendingChange={setPageDirty}
             focusColumn={goToRequest}
             frozenThrough={frozenColumn}
             onActiveColumnChange={setActiveColumn}
-            table={currentPreview.data} metadata={currentMetadata} readonly={readonly} busy={task.busy || previewPending} onCommit={commitRows}
+            table={currentPreview.data} metadata={currentMetadata} readonly={readonly || currentPreview.shortenedText} busy={task.busy || previewPending} onCommit={commitRows}
             onDelete={deleteRows}
             emptyMessage={filterField && (filterOperator === "IS NULL" || filterOperator === "IS NOT NULL" || filterValue.trim())
               ? "Không tìm thấy dữ liệu phù hợp."
               : undefined} />
-            : <div className="empty">{task.busy ? "Đang đọc bảng…" : "Chọn bảng để đọc tối đa 1.000 dòng dữ liệu."}</div>}
+            : <div className="empty">{task.busy ? "Đang đọc bảng…" : "Chọn bảng để đọc dữ liệu."}</div>}
+          {currentPage && (currentPage.offsets.length > 1 || currentPage.result.hasMore) &&
+            <div className="table-pagination">
+              <span className="muted" role="status">
+                {pageDirty ? "Lưu thay đổi trước khi chuyển trang." : currentPage.result.data.rows.length
+                  ? `Dòng ${rowOffset + 1}–${rowOffset + currentPage.result.data.rows.length}`
+                  : "Không có dòng dữ liệu."}
+              </span>
+              <nav aria-label="Phân trang dữ liệu bảng">
+                <IconButton label="Trang trước" disabled={task.busy || previewPending || pageDirty || currentPage.offsets.length === 1}
+                  onClick={() => movePage(false)}><ChevronLeft size={16} /></IconButton>
+                <span>Trang {currentPage.offsets.length}</span>
+                <IconButton label="Trang sau" disabled={task.busy || previewPending || pageDirty || !currentPage.result.hasMore}
+                  onClick={() => movePage(true)}><ChevronRight size={16} /></IconButton>
+              </nav>
+            </div>}
         </section>
       </div>
       {currentMetadata && <div className="table-filter-row">
@@ -962,7 +1004,7 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
             {task.error && <p className="form-error" role="alert">{task.error}</p>}
             <div className="flex flex-wrap justify-end gap-2">
               <Button disabled={task.busy} onClick={() => setDrop(undefined)}>Hủy</Button>
-              <Button disabled={task.busy} className="table-drop-action" onClick={() => void task.run(async () => {
+              <Button disabled={task.busy} variant="destructive" onClick={() => void task.run(async () => {
                 await request("table.dropColumns", { ...payload, columns: drop });
                 setPreview(undefined);
                 setDrop(undefined);
@@ -992,7 +1034,7 @@ export function TableTool({ scope, target, targets, initialTable, toolbarSlotId,
               setDeleteRequest(undefined);
               pending.resolve(false);
             }}>Hủy</Button>
-            <Button className="table-drop-action" onClick={() => {
+            <Button variant="destructive" onClick={() => {
               const pending = deleteRequest;
               setDeleteRequest(undefined);
               pending.resolve(true);

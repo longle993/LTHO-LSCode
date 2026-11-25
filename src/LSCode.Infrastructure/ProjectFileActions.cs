@@ -53,6 +53,12 @@ internal static class ProjectFileActions
     internal static void RemoveHistory(LegacyProject project, string path) =>
         RemoveHistory(project, [path]);
 
+    internal static void ClearHistory(LegacyProject project)
+    {
+        var path = HistoryPath(project);
+        if (File.Exists(path)) File.Delete(path);
+    }
+
     internal static void RemoveHistory(LegacyProject project, IEnumerable<string> paths)
     {
         var removed = paths.ToHashSet(StringComparer.OrdinalIgnoreCase);

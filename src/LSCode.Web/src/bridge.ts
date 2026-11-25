@@ -38,6 +38,7 @@ export type QueryResult = {
 export type Settings = {
   theme: string;
   accentColor?: string | null;
+  buttonColors?: import("./buttonTheme").ButtonColors | null;
   explorerFontSize?: number;
   editorFontSize?: number;
   explorerWidth?: number;
@@ -77,7 +78,12 @@ const pending = new Map<
   string,
   { resolve: (value: unknown) => void; reject: (reason: Error) => void }
 >();
-export type NativeEvent = { type: string; paths?: string[] };
+export type NativeEvent = {
+  type: string;
+  paths?: string[];
+  requestId?: string;
+  hits?: { path: string; line: number; column: number; preview: string }[];
+};
 const listeners = new Set<(event: NativeEvent) => void>();
 export const native = Boolean(window.chrome?.webview);
 window.chrome?.webview?.addEventListener("message", (event) => {

@@ -71,6 +71,7 @@ import {
   CodeEditor,
   modelFor,
   textOf,
+  syncSavedText,
   disposeModel,
   language,
   markSqlErrors,
@@ -79,6 +80,7 @@ import {
 } from "./editor";
 import type { EditorDiagnostic, EditorHandle } from "./editor";
 import { Button, IconButton, Select, Modal, DataGrid, WorkbenchNotice } from "./ui";
+import { applyButtonTheme } from "./buttonTheme";
 import {
   ToolDialog,
   ProjectDialog,
@@ -142,6 +144,47 @@ type EntityPeek = {
     caretSide: "top" | "bottom";
   };
 };
+
+type SearchFolder = { folders: Map<string, SearchFolder>; files: Hit[] };
+
+function SearchResultTree({ hits, root, onOpen }: { hits: Hit[]; root: string; onOpen: (hit: Hit) => void }) {
+  const tree = useMemo(() => {
+    const tree: SearchFolder = { folders: new Map(), files: [] };
+    for (const hit of hits) {
+      const relative = pathIsWithin(hit.path, root)
+        ? hit.path.slice(root.replace(/[\\/]+$/, "").length + 1) : hit.path;
+      let folder = tree;
+      for (const name of relative.split(/[\\/]/).slice(0, -1)) {
+        let child = folder.folders.get(name);
+        if (!child) {
+          child = { folders: new Map(), files: [] };
+          folder.folders.set(name, child);
+        }
+        folder = child;
+      }
+      folder.files.push(hit);
+    }
+    return tree;
+  }, [hits, root]);
+  function render(folder: SearchFolder): React.ReactNode {
+    return <>
+      {[...folder.folders].map(([name, child]) => (
+        <details key={name} open>
+          <summary className="tree-row folder-row search-tree-folder"><Folder size={15} aria-hidden="true" /><span>{name}</span></summary>
+          <div className="tree-children">{render(child)}</div>
+        </details>
+      ))}
+      {folder.files.map(hit => (
+        <button key={hit.path} className="search-hit" title={hit.path} onClick={() => onOpen(hit)}>
+          <strong className="search-tree-filename"><FileIcon path={hit.path} />{hit.path.split(/[\\/]/).at(-1)}{hit.line > 0 ? `:${hit.line}` : ""}</strong>
+          {hit.preview && <span>{hit.preview}</span>}
+        </button>
+      ))}
+    </>;
+  }
+  return <div className="project-file-tree">{render(tree)}</div>;
+}
+
 type EditorSearchHit = {
   line: number;
   column: number;
@@ -329,9 +372,15 @@ export default function App({
   const queryTimer = useRef<number>();
   const [hits, setHits] = useState<Hit[]>([]),
     [search, setSearch] = useState(""),
+    [fileName, setFileName] = useState(""),
+    [searchSubmitted, setSearchSubmitted] = useState(false),
     [regex, setRegex] = useState(false),
     [matchCase, setMatchCase] = useState(false),
     [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState("");
+  const [searchStopped, setSearchStopped] = useState(false);
+  const submitSearch = useRef<() => void>();
+  const stopSearch = useRef<() => void>();
   const [objects, setObjects] = useState<Table>(),
     [objectQuery, setObjectQuery] = useState(""),
     [objectOffset, setObjectOffset] = useState(0),
@@ -363,22 +412,41 @@ export default function App({
   const [historySearch, setHistorySearch] = useState("");
   const historyResults = useMemo(() => {
     const query = historySearch.trim().toLowerCase();
-    if (!query) return history;
-    return history?.flatMap((entry) => {
+    const current = history?.filter(entry => entry.projectId === project?.id);
+    if (!query) return current;
+    return current?.flatMap((entry) => {
       const files = entry.files.filter((path) =>
         path.split(/[\\/]/).slice(-2).some((part) => part.toLowerCase().includes(query)));
       return files.length ? [{ ...entry, files }] : [];
     });
-  }, [history, historySearch]);
+  }, [history, historySearch, project?.id]);
   const switchingHistoryProject = useRef(false);
   const [projectActionBusy, setProjectActionBusy] = useState(false);
   const [structureClear, setStructureClear] = useState<{ id: string; path: string; count: number }>();
   const [searchFolder, setSearchFolder] = useState("");
-  const searchFolders = useMemo(() => [...new Set(controller?.files.flatMap((path) => {
-    const separator = Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/"));
-    return separator > 0 ? [path.slice(0, separator)] : [];
-  }) ?? [])].sort(), [controller]);
-  const searchRoot = searchFolders.includes(searchFolder) ? searchFolder : workspace;
+  const [searchScope, setSearchScope] = useState<{ workspace: string; folders: Entry[] }>();
+  useEffect(() => {
+    if (!workspace || nav !== "search" || !side) return;
+    let active = true;
+    const list = (path: string) => request<Entry[]>("workspace.list", { path });
+    void list(workspace).then(async entries => {
+      const appData = entries.filter(entry => entry.directory && /^app_?data$/i.test(entry.name));
+      const controllers = (await Promise.allSettled(appData.map(entry => list(entry.path))))
+        .flatMap(result => result.status === "fulfilled" ? result.value : [])
+        .filter(entry => entry.directory && /^controllers?$/i.test(entry.name));
+      const folders = (await Promise.allSettled(controllers.map(entry => list(entry.path))))
+        .flatMap(result => result.status === "fulfilled" ? result.value : [])
+        .filter(entry => entry.directory)
+        .sort((left, right) => left.name.localeCompare(right.name) || left.path.localeCompare(right.path));
+      if (active) setSearchScope({ workspace, folders });
+    }).catch(() => {
+      if (active) setSearchScope({ workspace, folders: [] });
+    });
+    return () => { active = false; };
+  }, [workspace, nav, side]);
+  const searchFolders = searchScope?.workspace === workspace ? searchScope.folders : [];
+  const selectedSearchFolder = searchFolders.find(entry => entry.path === searchFolder);
+  const searchRoot = selectedSearchFolder?.path ?? workspace;
   const [unsavedPrompt, setUnsavedPrompt] = useState<{
     names: string[];
     resolve: (choice: "save" | "discard" | "cancel") => void;
@@ -418,9 +486,8 @@ export default function App({
   }, [peeks.length > 0]);
   const scriptToFocus = useRef<string>();
   const editor = useRef<EditorHandle>(),
-    latest = useRef({ tabs, activeId, settings }),
+    latest = useRef({ tabs, activeId, settings, projectId: project?.id }),
     runRef = useRef<ReturnType<typeof operation<QueryResult>>>(),
-    searchRef = useRef<ReturnType<typeof operation<Hit[]>>>(),
     menuLast = useRef("");
   const toolDirty = useRef(false),
     untitledCounter = useRef(0);
@@ -448,7 +515,7 @@ export default function App({
     projectSysTarget = useRef<Target>(),
     projectTargetIds = useRef<string[]>([]),
     pendingOpens = useRef(new Map<string, Promise<void>>());
-  latest.current = { tabs, activeId, settings };
+  latest.current = { tabs, activeId, settings, projectId: project?.id };
   const active = tabs.find((t) => t.id === activeId),
     target = active?.target ?? defaultTarget.current,
     diagnostics = active ? diagnosticsByDocument[active.id] ?? [] : [];
@@ -499,6 +566,12 @@ export default function App({
   const setSelectedCommand = (id: string) => setSelectedCommands((current) => ({ ...current, [menuKind]: id }));
   const [menuEditor, setMenuEditor] = useState<{ command: CommandNode; target: Target; appTarget?: Target; root: string }>();
   const [menuContext, setMenuContext] = useState<{ command: CommandNode; x: number; y: number }>();
+  const [menuScriptChoice, setMenuScriptChoice] = useState<CommandNode>();
+  const [expandedMenus, setExpandedMenus] = useState({ web: new Set<string>(), mobile: new Set<string>() });
+  const menuScroll = useRef({ web: 0, mobile: 0 });
+  const restoreMenuScroll = useCallback((element: HTMLDivElement | null) => {
+    if (element) element.scrollTop = menuScroll.current[menuKind];
+  }, [menuKind]);
   const [catalogTemplate, setCatalogTemplate] = useState("");
   const menuDirty = useRef(false);
   const menuBusy = useRef(false);
@@ -520,12 +593,17 @@ export default function App({
     setMenuEditor({ command, target: sys, appTarget: app?.id === sys.id ? undefined : app, root: workspace });
     setSelectedTool("menu-editor");
   }
-  function openMenuInsertScript(command: CommandNode) {
+  function openMenuInsertScript(command: CommandNode, includeChildren?: boolean) {
     const sysTarget = projectSysTarget.current;
     if (!sysTarget) { setStatus("Dự án chưa có kết nối Sys."); return; }
     setMenuContext(undefined);
+    if (command.children.length && includeChildren === undefined) {
+      setMenuScriptChoice(command);
+      return;
+    }
+    setMenuScriptChoice(undefined);
     void guard(async () => {
-      const script = await request<string>("project.menu.insertScript", { targetId: sysTarget.id, wmenuId: command.entry.id });
+      const script = await request<string>("project.menu.insertScript", { targetId: sysTarget.id, wmenuId: command.entry.id, includeChildren });
       newDocument(script, command.entry.id.replaceAll(".", "-") + "-menu.sql", sysTarget);
       setStatus("Đã tạo script INSERT cho wcommand và command.");
     });
@@ -563,11 +641,65 @@ export default function App({
   }, [side, nav, target?.id, objectQuery, contentSearch]);
   useEffect(() => {
     controllerCache.current.clear();
-    void searchRef.current?.cancel().catch(() => {});
-    searchRef.current = undefined;
-    setHits([]);
-    setSearching(false);
   }, [workspace]);
+  useEffect(() => {
+    setHits([]);
+    setSearchError("");
+    setSearchStopped(false);
+    setSearching(false);
+    setSearchSubmitted(false);
+    if (!side || nav !== "search" || !searchRoot || (!search.trim() && !fileName.trim())) return;
+    let pending: ReturnType<typeof operation<Hit[]>> | undefined;
+    const unsubscribe = subscribe(event => {
+      if (event.type === "workspace.search.progress" && pending && event.requestId === pending.id && event.hits) {
+        const batch = event.hits;
+        setHits(current => [...current, ...batch]);
+      }
+    });
+    const find = () => {
+      if (pending) return;
+      setSearchSubmitted(true);
+      setHits([]);
+      setSearching(true);
+      setSearchError("");
+      setSearchStopped(false);
+      const op = operation<Hit[]>("workspace.search", {
+        path: searchRoot, query: search.trim() ? search : "", fileName: fileName.trim(), regex, matchCase, firstPerFile: true, stream: true,
+        buffers: Object.fromEntries(latest.current.tabs.flatMap(tab => {
+          if (!tab.path || !pathIsWithin(tab.path, searchRoot)) return [];
+          const text = textOf(tab);
+          return text === tab.saved ? [] : [[tab.path, text]];
+        })),
+      });
+      pending = op;
+      void op.promise.then(found => {
+        if (pending === op) setHits(found);
+      }).catch((error: Error & { code?: string }) => {
+        if (pending === op && error.code !== "cancelled") setSearchError(error.message);
+      }).finally(() => {
+        if (pending === op) {
+          pending = undefined;
+          setSearching(false);
+        }
+      });
+    };
+    const cancel = () => {
+      void pending?.cancel().catch(() => {});
+      pending = undefined;
+    };
+    submitSearch.current = find;
+    stopSearch.current = () => {
+      cancel();
+      setSearching(false);
+      setSearchStopped(true);
+    };
+    return () => {
+      unsubscribe();
+      submitSearch.current = undefined;
+      stopSearch.current = undefined;
+      cancel();
+    };
+  }, [side, nav, searchRoot, search, fileName, regex, matchCase]);
   useEffect(() => {
     document
       .querySelector('.sidebar [aria-current="page"]')
@@ -677,11 +809,11 @@ export default function App({
           bom: false,
           newline: "CRLF",
           version: 1,
+          project: latest.current.projectId,
         },
-        connection ?? defaultTarget.current ??
-          latest.current.tabs.find((t) => t.id === latest.current.activeId)
-            ?.target ??
-          targets[0],
+        connection ?? defaultTarget.current ?? (latest.current.projectId
+          ? undefined
+          : latest.current.tabs.find((t) => t.id === latest.current.activeId)?.target ?? targets[0]),
       ),
     [addDocument, targets],
   );
@@ -703,7 +835,8 @@ export default function App({
           } else {
             lastId = document.id;
             if (key) byPath.set(key, document.id);
-            added.push({ ...document, saved: document.text, target: defaultTarget.current ?? targets[0] });
+            added.push({ ...document, saved: document.text, target: defaultTarget.current ??
+              (latest.current.projectId ? undefined : targets[0]) });
           }
         }
         if (added.length) setTabs((old) => [...old, ...added]);
@@ -725,7 +858,8 @@ export default function App({
           const d = await request<DocumentInfo | null>("document.open", {
             path,
           });
-          if (d) addDocument({ ...d, project: projectId }, defaultTarget.current ?? (projectId ? undefined : targets[0]));
+          if (d) addDocument({ ...d, project: projectId }, defaultTarget.current ??
+            (projectId || latest.current.projectId ? undefined : targets[0]));
         })();
         pendingOpens.current.set(key, work);
         try {
@@ -780,15 +914,16 @@ export default function App({
       });
     }
     if (!saved) return false;
+    syncSavedText(saved, text);
     setTabs((old) =>
       old.map((t) =>
         t.id === saved.id
           ? {
               ...t,
               ...saved,
-              text: textOf(t),
+              text: textOf(saved),
               version: Math.max(t.version, saved.version),
-              saved: text,
+              saved: saved.text,
             }
           : t,
       ),
@@ -809,6 +944,7 @@ export default function App({
     disposeModel(t);
     if (native) await request("document.close", { id: t.id });
   }
+  const closingSession = useRef(false);
   const persistRecovery = useCallback(
     () =>
       request("recovery.save", {
@@ -823,6 +959,7 @@ export default function App({
     [],
   );
   const closeWindow = useCallback(async () => {
+    if (closingSession.current) return;
     if (watchBusy.current) { setStatus("Dừng Watch trước khi đóng ứng dụng."); return; }
     if (menuBusy.current) { setStatus("Menu đang xử lý. Thử đóng lại khi hoàn tất."); return; }
     if (menuDirty.current && !window.confirm("Menu ERP còn thay đổi chưa lưu. Đóng ứng dụng?")) return;
@@ -845,23 +982,14 @@ export default function App({
         await new Promise(requestAnimationFrame);
       }
     }
+    closingSession.current = true;
     try {
-      await persistRecovery();
-    } catch (e) {
-      if (
-        latest.current.tabs.some(dirty) &&
-        !window.confirm(
-          "Không tạo được bản khôi phục: " +
-            (e as Error).message +
-            " Đóng và bỏ nội dung chưa lưu?",
-        )
-      ) {
-        setError((e as Error).message);
-        return;
-      }
+      await request("recovery.save", { documents: [] });
+      await request("window.close");
+    } finally {
+      closingSession.current = false;
     }
-    await request("window.close");
-  }, [persistRecovery]);
+  }, []);
   useEffect(
     () =>
       subscribe((e) => {
@@ -969,6 +1097,9 @@ export default function App({
     }
   }, [settings.theme, settings.accentColor]);
   useEffect(() => {
+    applyButtonTheme(settings.buttonColors?.[settings.theme]);
+  }, [settings.theme, settings.buttonColors]);
+  useEffect(() => {
     const currentResult = resultsByTab.current.get(activeId);
     setResult(currentResult);
     setQueryElapsedMs(queryDurationByTab.current.get(activeId) ?? currentResult?.durationMs ?? null);
@@ -977,7 +1108,9 @@ export default function App({
   useEffect(() => () => window.clearInterval(queryTimer.current), []);
   useEffect(() => {
     if (!native || !ready) return;
-    const timer = setInterval(() => void guard(persistRecovery), 8000);
+    const timer = setInterval(() => {
+      if (!closingSession.current) void guard(persistRecovery);
+    }, 8000);
     return () => clearInterval(timer);
   }, [ready, guard, persistRecovery]);
   useEffect(() => {
@@ -1140,16 +1273,39 @@ export default function App({
       delete window.lscodeSmoke;
     };
   }, [ready, newDocument, workspace, addDocument]);
+  const projectConnectionLoad = useRef<Promise<Target | undefined>>();
+  const projectOpeningVersion = useRef(0);
+  const waitingForSqlApp = useRef<number>();
   async function runSql() {
-    if (!active) return;
-    if (!active.target) {
-      setDialog("connection");
+    const version = projectOpeningVersion.current;
+    if (!active || runRef.current || waitingForSqlApp.current === version || closingSession.current) return;
+    if (!active.target && active.project && active.project !== project?.id) {
+      setStatus("Hãy chọn kết nối cho tab SQL thuộc dự án khác.");
       return;
     }
     const selection = editor.current?.getSelection();
     const selected = selection
       ? editor.current?.getModel()?.getValueInRange(selection)
       : "";
+    const sql = selected || textOf(active);
+    let sqlTarget = active.target ?? defaultTarget.current;
+    if (!sqlTarget && projectConnectionLoad.current) {
+      waitingForSqlApp.current = version;
+      setStatus("Đang chờ kết nối SQL App…");
+      try { sqlTarget = await projectConnectionLoad.current; }
+      finally {
+        if (waitingForSqlApp.current === version) waitingForSqlApp.current = undefined;
+      }
+      if (version !== projectOpeningVersion.current || latest.current.activeId !== active.id || closingSession.current) return;
+      sqlTarget = latest.current.tabs.find(tab => tab.id === active.id)?.target ?? sqlTarget;
+    }
+    if (!sqlTarget) {
+      if (project) setStatus("Chưa kết nối được SQL App của dự án. Kiểm tra cấu hình kết nối.");
+      else setDialog("connection");
+      return;
+    }
+    if (!active.target)
+      setTabs(current => current.map(tab => tab.id === active.id ? { ...tab, target: sqlTarget } : tab));
     const startedAt = performance.now();
     setRunning(true);
     setQueryElapsedMs(0);
@@ -1161,11 +1317,11 @@ export default function App({
     setError("");
     markSqlErrors(active, []);
     const queryDocument = active;
-    const targetId = active.target.id;
+    const targetId = sqlTarget.id;
     queryDurationByTab.current.delete(queryDocument.id);
     const op = operation<QueryResult>("sql.execute", {
       targetId,
-      sql: selected || textOf(active),
+      sql,
     });
     runRef.current = op;
     try {
@@ -1666,29 +1822,6 @@ export default function App({
     window.addEventListener("keydown", keys, true);
     return () => window.removeEventListener("keydown", keys, true);
   }, [guard, tableTab?.id]);
-  async function find() {
-    if (!workspace) return;
-    await searchRef.current?.cancel();
-    setSearching(true);
-    const op = operation<Hit[]>("workspace.search", {
-      path: searchRoot,
-      query: search,
-      regex,
-      matchCase,
-      buffers: Object.fromEntries(
-        tabs.filter((t) => t.path && pathIsWithin(t.path, searchRoot)).map((t) => [t.path!, textOf(t)]),
-      ),
-    });
-    searchRef.current = op;
-    try {
-      const found = await op.promise;
-      if (searchRef.current === op) setHits(found);
-    } catch (e) {
-      if (searchRef.current === op) setError((e as Error).message);
-    } finally {
-      if (searchRef.current === op) setSearching(false);
-    }
-  }
   function dbQueryKey() {
     return JSON.stringify([target?.id, objectQuery.trim(), contentSearch]);
   }
@@ -1929,7 +2062,7 @@ export default function App({
       void guard(() => openController(node.entry.link, false, node.entry.sysId, false, true));
       return;
     }
-    void guard(() => openController(node.entry.link, false, node.entry.sysId));
+    void guard(() => openController(node.entry.link, false, node.entry.sysId, true));
   }
   function exportCsv() {
     if (!result?.tables[resultIndex]) return;
@@ -1943,59 +2076,11 @@ export default function App({
       await request("text.export", { name: "results.csv", text: csv });
     });
   }
-  const closingProjectFiles = useRef(false);
-  async function closeProjectFiles(owner?: Project) {
-    if (closingProjectFiles.current) return;
-    if (running) { setStatus("Dừng query đang chạy trước khi đóng nhóm file."); return; }
-    closingProjectFiles.current = true;
-    const closed = new Set<string>();
-    try {
-      const ownerIds = new Set((owner ? [owner] : projects).map(item => item.id));
-      const pathKey = (path: string) => path.replaceAll("\\", "/").toLowerCase();
-      const historyOwners = new Map<string, Set<string>>();
-      for (const entry of history ?? []) {
-        for (const file of entry.files) {
-          const key = pathKey(file);
-          const ids = historyOwners.get(key) ?? new Set<string>();
-          ids.add(entry.projectId);
-          historyOwners.set(key, ids);
-        }
-      }
-      const closing = latest.current.tabs.filter(tab => {
-        if (tab.project && projects.some(item => item.id === tab.project)) return ownerIds.has(tab.project);
-        const path = tab.path;
-        const projectId = path && projects.filter(item => item.sourcePath && pathIsWithin(path, item.sourcePath))
-          .sort((left, right) => right.sourcePath.length - left.sourcePath.length)[0]?.id;
-        if (projectId) return ownerIds.has(projectId);
-        if (path && project && workspace && pathIsWithin(path, workspace)) return ownerIds.has(project.id);
-        const recorded = path ? historyOwners.get(pathKey(path)) : undefined;
-        if (recorded?.size === 1) return ownerIds.has(recorded.values().next().value!);
-        if (!owner && recorded) return [...recorded].some(id => ownerIds.has(id));
-        return !!(project && tab.target && projectTargetIds.current.includes(tab.target.id) && ownerIds.has(project.id));
-      });
-      const edited = closing.filter(dirty);
-      if (edited.length) {
-        const choice = await askUnsaved(edited.map(tab => tab.name));
-        if (choice === "cancel") return;
-        if (choice === "save") for (const tab of edited) if (!(await save(tab))) return;
-      }
-      for (const tab of closing) {
-        if (native) await request("document.close", { id: tab.id });
-        closed.add(tab.id);
-        disposeModel(tab);
-        resultsByTab.current.delete(tab.id);
-        queryDurationByTab.current.delete(tab.id);
-      }
-      setStatus(closing.length ? "Đã đóng " + closing.length + " tab của " + (owner?.name ?? "tất cả dự án") : "Không có tab dự án đang mở.");
-    } finally {
-      if (closed.size) {
-        const remaining = latest.current.tabs.filter(tab => !closed.has(tab.id));
-        setTabs(current => current.filter(tab => !closed.has(tab.id)));
-        setActiveIdRaw(current => closed.has(current) ? remaining.at(-1)?.id ?? "" : current);
-        setPaneIds(current => current.map(id => closed.has(id) ? remaining.at(-1)?.id ?? "" : id));
-      }
-      closingProjectFiles.current = false;
-    }
+  async function clearProjectHistory(owner?: Project) {
+    await request("project.history.clear", { id: owner?.id });
+    setHistory(current => owner ? current?.filter(entry => entry.projectId !== owner.id) : []);
+    setHistoryRevision(version => version + 1);
+    setStatus(owner ? "Đã xóa lịch sử của " + owner.name : "Đã xóa lịch sử của tất cả dự án");
   }
   async function openHistoryFile(p: Project, path: string) {
     if (switchingHistoryProject.current) return;
@@ -2030,14 +2115,19 @@ export default function App({
     }
   }
   async function openProject(p: Project, closingTargets: string[] = []) {
+    const version = ++projectOpeningVersion.current;
     const opened = await operation<{
       project: Project;
       targets: Target[];
-    }>("project.open", { id: p.id }, 31_000).promise;
+      targetsDeferred?: boolean;
+    }>("project.open", { id: p.id, deferTargets: true }, 31_000).promise;
+    if (version !== projectOpeningVersion.current) return;
     setProject(opened.project);
     setActiveId("");
-    defaultTarget.current = opened.targets[0];
-    projectTargetIds.current = opened.targets.map((t) => t.id);
+    const oldTargetIds = [...projectTargetIds.current, ...closingTargets];
+    defaultTarget.current = undefined;
+    projectSysTarget.current = undefined;
+    projectTargetIds.current = [];
     setSettings((old) => ({
       ...old,
       activeProjectId: p.id,
@@ -2050,59 +2140,79 @@ export default function App({
       }),
     }));
     setWorkspace(opened.project.sourcePath);
-    setTargets((old) => [...old.filter((target) => !closingTargets.includes(target.id)), ...opened.targets]);
+    setTargets(old => old.filter(target => !oldTargetIds.includes(target.id)));
     setCommandsByKind({ web: [], mobile: [] });
     setMenuLoaded({ web: false, mobile: false });
     setMenuKind("web");
+    setExpandedMenus({ web: new Set(), mobile: new Set() });
+    menuScroll.current = { web: 0, mobile: 0 };
+    setMenuScriptChoice(undefined);
     setMenuQueries({ web: "", mobile: "" });
     setSelectedCommands({ web: "", mobile: "" });
     setMenuLoadErrors({ web: "", mobile: "" });
     setMenuLoadingByKind({ web: false, mobile: false });
-    const sys =
-      opened.targets.find((t) => /_S(?:ys)?$/i.test(t.database)) ??
-      opened.targets[1];
-    projectSysTarget.current = sys;
-    if (sys) {
-      void request<CommandNode[]>("project.commands", {
-        targetId: sys.id,
-        appDatabase: opened.targets[0]?.database ?? "",
-        kind: "mobile",
-        context: p.id,
-      }).then((loaded) => {
-        if (projectTargetIds.current.includes(sys.id)) {
-          setCommandsByKind((current) => ({ ...current, mobile: loaded }));
-          setMenuLoaded((current) => ({ ...current, mobile: true }));
-        }
-      }).catch(() => {
-        // Mobile is optional. Web loading reports its own connection errors.
-      });
-      setMenuLoadingByKind((current) => ({ ...current, web: true }));
-      void request<CommandNode[]>("project.commands", {
-        targetId: sys.id,
-        appDatabase: opened.targets[0]?.database ?? "",
-        kind: "web",
-        context: p.id,
-      })
-        .then((loaded) => {
-          if (projectTargetIds.current.includes(sys.id)) {
-            setCommandsByKind((current) => ({ ...current, web: loaded }));
-            setMenuLoaded((current) => ({ ...current, web: true }));
-          }
-        })
-        .catch((e) => {
-          setMenuLoadErrors((current) => ({ ...current, web: e.message }));
-          setError(e.message);
-        })
-        .finally(() => {
-          if (projectTargetIds.current.includes(sys.id))
-            setMenuLoadingByKind((current) => ({ ...current, web: false }));
-        });
-    }
     setObjects(undefined);
     controllerRequest.current++;
     setControllers([]);
     setExpandedController(undefined);
     setDialog("");
+    const loading = opened.targetsDeferred
+      ? operation<Target[]>("project.targets", { id: p.id }, 31_000).promise
+      : Promise.resolve(opened.targets);
+    projectConnectionLoad.current = loading.then(loadedTargets => {
+      if (version !== projectOpeningVersion.current) return undefined;
+      const app = loadedTargets[0];
+      const sys = loadedTargets[1];
+      defaultTarget.current = app;
+      projectTargetIds.current = loadedTargets.map(item => item.id);
+      setTargets(old => [...old, ...loadedTargets]);
+      if (app) setSettings(old => ({ ...old, database: app.database }));
+      projectSysTarget.current = sys;
+      if (sys) {
+        void request<CommandNode[]>("project.commands", {
+          targetId: sys.id,
+          appDatabase: app?.database ?? "",
+          kind: "mobile",
+          context: p.id,
+        }).then((loaded) => {
+          if (version === projectOpeningVersion.current) {
+            setCommandsByKind((current) => ({ ...current, mobile: loaded }));
+            setMenuLoaded((current) => ({ ...current, mobile: true }));
+          }
+        }).catch(() => {
+          // Mobile is optional. Web loading reports its own connection errors.
+        });
+        setMenuLoadingByKind((current) => ({ ...current, web: true }));
+        void request<CommandNode[]>("project.commands", {
+          targetId: sys.id,
+          appDatabase: app?.database ?? "",
+          kind: "web",
+          context: p.id,
+        })
+          .then((loaded) => {
+            if (version === projectOpeningVersion.current) {
+              setCommandsByKind((current) => ({ ...current, web: loaded }));
+              setMenuLoaded((current) => ({ ...current, web: true }));
+            }
+          })
+          .catch((e) => {
+            if (version !== projectOpeningVersion.current) return;
+            setMenuLoadErrors((current) => ({ ...current, web: e.message }));
+            setError(e.message);
+          })
+          .finally(() => {
+            if (version === projectOpeningVersion.current)
+              setMenuLoadingByKind((current) => ({ ...current, web: false }));
+          });
+      }
+      return app;
+    }).catch((error: Error) => {
+      if (version === projectOpeningVersion.current) {
+        setError(error.message);
+        setStatus("Không tải được kết nối SQL App.");
+      }
+      return undefined;
+    });
   }
   function runProjectAction(work: () => Promise<void>) {
     setProjectActionBusy(true);
@@ -2218,7 +2328,7 @@ export default function App({
             setStatus("Đã lưu lại web.config");
           });
         }}><RefreshCw size={15} /></IconButton>
-        <IconButton label="Xóa Structure/App" disabled={!project || projectActionBusy} onClick={() => {
+        <IconButton destructive label="Xóa Structure/App" disabled={!project || projectActionBusy} onClick={() => {
           if (!project) return;
           runProjectAction(async () => {
             const preview = await request<{ path: string; count: number }>("project.structure.preview", { id: project.id });
@@ -2405,11 +2515,11 @@ export default function App({
                   const owner = projects.find((entry) => entry.id === projectId);
                   return owner && <ProjectHistory key={projectId} name={owner.name}
                     root={owner.sourcePath} files={files} activePath={active?.path}
-                    onCloseProject={() => void guard(() => closeProjectFiles(owner))}
-                    onCloseAllProjects={() => void guard(() => closeProjectFiles())}
+                    onCloseProject={() => void guard(() => clearProjectHistory(owner))}
+                    onCloseAllProjects={() => void guard(() => clearProjectHistory())}
                     onOpen={(path) => void guard(() => openHistoryFile(owner, path))}
                     onRemove={(path) => queueHistoryRemoval(projectId, path)} />;
-                }) : <div className="explorer-message">{!history ? "Đang tải lịch sử…" : history.length && historySearch.trim()
+                }) : <div className="explorer-message">{!project ? "Chọn dự án để xem lịch sử." : !history ? "Đang tải lịch sử…" : history.some(entry => entry.projectId === project.id) && historySearch.trim()
                   ? "Không tìm thấy file hoặc thư mục." : "Chưa có file trong lịch sử."}</div>}
               </div>
               </>
@@ -2487,27 +2597,30 @@ export default function App({
                   className="side-form"
                   onSubmit={(e) => {
                     e.preventDefault();
-                    void guard(find);
+                    submitSearch.current?.();
                   }}
                 >
-                  <input
-                    aria-label="Nội dung tìm"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Tìm trong dự án"
-                  />
-                  <Select label="Phạm vi tìm kiếm" value={searchRoot === workspace ? "" : searchRoot}
-                    options={[{ value: "", label: "Toàn dự án" }, ...searchFolders.map((folder) => ({
-                      value: folder, label: folder.slice(workspace.length).replace(/^[\\/]+/, "") || folder,
+                  <div className="workspace-search-input">
+                    <input
+                      aria-label="Nội dung tìm"
+                      type="search"
+                      autoFocus
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      placeholder="Tìm theo nội dung tệp"
+                    />
+                    {search && <IconButton label="Xóa nội dung tìm" type="button" onClick={() => setSearch("")}><X size={14} /></IconButton>}
+                  </div>
+                  <input type="search" aria-label="Tên file" placeholder="Tìm theo tên file"
+                    value={fileName} onChange={event => setFileName(event.target.value)} />
+                  <Select label="Phạm vi tìm kiếm" value={selectedSearchFolder?.path ?? ""} floating
+                    searchOptions="Tìm thư mục"
+                    options={[{ value: "", label: "Toàn dự án" }, ...searchFolders.map(folder => ({
+                      value: folder.path,
+                      label: searchFolders.some(entry => entry !== folder && entry.name.toLowerCase() === folder.name.toLowerCase())
+                        ? folder.path.slice(workspace.length).replace(/^[\\/]+/, "") : folder.name,
                     }))]}
-                    onChange={(folder) => {
-                      const previous = searchRef.current;
-                      searchRef.current = undefined;
-                      void previous?.cancel().catch(() => {});
-                      setSearching(false);
-                      setHits([]);
-                      setSearchFolder(folder);
-                    }} />
+                    onChange={setSearchFolder} />
                   <div className="inline-checks">
                     <label>
                       <input
@@ -2525,13 +2638,13 @@ export default function App({
                       />
                       Regex
                     </label>
-                    <Button disabled={!workspace || searching} type="submit">
+                    <Button disabled={!searchRoot || searching || (!search.trim() && !fileName.trim())} type="submit">
                       Tìm
                     </Button>
                     {searching && (
                       <Button
                         type="button"
-                        onClick={() => void searchRef.current?.cancel()}
+                        onClick={() => stopSearch.current?.()}
                       >
                         Dừng
                       </Button>
@@ -2539,25 +2652,15 @@ export default function App({
                   </div>
                 </form>
                 <div className="side-content">
-                  <div className="section-label">
+                  <div className="section-label" role={searchError ? "alert" : "status"}>
                     {searching
-                      ? "Đang tìm…"
-                      : `${hits.length} kết quả${hits.length === 2000 ? " · Giới hạn 2000" : ""}`}
+                      ? `Đang tìm… ${hits.length} tệp khớp`
+                      : searchError || (searchStopped ? "Đã dừng tìm kiếm." : !searchSubmitted ? "Nhập tên file hoặc nội dung rồi bấm Tìm."
+                        : hits.length ? `${hits.length === 2000 ? "Ít nhất " : ""}${hits.length} tệp khớp`
+                          : "Không tìm thấy tệp khớp.")}
                   </div>
-                  {hits.map((h, i) => (
-                    <button
-                      key={i}
-                      className="search-hit"
-                      onClick={() =>
-                        void guard(() => open(h.path, h.line, h.column))
-                      }
-                    >
-                      <strong>
-                        {h.path.split(/[\\/]/).at(-1)}:{h.line}
-                      </strong>
-                      <span>{h.preview}</span>
-                    </button>
-                  ))}
+                  <SearchResultTree hits={hits} root={workspace}
+                    onOpen={hit => void guard(() => open(hit.path, hit.line || undefined, hit.column || undefined))} />
                 </div>
               </>
             )}
@@ -2677,16 +2780,19 @@ export default function App({
                   />
 
                 </div>
-                <div className="side-content side-wide loading-region" aria-busy={menuLoading}>
+                <div ref={restoreMenuScroll} className="side-content side-wide loading-region" aria-busy={menuLoading}
+                  onScroll={event => { menuScroll.current[menuKind] = event.currentTarget.scrollTop; }}>
                   <LoadingLine busy={menuLoading} label={`Đang tải chức năng ${menuKind === "web" ? "Web" : "Mobile"}…`} />
                   {menuLoadError && <div className="tree-message error-text">{menuLoadError}</div>}
                   {!menuQuery && (
                     <FunctionTree
                       nodes={commands}
+                      expanded={expandedMenus[menuKind]}
+                      setExpanded={update => setExpandedMenus(current => ({ ...current, [menuKind]: update(current[menuKind]) }))}
                       selected={selectedCommand}
                       onSelect={setSelectedCommand}
                       onOpen={openFunctionController}
-                      onOpenSource={(node) => void guard(() => openController(node.entry.link, false, node.entry.sysId))}
+                      onOpenSource={(node) => void guard(() => openController(node.entry.link, false, node.entry.sysId, true))}
                       onEdit={openMenuEditor}
                       onScript={openMenuInsertScript}
                       onContext={(node, x, y) => setMenuContext({ command: node, x, y })}
@@ -2700,8 +2806,11 @@ export default function App({
                         aria-current={
                           selectedCommand === n.entry.id || (menuQuery && i === menuIndex) ? "page" : undefined
                         }
-                        onClick={() => {
+                        onClick={(event) => {
                           setSelectedCommand(n.entry.id);
+                          if (event.detail === 0 && (n.entry.link || n.entry.sysId)) openFunctionController(n);
+                        }}
+                        onDoubleClick={() => {
                           if (n.entry.link || n.entry.sysId) openFunctionController(n);
                         }}
                         onFocus={() => setSelectedCommand(n.entry.id)}
@@ -2731,7 +2840,7 @@ export default function App({
                         onClick={(event) => {
                           event.stopPropagation();
                           setSelectedCommand(n.entry.id);
-                          void guard(() => openController(n.entry.link, false, n.entry.sysId));
+                          void guard(() => openController(n.entry.link, false, n.entry.sysId, true));
                         }}
                       >{n.entry.id}</button> : <small className="function-menu-id">{n.entry.id}</small>}
                     </div>
@@ -2753,6 +2862,14 @@ export default function App({
             }} />
           </aside>
         )}
+        {menuScriptChoice && <Modal title="Tạo script menu" onClose={() => setMenuScriptChoice(undefined)}>
+          <div className="modal-copy"><p>Bạn có muốn tạo script cho các menu con của “{menuScriptChoice.entry.caption}” không?</p></div>
+          <div className="modal-footer" style={{ flexWrap: "wrap" }}>
+            <Button onClick={() => setMenuScriptChoice(undefined)}>Hủy</Button>
+            <Button onClick={() => openMenuInsertScript(menuScriptChoice, false)}>Chỉ menu cha</Button>
+            <Button variant="primary" onClick={() => openMenuInsertScript(menuScriptChoice, true)}>Cả menu con</Button>
+          </div>
+        </Modal>}
         {menuContext && <div className="table-action-menu explorer-action-menu" role="menu"
           style={{ left: Math.max(8, Math.min(menuContext.x, window.innerWidth - 248)), top: Math.max(8, Math.min(menuContext.y, window.innerHeight - 136)) }}
           onPointerDown={(event) => event.stopPropagation()}>
@@ -3003,8 +3120,6 @@ export default function App({
               onClose={closeMenuEditor} onDirtyChange={value => { menuDirty.current = value; }}
               onBusyChange={value => { menuBusy.current = value; }}
               onOpenPath={path => void guard(() => open(path))}
-               onCopy={copyWorkspaceText}
-               onReveal={revealWorkspacePath}
               onOpenTable={menuEditor.appTarget ? table => {
                 const target = menuEditor.appTarget;
                 const existing = tableTabs.find(tab => tab.target?.id === target?.id && tab.table === table);
@@ -3509,7 +3624,7 @@ export default function App({
             <p className="break-all">{structureClear.path}</p>
             <div className="inline-checks">
               <Button disabled={projectActionBusy} onClick={() => setStructureClear(undefined)}>Hủy</Button>
-              <Button disabled={projectActionBusy} onClick={() => runProjectAction(async () => {
+              <Button variant="destructive" disabled={projectActionBusy} onClick={() => runProjectAction(async () => {
                 const count = await request<number>("project.structure.clear", { id: structureClear.id, path: structureClear.path });
                 controllerCache.current.clear();
                 setControllers((current) => current.map((entry) => ({
@@ -3683,6 +3798,8 @@ type CommandNode = {
 };
 function FunctionTree({
   nodes,
+  expanded,
+  setExpanded,
   selected,
   onSelect,
   onOpen,
@@ -3693,6 +3810,8 @@ function FunctionTree({
   allowMenuActions,
 }: {
   nodes: CommandNode[];
+  expanded: Set<string>;
+  setExpanded: (update: (previous: Set<string>) => Set<string>) => void;
   selected: string;
   onSelect: (id: string) => void;
   onOpen: (node: CommandNode) => void;
@@ -3702,7 +3821,6 @@ function FunctionTree({
   onContext: (node: CommandNode, x: number, y: number) => void;
   allowMenuActions: boolean;
 }) {
-  const [expanded, setExpanded] = useState(new Set<string>());
   return (
     <ul className="file-tree">
       {nodes.map((node) =>
@@ -3729,7 +3847,7 @@ function FunctionTree({
                 ]
                   .filter(Boolean)
                   .join(" · ")}
-                onClick={() => {
+                onClick={(event) => {
                   onSelect(node.entry.id);
                   if (node.children.length)
                     setExpanded((old) => {
@@ -3738,8 +3856,11 @@ function FunctionTree({
                       else next.add(node.entry.id);
                       return next;
                     });
-                  else if (node.entry.link || node.entry.sysId)
+                  else if (event.detail === 0 && (node.entry.link || node.entry.sysId))
                     onOpen(node);
+                }}
+                onDoubleClick={() => {
+                  if (!node.children.length && (node.entry.link || node.entry.sysId)) onOpen(node);
                 }}
                 onKeyDown={(event) => {
                   if (allowMenuActions && event.key === "F3") {
@@ -3784,6 +3905,8 @@ function FunctionTree({
               <div className="tree-children">
                 <FunctionTree
                   nodes={node.children}
+                  expanded={expanded}
+                  setExpanded={setExpanded}
                   selected={selected}
                   onSelect={onSelect}
                   onOpen={onOpen}

@@ -20,11 +20,11 @@ async Task Reject<T>(Func<Task> work, string name) where T : Exception { try { a
 var nextCommandMethod = typeof(DeveloperTools).Assembly.GetType("LSCode.Infrastructure.MenuEditor")!
     .GetMethod("NextCommandId", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
 string NextCommand(HashSet<string> used) => (string)nextCommandMethod.Invoke(null, [used])!;
-Check(NextCommand([]) == "AA.00.00", "New command IDs start at AA.00.00 independently of tree IDs");
-Check(NextCommand(new(StringComparer.OrdinalIgnoreCase) { "AA.00.00", "AA.00.02", "03.10.01" }) == "AA.00.01",
+Check(NextCommand([]) == "AA.01.01", "New command IDs start at AA.01.01 independently of tree IDs");
+Check(NextCommand(new(StringComparer.OrdinalIgnoreCase) { "AA.01.01", "AA.01.03", "03.10.01" }) == "AA.01.02",
     "New command IDs reuse the first free slot");
-var fullFirstGroup = Enumerable.Range(0, 100).Select(number => $"AA.00.{number:00}").ToHashSet();
-Check(NextCommand(fullFirstGroup) == "AA.01.00", "New command IDs carry from 99 to the next group");
+var fullFirstGroup = Enumerable.Range(1, 99).Select(number => $"AA.01.{number:00}").ToHashSet();
+Check(NextCommand(fullFirstGroup) == "AA.02.00", "New command IDs carry from 99 to the next group");
 var allCommandIds = Enumerable.Range(0, 10000).Select(number => $"AA.{number / 100:00}.{number % 100:00}").ToHashSet();
 try { NextCommand(allCommandIds); throw new Exception("FAIL Exhausted command IDs"); }
 catch (System.Reflection.TargetInvocationException ex) when (ex.InnerException is InvalidOperationException)
@@ -169,15 +169,18 @@ await Reject<InvalidOperationException>(() => AdvanceNoteUpdateGenerator.Generat
 var workspace = new DocumentWorkspace();
 var path = Path.Combine(root, "unicode.xml");
 var encoding = new UnicodeEncoding(false, true, true);
+var utf8Bom = new UTF8Encoding(true, true);
 await File.WriteAllBytesAsync(path, encoding.GetPreamble().Concat(encoding.GetBytes("<root>Tiếng Việt</root>\r\n")).ToArray());
 var document = await workspace.OpenAsync(path, default);
 Check(document.Bom && document.Encoding == "utf-16" && document.Newline == "CRLF", "Open retains UTF16/BOM/newline");
-var saved = await workspace.SaveAsync(document.Id, path, "<root>Đã sửa</root>\r\n", 2, default);
-Check((await File.ReadAllBytesAsync(path)).AsSpan().StartsWith(encoding.GetPreamble()), "Native save preserves BOM");
+var saved = await workspace.SaveAsync(document.Id, path, "<?xml version='1.0' encoding='UTF-16'?><root>Đã sửa</root>\r\n", 2, default);
+Check(saved.Encoding == "utf-8" && saved.Text.Contains("encoding='utf-8'") &&
+    (await File.ReadAllBytesAsync(path)).AsSpan().StartsWith(utf8Bom.GetPreamble()) &&
+    await File.ReadAllTextAsync(path, utf8Bom) == saved.Text, "Native XML save writes UTF-8 BOM and synchronizes the encoding declaration");
 await Reject<InvalidOperationException>(() => workspace.SaveAsync(document.Id, path, "stale", 1, default), "Reject stale save version");
 var copy = Path.Combine(root, "copy.xml");
 await workspace.SaveAsync(document.Id, copy, "<root>Bản sao</root>", 4, default);
-Check((await File.ReadAllBytesAsync(copy)).AsSpan().StartsWith(encoding.GetPreamble()), "Save As preserves original encoding");
+Check((await File.ReadAllBytesAsync(copy)).AsSpan().StartsWith(utf8Bom.GetPreamble()), "XML Save As writes UTF-8 with BOM");
 await File.WriteAllTextAsync(copy, "external");
 Check(await workspace.ChangedAsync(document.Id, default), "Detect external modification");
 await Reject<LSCode.Core.FileConflictException>(() => workspace.SaveAsync(document.Id, copy, "overwrite", 8, default), "Conflict stops external overwrite");
@@ -196,8 +199,8 @@ var renamedPath = Path.Combine(renamedFolder, Path.GetFileName(renamedFile));
 Check(!File.Exists(renameSource) && !Directory.Exists(renameFolder) && File.Exists(renamedPath) &&
     !await workspace.ChangedAsync(renameDocument.Id, default), "Rename rebinds an open document through both file and folder moves");
 var savedAfterRename = await workspace.SaveAsync(renameDocument.Id, renamedPath, "<root>Dirty buffer</root>", 2, default);
-Check(savedAfterRename.Bom && savedAfterRename.Encoding == "utf-16" &&
-    (await File.ReadAllTextAsync(renamedPath)).Contains("Dirty buffer"), "Dirty document saves to its renamed path with original encoding and BOM");
+Check(savedAfterRename.Bom && savedAfterRename.Encoding == "utf-8" &&
+    (await File.ReadAllTextAsync(renamedPath)).Contains("Dirty buffer"), "Dirty XML document saves to its renamed path in UTF-8 with BOM");
 var caseRenamed = await workspace.RenameAsync(renamedPath, "Changed.xml", default);
 Check(File.Exists(caseRenamed) && Directory.EnumerateFiles(renamedFolder).Single() == caseRenamed, "Case-only rename changes the on-disk name");
 await File.WriteAllTextAsync(Path.Combine(renamedFolder, "occupied.xml"), "keep");
@@ -212,6 +215,10 @@ var erpFile=Path.Combine(root,"controller.f");await File.WriteAllTextAsync(erpFi
 Check((await workspace.FilesAsync(root,default)).Contains(erpFile),"Quick open includes ERP .f files");
 var erpHits=(List<LSCode.Core.SearchHit>)await workspace.SearchAsync(root,"ERP_NEEDLE",false,false,[],default);
 Check(erpHits.Count==1&&erpHits[0].Path==erpFile,"Workspace search includes ERP .f content");
+var matchByContent = (List<LSCode.Core.SearchHit>)await workspace.SearchAsync(root, "ERP_NEEDLE", false, false,
+    new() { [erpFile] = "first\nerp_needle\nERP_NEEDLE", [copy] = "ERP_NEEDLE" }, default, firstPerFile: true);
+Check(matchByContent.Count == 2 && matchByContent.Single(hit => hit.Path == erpFile).Line == 2 &&
+    matchByContent.Any(hit => hit.Path == copy), "File search returns each matching file once at its first content match");
 var readOnlyPath = Path.Combine(root, "readonly.sql"); await File.WriteAllTextAsync(readOnlyPath, "SELECT 1");
 var readOnly = await workspace.OpenAsync(readOnlyPath, default); File.SetAttributes(readOnlyPath, FileAttributes.ReadOnly);
 try
@@ -223,7 +230,7 @@ try
 finally { File.SetAttributes(readOnlyPath, FileAttributes.Normal); }
 var restored = workspace.Restore(document with { Path = null, Text = "Khôi phục" });
 var restoredPath = Path.Combine(root, "restored.xml"); await workspace.SaveAsync(restored.Id, restoredPath, restored.Text, 2, default);
-Check((await File.ReadAllBytesAsync(restoredPath)).AsSpan().StartsWith(encoding.GetPreamble()), "Recovered document retains original BOM on Save As");
+Check((await File.ReadAllBytesAsync(restoredPath)).AsSpan().StartsWith(utf8Bom.GetPreamble()), "Recovered XML saves as UTF-8 with BOM");
 using var cancelled = new CancellationTokenSource(); cancelled.Cancel();
 await Reject<OperationCanceledException>(() => workspace.FilesAsync(root, cancelled.Token), "Workspace scan cancellation");
 var sql = CatalogDefinition.Build("dbo", "DanhMuc", true, [new("ma", "nvarchar", "20", Key: true), new("ten", Default: "O'Brien")], [], false, false);
@@ -973,6 +980,49 @@ if (args.Contains("--sql"))
         }), Protocol.Json);
         Check(expressionPreview.GetProperty("data").GetProperty("rows")[0][0].GetString() == "3",
             "Table viewer executes SELECT expressions with WHERE and ORDER BY syntax");
+        await Call("sql.execute", new
+        {
+            targetId = target.Id, sql = """
+                CREATE TABLE dbo.paged_fixture (id int NOT NULL PRIMARY KEY, label nvarchar(max), payload varbinary(max), detail xml);
+                WITH digits(n) AS (SELECT n FROM (VALUES (0),(1),(2),(3),(4),(5),(6),(7),(8),(9)) AS d(n))
+                INSERT dbo.paged_fixture (id, label, payload, detail)
+                SELECT n, N'Mẫu', 0x0123, N'<r>ok</r>'
+                FROM (SELECT 1+a.n+10*b.n+100*c.n+1000*d.n AS n FROM digits a CROSS JOIN digits b CROSS JOIN digits c CROSS JOIN digits d) ids
+                WHERE n<=1201;
+                UPDATE dbo.paged_fixture SET label=REPLICATE(CONVERT(nvarchar(max), N'X'), 300000) WHERE id BETWEEN 1 AND 4;
+                """,
+        });
+        async Task<JsonElement> ReadFixturePage(int offset, string select, string where = "") =>
+            JsonSerializer.SerializeToElement(await Call("table.view", new
+            {
+                targetId = target.Id, table = "paged_fixture", offset, select, where, scope = "paging-fixture",
+            }), Protocol.Json);
+        var largePage = await ReadFixturePage(0, "id, label", "id <= 4");
+        var largeRows = largePage.GetProperty("data").GetProperty("rows");
+        var nextLargePage = await ReadFixturePage(largeRows.GetArrayLength(), "id, label", "id <= 4");
+        Check(largePage.GetProperty("hasMore").GetBoolean() && largeRows.GetArrayLength() == 2 &&
+            largeRows[0][1].GetString()!.Length == 300000 &&
+            nextLargePage.GetProperty("data").GetProperty("rows")[0][0].GetString() == "3",
+            "Table viewer bounds large pages and resumes without dropping the complete text values");
+        await Call("sql.execute", new
+        {
+            targetId = target.Id,
+            sql = "UPDATE dbo.paged_fixture SET label=N'MAX filter ' + REPLICATE(CONVERT(nvarchar(max), N'X'), 600000) WHERE id=5;",
+        });
+        var shortenedPage = await ReadFixturePage(0, "label, id", "label LIKE N'MAX filter %'");
+        var shortenedRow = shortenedPage.GetProperty("data").GetProperty("rows")[0];
+        Check(shortenedPage.GetProperty("shortenedText").GetBoolean() &&
+            shortenedRow[0].GetString()!.StartsWith("MAX filter ", StringComparison.Ordinal) &&
+            shortenedRow[0].GetString()!.Length < 600000 && shortenedRow[1].GetString() == "5",
+            "Table viewer keeps filtered rows and later columns when an nvarchar(max) value exceeds the preview budget");
+        var pagePastThousand = await ReadFixturePage(1000, "id, payload, detail");
+        var pageEnd = await ReadFixturePage(1200, "id, payload, detail");
+        Check(pagePastThousand.GetProperty("hasMore").GetBoolean() &&
+            pagePastThousand.GetProperty("data").GetProperty("rows")[0][0].GetString() == "1001" &&
+            !pageEnd.GetProperty("hasMore").GetBoolean() &&
+            pageEnd.GetProperty("data").GetProperty("rows")[0].EnumerateArray().Select(cell => cell.GetString())
+                .SequenceEqual(new[] { "1201", "0x0123", "<r>ok</r>" }),
+            "Table viewer reaches rows past 1000 in key order and retains binary and XML values");
         await Reject<ArgumentException>(async () => await Call("table.view", new
         {
             targetId = target.Id, schema = "dbo", table = "viewer_fixture",

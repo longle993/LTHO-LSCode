@@ -1,12 +1,14 @@
 # Mục tiêu LSCode
 
-Mở **SQL Profiler** sẽ tự lấy server và database từ tab hiện tại hoặc dự án, điền bộ lọc và bắt đầu thu sự kiện. Dùng đường dẫn `PROFILER.EXE` đã chọn hoặc bản SSMS mặc định khi có. Khi thiếu SSMS, dùng SQL Trace tích hợp cho SQL Server 2008, máy chủ SQL2014 có tài khoản Profiler riêng hoặc khi người dùng nhập tài khoản thu riêng; SQL Server 2012 trở lên có thể dùng Extended Events. Hai instance SQL2008/SQL2014 chuẩn dùng tài khoản Profiler riêng thay cho tài khoản dự án để có quyền `ALTER TRACE`. Batch tạo/dọn trace không chứa cú pháp `THROW` để tương thích SQL Server 2008. Người dùng vẫn có thể chọn `PROFILER.EXE` trong Cài đặt hoặc ngay trong tab Profiler.
+Mở **SQL Profiler** sẽ tự lấy server và database từ tab hiện tại hoặc dự án, điền bộ lọc và bắt đầu thu sự kiện. Dùng đường dẫn `PROFILER.EXE` đã chọn hoặc bản SSMS mặc định khi có. Khi thiếu SSMS, dùng SQL Trace tích hợp cho SQL Server 2008, máy chủ SQL2014 có tài khoản Profiler riêng hoặc khi người dùng nhập tài khoản thu riêng; SQL Server 2012 trở lên có thể dùng Extended Events. WebView mặc định dùng tài khoản thu riêng cho Profiler và cho phép nhập tài khoản khác để chạy thủ công. Batch tạo/dọn trace không chứa cú pháp `THROW` để tương thích SQL Server 2008. Người dùng vẫn có thể chọn `PROFILER.EXE` trong Cài đặt hoặc ngay trong tab Profiler.
 
 Sau khi Dừng rồi Chạy lại, SQL Profiler tiếp tục nối sự kiện mới vào lưới hiện có. Dữ liệu đã thu chỉ được xóa khi người dùng bấm **Xóa**.
 
 Khi mở hoặc chuyển sang file `.xml`, panel Kết quả/Thông báo/Vấn đề tự thu gọn để dành chiều cao cho editor. Dữ liệu trong panel được giữ nguyên và người dùng có thể mở lại ngay từ thanh panel.
 
 Trong **Dự án của bạn**, nút **Đồng bộ** đọc danh mục QLYC bằng `ns_getListDept`. Khi chưa có tên LSCode hoặc danh mục trả rỗng cho tên đã lưu, dùng `CurrUser` của FSD Studio nếu xác định được trong phiên Windows hiện tại. Đồng bộ thêm mã dự án mới, cập nhật profile đang sử dụng, giữ profile ngừng dùng và giải thích kết quả rỗng.
+
+**Đề xuất giao diện.** Phân loại nút thành Primary, Secondary, Tertiary/Ghost, Destructive và Icon Button. Người dùng tùy chỉnh màu theo loại và theo theme, xem trước, lưu và đặt lại. Nghiệm thu bao gồm tương phản, thao tác bàn phím và tương thích với cấu hình màu nhấn cũ. Xem [đặc tả nút và theme](docs/specifications/BUTTON-THEME.vi.md).
 
 Trong tab SQL, gõ `@` để gợi ý tham số của `CREATE/ALTER PROC` và biến khai báo trong tài liệu. Gõ `#` để gợi ý bảng tạm từ `CREATE TABLE` và `SELECT INTO`. Gợi ý lọc theo tiền tố và thay cả ký tự `@` hoặc `#` khi chèn.
 
@@ -16,8 +18,8 @@ Cung cấp một IDE Windows cho người phát triển và bảo trì FAST ERP.
 
 | Phạm vi | Tiêu chí nghiệm thu |
 | --- | --- |
-| Editor và workspace | Mở, tìm kiếm, định dạng, chia pane và lưu file. Kiểm tra thay đổi ngoài ứng dụng và giữ encoding khi lưu. Kéo file từ Explorer vào cửa sổ sẽ mở file; Ctrl+Shift+P mở bảng lệnh và focus ô tìm. Snippet người dùng có khóa bắt đầu bằng `/` xuất hiện ngay trong gợi ý SQL; Enter/Tab thay khóa bằng nội dung và đặt caret theo vị trí đã lưu. Cửa sổ không chrome có viền bao theo theme để phân biệt khi chồng nhiều cửa sổ. Toolbar editor không hiện lối tắt Generate Update/SQL Watch; ô tìm và target được co giãn nhưng nút Chạy luôn đọc trên một dòng khi đổi kích thước cửa sổ. |
-| Dự án, menu và source ERP | Chọn hoặc đồng bộ profile, import/export qua tệp, giữ đúng ngữ cảnh dự án khi mở menu, controller và Source Collection. Panel Chức năng có Web/Mobile; Web giữ `wcommand`, Mobile lazy-load `dvcommand`, cache theo project/SYS/App/identity/loại menu và refresh chủ động. Chọn menu chỉ hiện cây controller theo link hoặc `sysid`, không tự mở Main. F12 và menu chuột phải chỉ áp dụng Web để sinh script INSERT `wcommand` và `command`. |
+| Editor và workspace | Mở, tìm kiếm, định dạng, chia pane và lưu file. Kiểm tra thay đổi ngoài ứng dụng. Tệp XML luôn được lưu bằng UTF-8 có BOM. Khai báo encoding, nếu có, khớp với định dạng khi lưu. Các định dạng khác giữ encoding khi lưu. Kéo file từ Explorer vào cửa sổ sẽ mở file; Ctrl+Shift+P mở bảng lệnh và focus ô tìm. Snippet người dùng có khóa bắt đầu bằng `/` xuất hiện ngay trong gợi ý SQL; Enter/Tab thay khóa bằng nội dung và đặt caret theo vị trí đã lưu. Cửa sổ không chrome có viền bao theo theme để phân biệt khi chồng nhiều cửa sổ. Toolbar editor không hiện lối tắt Generate Update/SQL Watch; ô tìm và target được co giãn nhưng nút Chạy luôn đọc trên một dòng khi đổi kích thước cửa sổ. |
+| Dự án, menu và source ERP | Chọn hoặc đồng bộ profile, import/export qua tệp, giữ đúng ngữ cảnh dự án khi mở menu, controller và Source Collection. Panel Chức năng có Web/Mobile; Web giữ `wcommand`, Mobile lazy-load `dvcommand`, cache theo project/SYS/App/identity/loại menu và refresh chủ động. Nhấp tên một lần để chọn mục ERP. Nhấp đúp tên hoặc nhấp Menu ID để mở tệp chính đã phân giải theo link hoặc `sysid` và hiển thị cây controller. F12 và menu chuột phải chỉ áp dụng Web để sinh script INSERT `wcommand` và `command`. |
 | SQL và danh mục | Target App/SYS gắn với từng tab. Truy vấn có thể hủy. Cấu trúc và dữ liệu có SELECT, WHERE chiếm 70% và ORDER BY chiếm 30% trên cùng hàng; màn hẹp tự xếp dọc. Trạng thái/lỗi dùng toast nội bộ và xác nhận xóa dùng modal LSCode, không gọi hộp thoại hệ thống. Lưới dùng cùng ngôn ngữ với kết quả SQL: kéo chọn vùng, chọn dòng/cột/toàn bảng, Ctrl+C, sửa trực tiếp ô và F8 xóa các dòng được chọn theo khóa chính sau bước xác nhận; dropdown hiển thị App/Sys, Ctrl+Alt+D đổi target của tab bảng. Ctrl+D tại bảng lưu khóa dữ liệu vào Generate Update; menu Tập lệnh mở trên top-layer để không bị toolbar cắt. Nhấp chuột phải trên bề mặt dữ liệu mở cùng menu với nút Tập lệnh, gồm đóng băng đến cột đang trỏ, thêm key vào SQL Data, tạo bảng, INSERT kết quả hiện tại và xóa bảng; chuột phải trong ô đang nhập vẫn giữ menu soạn thảo của hệ thống. Đóng băng giữ cột số dòng và tất cả cột từ đầu đến cột đích khi cuộn ngang; chọn lại chức năng từ toolbar hoặc menu chuột phải sẽ bỏ đóng băng. Gợi ý SQL gồm schema, cột, biến, bảng tạm và snippet nhanh khai báo trong ứng dụng. Thanh Kết quả đếm thời gian mỗi 100 ms khi đang chạy và giữ tổng thời gian sau khi hoàn tất, lỗi hoặc dừng. |
 | Công cụ tích hợp | Dùng Generate Update, Template Studio, Profiler và SQL Watch trên WebView. Ctrl+Shift+4 mở Generate Update. Cài đặt phím tắt là một tab riêng, có tìm kiếm và nhóm theo chức năng. Thao tác breakpoint/step được chuyển sang SSDT. |
 | Phân phối | Build WebView và các project Template Studio từ checkout LSCode. Xác minh gói cài và smoke trên Windows x64. |
@@ -27,6 +29,8 @@ Xem [ma trận WebView](docs/specifications/WEBVIEW-MIGRATION.vi.md) và [đặc
 Lưới Cấu trúc và dữ liệu hiện viền trên mỗi ô được quét và dùng nền xám cho ô nhập. Lưu hoặc Ctrl+S ghi cả lô dữ liệu, gồm thay đổi khóa cho phép ghi. Khi có xung đột khóa, toàn bộ lần lưu được hoàn tác và các ô khóa của dòng lỗi được đánh dấu sau khi khôi phục giá trị.
 
 Sau khi tạo bảng trong LSCode, ô FROM tìm được bảng mới ngay khi quay lại tab Cấu trúc và dữ liệu trên cùng kết nối. Chọn bảng tải được cấu trúc và dữ liệu ngay lần đầu. Tập lệnh INSERT của bảng dùng `dd/MM/yyyy` cho `smalldatetime` và `dd/MM/yyyy HH:mm` cho `datetime`, với chuyển đổi ngày tường minh để chạy được trên phiên SQL Server dùng `mdy`. Lỗi SQL và lỗi tra cứu bảng hiện trong thông báo nổi có thể đóng mà không thay đổi vị trí vùng làm việc.
+
+Trong **Cấu trúc và dữ liệu** của WebView, truy vấn có thể duyệt qua dòng thứ 1.000 bằng các nút chuyển trang. SQL chỉ đọc dữ liệu của từng trang có giới hạn dung lượng, còn lưới chỉ dựng các hàng gần vùng đang xem. Chuyển trang dùng SELECT, WHERE và ORDER BY của lần chạy hiện tại. Các thao tác chọn, sửa, xóa, sao chép và xuất INSERT áp dụng cho dữ liệu trên trang đang xem. Ô **Tìm kiếm** ở thanh bên trái tự tìm theo nội dung khi gõ, hiện mỗi tệp khớp một lần và mở đến vị trí khớp đầu tiên.
 
 ## Tải menu nhanh và menu Mobile
 
@@ -52,6 +56,20 @@ Chỉ hiện thanh Web / Mobile khi tải được cây menu Mobile có mục. D
 
 Batch kiểm tra `dbo.dvcommand` phải chạy được trên các SYS FAST cũ: dùng `RAISERROR + RETURN`, không dùng cú pháp `THROW` yêu cầu SQL Server 2012 trở lên.
 # Điều hướng XML và quản lý yêu cầu
+
+Trong **View All** của QLYC, chọn **Xuất mẫu Excel**, điền danh sách rồi dùng **Import Excel**. Bảng nhóm và lọc theo mã bộ phận. Hai ô chọn điều khiển Số yêu cầu và Số lượng dưới mỗi kỳ. Tiêu đề cột sắp xếp tăng, giảm rồi trả về thứ tự nguồn trong từng nhóm.
+
+Sheet đầu tiên của tệp `.xlsx` có tiêu đề `ma_bp`, `ma_nv`, `ten_nv` theo thứ tự dưới đây. `ma_nv` là mã người xử lý trong dữ liệu QLYC. Mẫu định dạng cột dưới dạng văn bản để giữ số 0 đầu mã. LSCode kiểm tra trùng sau khi bỏ khoảng trắng hai đầu và bỏ phân biệt hoa/thường. Tệp lỗi giữ nguyên danh sách đang dùng. Khi import thành công, LSCode thêm mã mới và ghi đè bộ phận, tên của mã đã có, đồng thời giữ các mã vắng mặt trong tệp. Thông báo nhập hiển thị số nhân viên trong lần nhập vừa hoàn tất.
+
+Hai hàng tiêu đề bảng luôn hiển thị khi cuộn dọc. Cột mã và tên đã ghim vẫn hiển thị khi cuộn ngang. Vùng bảng có thanh cuộn theo các chiều mà dữ liệu vượt khung.
+
+```tsv
+ma_bp	ma_nv	ten_nv
+KT	NV001	Nguyễn Văn An
+KT	NV002	Trần Minh Bình
+```
+
+Thống kê mở ở bộ phận **LTHO** và chỉ hiển thị người có bộ phận trong danh sách đã import. Sau khi import, bộ lọc trở về LTHO. Hai nút icon nhập/xuất mẫu Excel nằm trên thanh công cụ. Bảng cuộn đến tháng hiện tại, mặc định ghim mã và tên nhân viên, cho phép kéo chọn vùng và Ctrl+C để sao chép. Dòng đầu mỗi bộ phận có màu nhận diện. Bật cả hai ô để xem số yêu cầu bên trái và số lượng bên phải trong từng tháng, Tổng và TB.
 
 Ctrl+G trong XML ERP hiển thị TAG và DETAIL với màu nhận diện cho từng nhóm. Nhóm fields có Start tại field đầu tiên và End tại field cuối cùng. Nhóm views liệt kê các view theo `id`. Nhóm command liệt kê sự kiện theo thứ tự nguồn, script chỉ liệt kê tên hàm JavaScript, và css có End/Start. Không đưa `items` hoặc `text` vào danh sách điều hướng. Chọn một mục để nhảy tới vị trí tương ứng trong buffer đang sửa.
 

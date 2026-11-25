@@ -41,10 +41,25 @@ internal sealed class ExecuteStudioCommandHandler(
                 return dialogs.SaveFile(Text("name", "projects.xml"), "LSCode Project Catalog (*.xml)|*.xml");
             case "document.save":
                 var path = Text("path");
-                if (Flag("saveAs") || path.Length == 0) path = dialogs.SaveFile(Text("name", path));
+                if (Flag("saveAs") || path.Length == 0)
+                {
+                    var fileName = Text("name", path);
+                    var sqlFilter = Path.GetExtension(fileName).Equals(".sql", StringComparison.OrdinalIgnoreCase)
+                        ? "Tệp SQL (*.sql)|*.sql|Tất cả file (*.*)|*.*"
+                        : null;
+                    path = dialogs.SaveFile(fileName, sqlFilter);
+                }
                 return string.IsNullOrEmpty(path)
                     ? null
                     : await documents.SaveAsync(Text("id"), path, Text("text"), payload.GetProperty("version").GetInt64(), cancellationToken, Flag("overwriteReadOnly"));
+            case "requestTracking.exportTemplate":
+                var templateData = Text("base64");
+                if (templateData.Length > 256_000) throw new ArgumentException("Tệp mẫu vượt giới hạn kích thước.");
+                var templateBytes = Convert.FromBase64String(templateData);
+                var templatePath = dialogs.SaveFile("mau-nhan-vien-qlyc.xlsx", "Excel (*.xlsx)|*.xlsx");
+                if (templatePath is null) return false;
+                await File.WriteAllBytesAsync(templatePath, templateBytes, cancellationToken);
+                return true;
             case "text.export":
                 var exportPath = dialogs.SaveFile(Text("name", "export.txt"));
                 if (exportPath == null) return null;
@@ -80,7 +95,8 @@ internal sealed class ExecuteStudioCommandHandler(
                 var buffers = payload.TryGetProperty("buffers", out var bufferElement)
                     ? bufferElement.Deserialize<Dictionary<string, string>>(Json) ?? []
                     : [];
-                return await documents.SearchAsync(Text("path"), Text("query"), Flag("regex"), Flag("matchCase"), buffers, cancellationToken);
+                return await documents.SearchAsync(Text("path"), Text("query"), Flag("regex"), Flag("matchCase"), buffers,
+                    cancellationToken, Flag("firstPerFile"), Text("fileName"), request.Progress);
             case "recovery.load":
                 return await documents.RecoverAsync(cancellationToken);
             case "recovery.save":

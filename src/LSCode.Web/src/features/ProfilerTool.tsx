@@ -54,7 +54,7 @@ export function ProfilerTool({ target, visible, closing, onBusyChange }: {
       const result = await request<{ engine: ProfilerEngine }>("profiler.start", {
         targetId: connection.id,
         engine: "auto",
-        useTargetCredentials: !overrideUser,
+        useTargetCredentials: false,
         ...(overrideUser ? { user: overrideUser, password } : {}),
         ...(automatic ? {} : { filter: filter.trim(), profilerPath: profilerPath?.trim() }),
       });
