@@ -2062,7 +2062,7 @@ export default function App({
       void guard(() => openController(node.entry.link, false, node.entry.sysId, false, true));
       return;
     }
-    void guard(() => openController(node.entry.link, false, node.entry.sysId, true));
+    void guard(() => openController(node.entry.link, false, node.entry.sysId));
   }
   function exportCsv() {
     if (!result?.tables[resultIndex]) return;
@@ -2758,8 +2758,8 @@ export default function App({
                 )}
               </>
             )}
-            {nav === "functions" && (
-              <>
+            <div aria-hidden={nav !== "functions"}
+              style={{ display: nav === "functions" ? "contents" : "none" }}>
                 {(commandsByKind.mobile.length > 0 || menuKind === "mobile") && (
                 <div className="menu-kind-tabs" role="tablist" aria-label="Loại chức năng ERP">
                   <button type="button" role="tab" aria-selected={menuKind === "web"}
@@ -2800,17 +2800,14 @@ export default function App({
                     />
                   )}
                   {(menuQuery ? matches : []).map((n, i) => (
-                    <div className="function-row" key={n.entry.id}>
+                    <div className="function-row" data-selected={selectedCommand === n.entry.id ? "true" : undefined} key={n.entry.id}>
                       <button
                         className="search-hit"
                         aria-current={
                           selectedCommand === n.entry.id || (menuQuery && i === menuIndex) ? "page" : undefined
                         }
-                        onClick={(event) => {
+                        onClick={() => {
                           setSelectedCommand(n.entry.id);
-                          if (event.detail === 0 && (n.entry.link || n.entry.sysId)) openFunctionController(n);
-                        }}
-                        onDoubleClick={() => {
                           if (n.entry.link || n.entry.sysId) openFunctionController(n);
                         }}
                         onFocus={() => setSelectedCommand(n.entry.id)}
@@ -2852,8 +2849,7 @@ export default function App({
                     <div className="empty">Chọn dự án có kết nối SYS để tải chức năng.</div>
                   )}
                 </div>
-              </>
-            )}
+            </div>
             <WorkspaceResizeHandle width={settings.explorerWidth ?? 264} onCommit={(explorerWidth) => {
               const next = { ...latest.current.settings, explorerWidth };
               latest.current.settings = next;
@@ -2871,7 +2867,7 @@ export default function App({
           </div>
         </Modal>}
         {menuContext && <div className="table-action-menu explorer-action-menu" role="menu"
-          style={{ left: Math.max(8, Math.min(menuContext.x, window.innerWidth - 248)), top: Math.max(8, Math.min(menuContext.y, window.innerHeight - 136)) }}
+          style={{ left: Math.max(8, Math.min(menuContext.x, window.innerWidth - 248)), top: Math.max(8, Math.min(menuContext.y, window.innerHeight - 176)) }}
           onPointerDown={(event) => event.stopPropagation()}>
           <Button variant="ghost" onClick={() => { const command = menuContext.command; setMenuContext(undefined); openMenuEditor(command); }}>
             Sửa thông tin menu<kbd>F3</kbd>
@@ -2885,6 +2881,14 @@ export default function App({
               setMenuContext(undefined);
               setDialog("catalog");
             }}>Dùng làm mẫu tạo danh mục</Button>
+          <Button variant="ghost" disabled={menuLoading} onClick={() => {
+            const kind = menuKind;
+            setMenuContext(undefined);
+            void guard(async () => {
+              await loadCommands(kind, true);
+              setStatus(`Đã tải lại menu ${kind === "web" ? "Web" : "Mobile"}.`);
+            });
+          }}>Làm mới menu</Button>
         </div>}
         <main className="editor-area">
           <div
@@ -3120,6 +3124,9 @@ export default function App({
               onClose={closeMenuEditor} onDirtyChange={value => { menuDirty.current = value; }}
               onBusyChange={value => { menuBusy.current = value; }}
               onOpenPath={path => void guard(() => open(path))}
+              onCopy={copyWorkspaceText} onReveal={revealWorkspacePath}
+              onDuplicate={path => void guard(() => duplicateWorkspaceItem(path))}
+              onRename={renameWorkspaceItem}
               onOpenTable={menuEditor.appTarget ? table => {
                 const target = menuEditor.appTarget;
                 const existing = tableTabs.find(tab => tab.target?.id === target?.id && tab.table === table);
@@ -3832,7 +3839,7 @@ function FunctionTree({
           />
         ) : (
           <li key={node.entry.id}>
-            <div className="function-row">
+            <div className="function-row" data-selected={selected === node.entry.id ? "true" : undefined}>
               <button
                 className="tree-row"
                  aria-label={node.entry.caption}
@@ -3847,7 +3854,7 @@ function FunctionTree({
                 ]
                   .filter(Boolean)
                   .join(" · ")}
-                onClick={(event) => {
+                onClick={() => {
                   onSelect(node.entry.id);
                   if (node.children.length)
                     setExpanded((old) => {
@@ -3856,11 +3863,8 @@ function FunctionTree({
                       else next.add(node.entry.id);
                       return next;
                     });
-                  else if (event.detail === 0 && (node.entry.link || node.entry.sysId))
+                  else if (node.entry.link || node.entry.sysId)
                     onOpen(node);
-                }}
-                onDoubleClick={() => {
-                  if (!node.children.length && (node.entry.link || node.entry.sysId)) onOpen(node);
                 }}
                 onKeyDown={(event) => {
                   if (allowMenuActions && event.key === "F3") {

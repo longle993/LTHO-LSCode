@@ -602,6 +602,19 @@ kbd {
   width: 100%;
   min-width: 0;
 }
+.function-row[data-selected="true"] {
+  border-radius: 8px;
+  background: var(--secondary);
+}
+.function-row[data-selected="true"] > .tree-row,
+.function-row[data-selected="true"] > .search-hit {
+  background: transparent;
+  font-weight: 700;
+}
+.function-row[data-selected="true"] > .function-menu-id {
+  color: var(--foreground);
+  font-weight: 700;
+}
 .function-row > .tree-row,
 .function-row > .search-hit {
   width: auto;
