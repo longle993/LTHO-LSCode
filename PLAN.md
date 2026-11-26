@@ -8,7 +8,7 @@
 
 - [x] Chèn snippet SQL giữ nguyên ký tự trong tên thủ tục và giá trị tham số. Kiểm tra bằng bộ phân tích snippet của Monaco với mẫu thủ tục phân kỳ và snippet nhập nhanh.
 
-- [x] SQL Profiler dùng tài khoản thu riêng mặc định. Trong cây ERP và kết quả lọc menu, nhấp một lần để chọn, nhấp đúp tên hoặc nhấp Menu ID để mở tệp.
+- [x] SQL Profiler dùng tài khoản thu riêng mặc định. Trong cây ERP và kết quả lọc menu, nhấp tên một lần để tải cây controller và chuyển sang File; nhấp Menu ID để mở tệp chính.
 
 ## Phân loại nút và tùy chỉnh màu
 
@@ -26,6 +26,19 @@
 - [x] Chạy 173 kiểm tra WebView/.NET với LocalDB, gồm truy cập dòng 1.201, phân trang bản ghi có chuỗi dài, giữ dữ liệu binary/XML và tìm trong bộ đệm chưa lưu.
 - [x] Build frontend và Desktop Release. Chạy 154 kiểm tra Core và 11 kiểm tra Chrome trên bản production, gồm phân trang và tìm kiếm ở chiều rộng 375 px. Probe màn chung ghi ba điểm ngoài hai khu vực thay đổi: nút **Mở thư mục** xuống dòng và nút tìm lệnh có vùng bấm dưới 24 px ở 375 px, nút **Chức năng** xuống dòng ở 1.440 px.
 - [ ] Đo thời gian và bộ nhớ trên dữ liệu ERP thực tế. Nhánh đọc SQL Server 2008 chưa được chạy trên máy chủ phiên bản đó.
+
+## Tạo menu cùng cấp từ menu đang chọn — 25/11/2026
+
+- [x] Đọc `wmenu_id` và `wmenu_id0` thực tế của menu đang chọn trong `dbo.wcommand`, không suy diễn mã cha từ hai đoạn đầu.
+- [x] Khi nhấn **Thêm mới**, giữ mã cha và tăng hậu tố số cuối của mã cây, giữ số 0 đầu; bỏ qua mã đã tồn tại và giữ luồng cũ cho mã không có hậu tố số.
+- [x] TypeScript/Vite production build, 114 WebView checks và Chrome `--menu-regression` 11 kiểm tra đạt. Kiểm tra tích hợp SQL đã được bổ sung nhưng chưa chạy vì máy hiện tại không có SQL instance cục bộ; chưa nghiệm thu trên SYS ERP thật.
+
+## Giữ trạng thái và làm mới cây menu ERP — 25/11/2026
+
+- [x] Chọn một menu tải controller/diagnostics và chuyển sang tab File; component cây Chức năng vẫn giữ state để khi quay lại, các nhánh cha đang mở không bị reset.
+- [x] Tô nền và in đậm toàn bộ dòng menu đang chọn, gồm cả tên và mã menu.
+- [x] Thêm **Làm mới menu** vào menu chuột phải, gọi lại `project.commands` với `refresh: true`, giữ nhánh mở và lựa chọn nếu menu vẫn tồn tại.
+- [x] TypeScript/Vite production build và .NET build sạch; Chrome fixture `--menu-regression` đạt 11 kiểm tra, gồm chuyển sang File, quay lại giữ cây/dòng chọn và refresh menu.
 
 ## Menu Tập lệnh bằng chuột phải — 23/11/2026
 

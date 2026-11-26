@@ -59,11 +59,22 @@ await page.addInitScript(()=>{
       case 'project.refreshConfig':result=projectRoot+'\\web.config';break;
       case 'project.structure.preview':result={path:projectRoot+'\\Controller\\Structure\\App',count:2};break;
       case 'project.structure.clear':result=2;break;
-      case 'project.commands':result=request.payload.kind==='mobile'
-        ? [{entry:{id:'mobile1',caption:'Mobile bán hàng',sysId:'MobileSales',commandId:'mobile1',link:''},children:[]}]
-        : [{entry:{id:'menu1',caption:'Nhân viên',sysId:'HR',commandId:'Dir',link:'nhanvien.aspx'},children:[]},{entry:{id:'menu2',caption:'Bộ phận',sysId:'HR',commandId:'Dept',link:'bophan.aspx'},children:[]},{entry:{id:'menu3',caption:'Thông tin nhân viên',sysId:'HR',commandId:'Info',link:'hrEmployeeInformation.aspx'},children:[]},{entry:{id:'separator',caption:'-',sysId:'',commandId:'',link:''},children:[]}];break;
+      case 'project.commands':
+        result=request.payload.kind==='mobile'
+          ? [{entry:{id:'mobile1',caption:'Mobile bán hàng',sysId:'MobileSales',commandId:'mobile1',link:''},children:[]}]
+          : [
+              {entry:{id:'menu-parent',caption:'Hệ thống',sysId:'',commandId:'',link:''},children:[
+                {entry:{id:'menu-child',caption:'Cấu hình hệ thống',sysId:'HR',commandId:'SystemConfig',link:'systemconfig.aspx'},children:[]},
+              ]},
+              {entry:{id:'menu1',caption:'Nhân viên',sysId:'HR',commandId:'Dir',link:'nhanvien.aspx'},children:[]},
+              {entry:{id:'menu2',caption:'Bộ phận',sysId:'HR',commandId:'Dept',link:'bophan.aspx'},children:[]},
+              {entry:{id:'menu3',caption:'Thông tin nhân viên',sysId:'HR',commandId:'Info',link:'hrEmployeeInformation.aspx'},children:[]},
+              {entry:{id:'separator',caption:'-',sysId:'',commandId:'',link:''},children:[]},
+              ...(request.payload.refresh?[{entry:{id:'menu4',caption:'Menu vừa thêm',sysId:'HR',commandId:'NewMenu',link:'newmenu.aspx'},children:[]}]:[]),
+            ];
+        break;
       case 'project.menu.details':{
-        const values={wmenu_id0:'',wmenu_id:'menu1',menu_id:'Dir',bar:'Nhân viên',bar2:'Employee',link:'nhanvien.aspx',sysid:'HR',parameter:'',syscode:'',type:'D',status:'1',icon_url:'',icon:''};
+        const values={wmenu_id0:'03.69.02',wmenu_id:'03.69.43',menu_id:'Dir',bar:'Nhân viên',bar2:'Employee',link:'nhanvien.aspx',sysid:'HR',parameter:'',syscode:'',type:'D',status:'1',icon_url:'',icon:''};
         result={mode:'edit',fields:Object.keys(values).map(name=>({name,type:'varchar',maxLength:80})),values,version:'fixture',canSave:true};break;
       }
       case 'project.menu.resources':result={controllers:['HR'],tables:['DanhMuc','hr.NhanVien'],resources:[
@@ -77,7 +88,10 @@ await page.addInitScript(()=>{
       ]};break;
       case 'catalogSource.preview':result={fingerprint:'catalog-fixture',hasMain:true,
         files:[{path:'App_Data\\Controllers\\Grid\\CatalogDemo.xml',text:"<grid table='DanhMucDemo' />"}]};break;
-      case 'project.menu.new':result={values:{wmenu_id0:'',wmenu_id:'',menu_id:'',bar:'',bar2:'',link:'',sysid:'',status:'1'}};break;
+      case 'project.menu.new':{
+        const values={wmenu_id0:'03.69.02',wmenu_id:'03.69.44',menu_id:'AA.00.01',bar:'',bar2:'',link:'',sysid:'',parameter:'',syscode:'',type:'',status:'1',icon_url:'',icon:''};
+        result={mode:'new',fields:Object.keys(values).map(name=>({name,type:'varchar',maxLength:80})),values,version:'',canSave:true};break;
+      }
       case 'catalogDescription.preview':result={fingerprint:'catalog-description-fixture',
         sql:'CREATE TABLE [dbo].['+request.payload.design.table+'] (...);',
         files:[{path:'App_Data\\Controllers\\Dir\\'+request.payload.design.source.controller+'.xml',text:'<controller />'}]};break;
@@ -242,6 +256,13 @@ await page.addInitScript(()=>{
 });
 const out='artifacts/webview-ui';mkdirSync(out,{recursive:true});
 let checks=0;const check=(value,name)=>{if(!value)throw Error('FAIL '+name);checks++;console.log('PASS '+name);};
+const waitForInputValue=async(locator,value)=>{
+  for(let attempt=0;attempt<50;attempt++){
+    if(await locator.inputValue()===value)return;
+    await page.waitForTimeout(100);
+  }
+  throw Error(`Timed out waiting for input value ${value}`);
+};
 async function testProfiler(){
   await page.getByRole('button',{name:'SQL Profiler',exact:true}).click();
   const profiler=page.getByRole('tabpanel',{name:'SQL Profiler'});
@@ -318,6 +339,15 @@ async function testMenuEditor(functionRow){
   check(await menuPanel.getByText('Đang dò controller và file…',{exact:true}).isVisible() &&
     await menuPanel.getByLabel('Main').isEditable(), 'ERP menu can be edited before resources finish loading');
   await page.evaluate(()=>{window.__holdMenuResources=false;window.__releaseMenuResources();});
+  await menuPanel.getByRole('button',{name:'hr.NhanVien',exact:true}).waitFor();
+  await menuPanel.getByRole('button',{name:'Thêm mới',exact:true}).click();
+  const parentInput=menuPanel.getByLabel(/^Mã cha/);
+  const treeInput=menuPanel.getByLabel(/^Mã cây/);
+  await waitForInputValue(treeInput,'03.69.44');
+  check(await parentInput.inputValue()==='03.69.02' && await treeInput.inputValue()==='03.69.44',
+    'New ERP menu keeps the selected parent and increments the final tree-code suffix');
+  await menuPanel.getByRole('button',{name:'Tải lại',exact:true}).click();
+  await waitForInputValue(treeInput,'03.69.43');
   await menuPanel.getByRole('button',{name:'hr.NhanVien',exact:true}).waitFor();
   await menuPanel.screenshot({path:out+'/erp-menu-editor.png'});
   const shell=menuPanel.locator('.menu-editor-shell');
@@ -681,11 +711,9 @@ Trạng thái: 1-Còn sử dụng, 0-Không còn sử dụng`);
     await page.getByRole('button',{name:'Chức năng',exact:true}).click();
     const menuEntry=page.getByRole('button',{name:'Nhân viên',exact:true});
     await menuEntry.click();
-    check(await menuEntry.getAttribute('aria-current')==='page' &&
-      await page.evaluate(()=>!window.__nativeCalls.some(c=>c.method==='project.controller')),
-    'A single click selects the ERP menu without loading source');
-    await menuEntry.dblclick();
-    await page.getByRole('tab',{name:'nhanvien.aspx',exact:true}).waitFor();
+    await page.waitForFunction(()=>window.__nativeCalls.some(c=>c.method==='project.controller'&&c.payload.link==='nhanvien.aspx'));
+    check(await page.getByRole('button',{name:'File',exact:true}).getAttribute('aria-selected')==='true',
+      'A single click loads the controller tree and switches to File');
     const diagnosticPath='C:\\Fixture\\App_Data\\Controllers\\Filter\\nhanvien.xml';
     const fileTree=page.locator('.project-file-tree');
     const diagnosticFile=fileTree.getByTitle(diagnosticPath,{exact:true});
@@ -737,6 +765,29 @@ Trạng thái: 1-Còn sử dụng, 0-Không còn sử dụng`);
     await page.locator('.project-row').filter({hasText:'Dự án thử UI'}).click();
     await page.locator('dialog').waitFor({state:'detached'});
     await page.getByRole('button',{name:'Chức năng',exact:true}).click();
+    const menuParent=page.getByRole('button',{name:'Hệ thống',exact:true});
+    await menuParent.click();
+    const menuChild=page.getByRole('button',{name:'Cấu hình hệ thống',exact:true});
+    await menuChild.click();
+    await page.waitForFunction(()=>window.__nativeCalls.some(call=>call.method==='project.controller'&&call.payload.link==='systemconfig.aspx'));
+    const selectedMenuRow=menuChild.locator('xpath=..');
+    const fileNav=page.getByRole('button',{name:'File',exact:true});
+    check(await fileNav.getAttribute('aria-selected')==='true' && !(await menuChild.isVisible()),
+      'Selecting a function switches to the File tab and shows its controller tree');
+    await page.getByRole('button',{name:'Chức năng',exact:true}).click();
+    check(await menuParent.getAttribute('aria-expanded')==='true' &&
+      await selectedMenuRow.getAttribute('data-selected')==='true' &&
+      await menuChild.evaluate(element=>Number.parseInt(getComputedStyle(element).fontWeight,10)>=700),
+      'Returning to Functions keeps its parent expanded and emphasizes the selected menu row');
+    await menuChild.click({button:'right'});
+    const refreshMenu=page.getByRole('button',{name:'Làm mới menu',exact:true});
+    await refreshMenu.waitFor();
+    await refreshMenu.click();
+    await page.getByRole('button',{name:'Menu vừa thêm',exact:true}).waitFor();
+    check(await page.evaluate(()=>window.__nativeCalls.some(call=>call.method==='project.commands'&&call.payload.kind==='web'&&call.payload.refresh===true)) &&
+      await menuParent.getAttribute('aria-expanded')==='true' &&
+      await selectedMenuRow.getAttribute('data-selected')==='true',
+      'Context refresh reloads newly added menus without resetting expansion or selection');
     await testMenuEditor(page.getByRole('button',{name:'Nhân viên',exact:true}));
     check(errors.length===0,'No uncaught browser errors');
   } else if(process.argv.includes('--project-target-regression')){
@@ -920,16 +971,17 @@ Trạng thái: 1-Còn sử dụng, 0-Không còn sử dụng`);
   check(await page.getByRole('button',{name:'menu-parent',exact:true}).count()===0,
     'Parent functions keep menu ID text without a source action');
   await functionRow.click();
-  check(await functionRow.getAttribute('aria-current')==='page' &&
-    await page.evaluate(before=>window.__nativeCalls.filter(c=>c.method==='document.open').length===before,openedBefore),
-    'Single click selects the ERP function');
-  await page.getByRole('button',{name:'menu1',exact:true}).click();
   const fileTree=page.locator('.project-file-tree');
   const dirPath='C:\\Fixture\\App_Data\\Controllers\\Dir';
   const gridPath='C:\\Fixture\\App_Data\\Controllers\\Grid';
   const dirFile=fileTree.getByTitle(dirPath+'\\nhanvien.xml',{exact:true});
   const gridFile=fileTree.getByTitle(gridPath+'\\nhanvien.xml',{exact:true});
   await dirFile.waitFor();await gridFile.waitFor();
+  check(await page.getByRole('button',{name:'File',exact:true}).getAttribute('aria-selected')==='true' &&
+    await page.evaluate(before=>window.__nativeCalls.filter(c=>c.method==='document.open').length===before,openedBefore),
+    'Single click opens the ERP controller tree without opening Main');
+  await page.getByRole('button',{name:'Chức năng',exact:true}).click();
+  await page.getByRole('button',{name:'menu1',exact:true}).click();
   await page.getByRole('tab',{name:'nhanvien.aspx',exact:true}).waitFor();
   check(await fileTree.getByTitle('C:\\Fixture\\Main\\nhanvien.aspx',{exact:true}).getAttribute('aria-current')==='page',
     'Menu ID opens Main and reveals its controller tree immediately');
