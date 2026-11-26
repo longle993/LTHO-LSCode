@@ -44,21 +44,29 @@ public partial class MainWindow
         var defaultTemplate = ProfilerTemplate.Default(defaultTarget.Database);
         var originalTemplateBytes = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Template", "SQL2014.tdf"));
         var effectiveTemplateBytes = File.ReadAllBytes(defaultTemplate.TraceTemplatePath!);
-        var reconstructed = new List<byte>(); int eventRecords = 0;
+        var reconstructed = new List<byte>(); int eventRecords = 0; var extraEvents = new HashSet<int>();
         for (int i = 0; i < effectiveTemplateBytes.Length;)
         {
             if (i >= 650 && i + 2 < effectiveTemplateBytes.Length && effectiveTemplateBytes[i] == 252 && effectiveTemplateBytes[i + 1] is 255 or 251)
             {
                 int size = effectiveTemplateBytes[i + 2];
                 if (size < 2 || i + 3 + size > effectiveTemplateBytes.Length || effectiveTemplateBytes[i + 3 + size - 2] != 35 || effectiveTemplateBytes[i + 3 + size - 1] != 0) throw new Exception("DatabaseName column missing from trace template");
+                var eventId = effectiveTemplateBytes[i + 1] == 255
+                    ? effectiveTemplateBytes[i + 3] | effectiveTemplateBytes[i + 4] << 8 : -1;
+                if (eventId is 11 or 162)
+                {
+                    var columns = Enumerable.Range(0, (size - 2) / 2).Select(index => (int)effectiveTemplateBytes[i + 5 + index * 2]).ToArray();
+                    if (eventId == 162 && !columns.Contains(20)) throw new Exception("Severity column missing from user error trace event");
+                    extraEvents.Add(eventId); i += 3 + size; continue;
+                }
                 if (effectiveTemplateBytes[i + 1] == 255) eventRecords++;
                 reconstructed.Add(effectiveTemplateBytes[i]); reconstructed.Add(effectiveTemplateBytes[i + 1]); reconstructed.Add((byte)(size - 2));
                 reconstructed.AddRange(effectiveTemplateBytes.Skip(i + 3).Take(size - 2)); i += 3 + size;
             }
             else reconstructed.Add(effectiveTemplateBytes[i++]);
         }
-        if (eventRecords != 6 || !reconstructed.SequenceEqual(originalTemplateBytes)) throw new Exception("Trace template changes original events/filters");
-        report.Add("PASS SQL2014 template adds DatabaseName to all six events and preserves every original byte otherwise");
+        if (eventRecords != 6 || !extraEvents.SetEquals([11, 162]) || !reconstructed.SequenceEqual(originalTemplateBytes)) throw new Exception("Trace template changes original events/filters");
+        report.Add("PASS SQL2014 template preserves its original events and adds RPC starting plus user error events");
         if (!File.Exists(defaultTemplate.TraceTemplatePath) || new FileInfo(defaultTemplate.TraceTemplatePath!).Length == 0 || defaultTemplate.DatabaseFilter != "Fixture") throw new Exception("Bundled SQL2014 template missing or wrong database filter");
         using (var defaultsJson = System.Text.Json.JsonDocument.Parse(SqlTraceSession.BuildRequest(defaultTarget, defaultTemplate)))
         {

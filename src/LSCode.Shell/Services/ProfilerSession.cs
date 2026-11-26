@@ -8,10 +8,10 @@ using Microsoft.Data.SqlClient;
 namespace LSCode.Shell.Services;
 public sealed record ProfilerTemplate(string Name, string[] Events, string? DatabaseFilter = null, string? TraceTemplatePath = null)
 {
-    public static readonly string[] AllowedEvents = ["rpc_completed", "sql_batch_completed", "sql_statement_completed", "sp_statement_completed", "error_reported"];
+    public static readonly string[] AllowedEvents = ["rpc_starting", "rpc_completed", "sql_batch_starting", "sql_batch_completed", "sql_statement_completed", "sp_statement_completed", "error_reported"];
     public static string FilePath => Path.Combine(SettingsStore.Root, "profiler-template.json");
     public static string BundledTemplatePath => Path.Combine(AppContext.BaseDirectory, "Template", "SQL2014.WithDatabase.tdf");
-    public static ProfilerTemplate Default(string database) => new("SQL2014", ["rpc_completed", "sql_batch_completed"], LSCode.Core.ProfilerDatabaseFilter.Prefix(database), BundledTemplatePath);
+    public static ProfilerTemplate Default(string database) => new("SQL2014", ["rpc_starting", "rpc_completed", "sql_batch_starting", "sql_batch_completed", "error_reported"], LSCode.Core.ProfilerDatabaseFilter.Prefix(database), BundledTemplatePath);
     public static ProfilerTemplate Load()
     {
         var template = File.Exists(FilePath) ? JsonSerializer.Deserialize<ProfilerTemplate>(File.ReadAllText(FilePath)) : new("LS Code — Standard", ["rpc_completed", "sql_batch_completed"]);
@@ -28,7 +28,10 @@ public sealed record ProfilerTemplate(string Name, string[] Events, string? Data
         var temp = FilePath + ".tmp"; File.WriteAllText(temp, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true })); File.Move(temp, FilePath, true);
     }
 }
-public sealed record ProfilerEvent(long Sequence, DateTime Time, string Event, string Database, string Login, string Host, string Application, string Session, double DurationMs, long Reads, long Writes, double CpuMs, string Text);
+public sealed record ProfilerEvent(long Sequence, DateTime Time, string Event, string Database, string Login, string Host, string Application, string Session, double DurationMs, long Reads, long Writes, double CpuMs, string Text)
+{
+    public int Severity { get; init; }
+}
 public sealed record ProfilerBatch(IReadOnlyList<ProfilerEvent> Events, bool Truncated, long Dropped);
 public sealed class ProfilerSession(SqlTarget target, ProfilerTemplate template)
 {
@@ -70,7 +73,8 @@ public sealed class ProfilerSession(SqlTarget target, ProfilerTemplate template)
             long Number(string name) => long.TryParse(Value(name), NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) ? n : 0;
             var text = Value("statement"); if (text.Length == 0) text = Value("batch_text"); if (text.Length == 0) text = Value("message"); if (text.Length == 0) text = Value("sql_text");
             return new ProfilerEvent(Number("event_sequence"), DateTime.Parse((string)e.Attribute("timestamp")!, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal).ToLocalTime(),
-                (string?)e.Attribute("name") ?? "", Value("database_name"), Value("username"), Value("client_hostname"), Value("client_app_name"), Value("session_id"), Number("duration") / 1000d, Number("logical_reads"), Number("writes"), Number("cpu_time") / 1000d, text);
+                (string?)e.Attribute("name") ?? "", Value("database_name"), Value("username"), Value("client_hostname"), Value("client_app_name"), Value("session_id"), Number("duration") / 1000d, Number("logical_reads"), Number("writes"), Number("cpu_time") / 1000d, text)
+            { Severity = (int)Number("severity") };
         }).OrderBy(e => e.Sequence).ToList();
         return new(events, (string?)root.Attribute("truncated") == "1", long.TryParse((string?)root.Attribute("droppedCount"), out var dropped) ? dropped : 0);
     }

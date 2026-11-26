@@ -89,14 +89,20 @@ class Program
                 for (int i=0;i<count;i++) { string name=(string)reader.GetType().GetMethod("GetName").Invoke(reader,new object[]{i}); row[name]=reader.GetType().GetMethod("GetValue").Invoke(reader,new object[]{i}); }
                 if (Text(row,"ApplicationName")=="LSCode.Profiler") continue;
                 string eventClass = Text(row,"EventClass");
-                if (eventClass != "SQL:BatchCompleted" && eventClass != "BatchCompleted" && eventClass != "SQLBatchCompleted" && eventClass != "12") continue;
+                bool included =
+                    eventClass == "RPC:Completed" || eventClass == "RPCCompleted" || eventClass == "10" ||
+                    eventClass == "RPC:Starting" || eventClass == "RPCStarting" || eventClass == "11" ||
+                    eventClass == "SQL:BatchCompleted" || eventClass == "BatchCompleted" || eventClass == "SQLBatchCompleted" || eventClass == "12" ||
+                    eventClass == "SQL:BatchStarting" || eventClass == "BatchStarting" || eventClass == "SQLBatchStarting" || eventClass == "13" ||
+                    eventClass == "User Error Message" || eventClass == "UserErrorMessage" || eventClass == "162";
+                if (!included) continue;
                 string database=Text(row,"DatabaseName");
                 if (input["Database"].Length>0 && !row.ContainsKey("DatabaseName"))
                     throw new InvalidOperationException("Template không thu cột DatabaseName nên không thể lọc theo DB. Chọn template SQL2014 của LS Code hoặc thêm DatabaseName trong SQL Profiler.");
                 // Match the shared project prefix to include both Sys and App databases.
                 if (input["Database"].Length>0 && !LSCode.Core.ProfilerDatabaseFilter.Matches(database, input["Database"])) continue;
                 DateTime time; if (!DateTime.TryParse(Text(row,"StartTime"),out time)) time=DateTime.Now;
-                Emit(new { Kind="event", Sequence=++sequence, Time=time.ToString("o"), Event=Text(row,"EventClass"), Database=database, Login=Text(row,"LoginName"), Host=Text(row,"HostName"), Application=Text(row,"ApplicationName"), Session=Text(row,"SPID"), DurationMs=Number(row,"Duration")/1000d, Reads=(long)Number(row,"Reads"), Writes=(long)Number(row,"Writes"), CpuMs=Number(row,"CPU"), Text=Text(row,"TextData") });
+                Emit(new { Kind="event", Sequence=++sequence, Time=time.ToString("o"), Event=Text(row,"EventClass"), Database=database, Login=Text(row,"LoginName"), Host=Text(row,"HostName"), Application=Text(row,"ApplicationName"), Session=Text(row,"SPID"), DurationMs=Number(row,"Duration")/1000d, Reads=(long)Number(row,"Reads"), Writes=(long)Number(row,"Writes"), CpuMs=Number(row,"CPU"), Severity=(int)Number(row,"Severity"), Text=Text(row,"TextData") });
             }
         }
         catch(Exception ex) { if (!stopping) { Emit(new {Kind="error",Message=DescribeError(ex,stage,password)}); code=1; } }
