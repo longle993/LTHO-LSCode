@@ -6,7 +6,7 @@ Trạng thái: đã triển khai trong WebView LSCode. Ảnh WCOMMAND được d
 
 - Thanh đầu có Tải lại, Thêm mới, Lưu và Đóng. Form lần lượt xếp Mã cha / Mã cây / Mã command, Tên tiếng Việt / Tên tiếng Anh, Main, rồi Controller/SysId.
 - Thuộc tính kỹ thuật xếp Tham số / Syscode / Loại / Trạng thái và Icon URL / Icon. Loại có các giá trị trống, D, V. Loại cũ ngoài danh sách vẫn đọc được. Trạng thái dùng ô tick và lưu bằng 1 hoặc 0.
-- Cột phải gom trạng thái thay đổi, Controller và Table Dir vào một panel. Khung file riêng nhóm theo Dir, Filter, Grid và Main. Mỗi file mở trực tiếp trong editor.
+- Cột phải gom trạng thái thay đổi, Controller và Table Dir vào một panel. Khung file có các tab Dir, Filter, Grid, Report, Lookup, Upload và Main, kèm bảng khai báo ở từng file Dir. Bấm vào dòng để mở file trong editor. Chuột phải có thao tác sao chép, mở thư mục chứa file, đổi tên và nhân bản. F2 mở ô đổi tên file.
 - Table Dir liệt kê tên bảng tĩnh từ khai báo bảng trong Dir chính và Dir tìm qua controller Grid chi tiết. Bấm từng tên để mở cấu trúc và dữ liệu trên App DB của dự án đã mở F3. Tên có schema hoặc hậu tố partition được giữ khi mở.
 - Khi thêm mới, native điền chuỗi rỗng hoặc 0 theo kiểu cột chưa có mặc định, dùng mặc định SQL nếu được khai báo và kiểm tra cả bản ghi trong transaction. Còn cột NULL thì rollback và báo tên cột. Bản ghi cũ giữ nguyên các giá trị NULL chưa sửa.
 - Form đọc dữ liệu độc lập với panel tài nguyên, nên việc dò file không giữ form ở trạng thái đang tải. Việc dò chỉ lập danh sách file controller XML/.f và hủy yêu cầu cũ khi đổi Main hoặc SysId.
@@ -23,7 +23,7 @@ Các mục bên dưới lưu thiết kế và kết quả của bản triển kh
 - Cây Chức năng giữ trạng thái bung nhánh theo Web/Mobile khi chuyển tab. Khi tạo script cho nhánh cha bằng F12 hoặc menu chuột phải, chọn xuất riêng mục cha hoặc kèm toàn bộ hậu duệ.
 - Lưu dùng transaction `SERIALIZABLE`, khóa bản ghi/tập mã, kiểm tra trùng `wcommand.wmenu_id`, `wcommand.menu_id` và `command.menu_id` nếu các cột/bảng này tồn tại.
 - Bản sửa dùng fingerprint của dữ liệu gốc để phát hiện thay đổi từ phiên khác, không ghi đè âm thầm.
-- Panel tài nguyên resolve Main từ link, đọc controller trong ASPX, quét đúng basename ở App_Data/AppData và phân loại Dir/Filter/Grid/Main. `.f` và `.xml` đều được tính; file có thể bấm để mở.
+- Panel tài nguyên resolve Main từ link, đọc controller trong ASPX, quét đúng basename ở App_Data/AppData và phân loại Dir, Filter, Grid, Report, Lookup, Upload và Main. Các nhóm controller nhận cả `.f` và `.xml`.
 - Table Dir được đọc từ các khai báo `table`, `tableName`, `baseTable` hoặc node `<table>` trong XML Dir; không lấy bừa tên bảng từ SQL.
 - Lưu thành công tải lại cây Chức năng và giữ chọn theo mã vừa lưu.
 

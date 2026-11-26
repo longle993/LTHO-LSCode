@@ -411,12 +411,15 @@ await using (var projectTools = new DeveloperTools())
     var resourceControllers = Path.Combine(resourceRoot, "App_Data", "Controllers");
     Directory.CreateDirectory(Path.Combine(resourceControllers, "Dir"));
     Directory.CreateDirectory(Path.Combine(resourceControllers, "Grid"));
+    Directory.CreateDirectory(Path.Combine(resourceControllers, "Report"));
     await File.WriteAllTextAsync(Path.Combine(resourceMain, "fixture.aspx"), "<FastBusiness:ReportExtender Controller='Fixture' />");
     await File.WriteAllTextAsync(Path.Combine(resourceControllers, "Dir", "Fixture.xml"),
         "<controller tableName='d46$000000' detailTable='dbo.d47$000000'><items style='Grid' controller='FixtureDetail'/><!-- <table>Ignored</table> --></controller>");
     await File.WriteAllTextAsync(Path.Combine(resourceControllers, "Dir", "FixtureDetail.f"),
         "<controller><table>[dbo].[FixtureLines]</table></controller>");
     await File.WriteAllTextAsync(Path.Combine(resourceControllers, "Grid", "Fixture.f"), "<controller/>");
+    var reportFixture = Path.Combine(resourceControllers, "Report", "Fixture.xml");
+    await File.WriteAllTextAsync(reportFixture, "<controller/>");
     var menuResources = JsonSerializer.SerializeToElement(await CallProject("project.menu.resources", new { root = resourceRoot, link = "fixture.aspx" }), Protocol.Json);
     var resourceStates = menuResources.GetProperty("resources").EnumerateArray().ToDictionary(
         item => item.GetProperty("kind").GetString()!, item => item.GetProperty("status").GetString());
@@ -424,8 +427,15 @@ await using (var projectTools = new DeveloperTools())
         menuResources.GetProperty("tables").EnumerateArray().Select(table => table.GetString()).ToHashSet()
             .SetEquals(["d46$000000", "dbo.d47$000000", "[dbo].[FixtureLines]"]) &&
         resourceStates["Dir"] == "multiple" && resourceStates["Grid"] == "found" &&
-        resourceStates["Filter"] == "missing" && resourceStates["Main"] == "found",
+        resourceStates["Filter"] == "missing" && resourceStates["Main"] == "found" && resourceStates["Report"] == "found",
         "Menu editor resolves master and detail Dir tables, including a linked controller, and missing file groups");
+    var dirResources = menuResources.GetProperty("resources").EnumerateArray()
+        .Single(item => item.GetProperty("kind").GetString() == "Dir").GetProperty("files");
+    var dirResourceFile = dirResources.EnumerateArray()
+        .Single(file => Path.GetFileName(file.GetProperty("path").GetString()) == "Fixture.xml");
+    Check(dirResourceFile.GetProperty("tables").EnumerateArray().Select(table => table.GetString()).ToHashSet()
+        .SetEquals(["d46$000000", "dbo.d47$000000"]), "Menu editor returns the table declarations for each Dir file");
+    File.Delete(reportFixture);
     Directory.CreateDirectory(Path.Combine(resourceControllers, "Filter"));
     await File.WriteAllTextAsync(Path.Combine(resourceControllers, "Filter", "Fixture.xml"),
         "<filter><title v='Mẫu' e='Sample'/><fields><field name='old_code'/></fields></filter>", new UTF8Encoding(true));

@@ -67,7 +67,9 @@ await page.addInitScript(()=>{
         result={mode:'edit',fields:Object.keys(values).map(name=>({name,type:'varchar',maxLength:80})),values,version:'fixture',canSave:true};break;
       }
       case 'project.menu.resources':result={controllers:['HR'],tables:['DanhMuc','hr.NhanVien'],resources:[
-        {kind:'Dir',paths:['App_Data\\Controllers\\Dir\\nhanvien.xml']},
+        {kind:'Dir',paths:['App_Data\\Controllers\\Dir\\nhanvien.xml'],files:[
+          {path:'App_Data\\Controllers\\Dir\\nhanvien.xml',tables:['hr.NhanVien']},
+        ]},
         {kind:'Filter',paths:[]},
         {kind:'Grid',paths:['App_Data\\Controllers\\Grid\\nhanvien.f']},
         {kind:'Main',paths:['Main\\nhanvien.aspx']},
@@ -342,6 +344,21 @@ async function testMenuEditor(functionRow){
     await menuPanel.getByLabel('Main').isEditable(), 'ERP menu can be edited before resources finish loading');
   await page.evaluate(()=>{window.__holdMenuResources=false;window.__releaseMenuResources();});
   await menuPanel.getByRole('button',{name:'hr.NhanVien',exact:true}).waitFor();
+  const resourcePanel=menuPanel.getByRole('tabpanel');
+  const dirFile=resourcePanel.getByRole('button',{name:/nhanvien\.xml.*hr\.NhanVien/});
+  await dirFile.click({button:'right'});
+  await page.getByRole('menuitem',{name:'Mở thư mục chứa file',exact:true}).click();
+  await page.waitForFunction(()=>window.__nativeCalls.some(call=>call.method==='workspace.reveal'&&
+    call.payload.path==='C:\\Fixture\\App_Data\\Controllers\\Dir\\nhanvien.xml'));
+  await dirFile.focus();
+  await dirFile.press('F2');
+  const rename=page.getByRole('dialog',{name:'Đổi tên file',exact:true});
+  check(await rename.getByRole('textbox',{name:'Tên mới',exact:true}).inputValue()==='nhanvien.xml',
+    'ERP Dir rows show the file table, reveal that file and open rename with F2');
+  await rename.getByRole('button',{name:'Hủy',exact:true}).click();
+  await menuPanel.getByRole('tab',{name:'Grid (1)',exact:true}).click();
+  await resourcePanel.getByRole('button',{name:/nhanvien\.f/}).waitFor();
+  await menuPanel.getByRole('tab',{name:'Dir (1)',exact:true}).click();
   await menuPanel.screenshot({path:out+'/erp-menu-editor.png'});
   const shell=menuPanel.locator('.menu-editor-shell');
   await shell.evaluate(element=>{element.style.width='375px';});

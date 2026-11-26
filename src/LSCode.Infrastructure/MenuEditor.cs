@@ -19,7 +19,8 @@ internal static class MenuEditor
     ];
 
     internal sealed record Field(string Name, string Type, int MaxLength, bool Nullable, bool ReadOnly, bool HasDefault);
-    internal sealed record Resource(string Kind, string Status, string[] Paths);
+    internal sealed record ResourceFile(string Path, string[] Tables);
+    internal sealed record Resource(string Kind, string Status, string[] Paths, ResourceFile[] Files);
     internal sealed record ResourceResult(string[] Controllers, Resource[] Resources, string[] Tables);
 
     public static async Task<object> ReadAsync(SqlTarget target, string wmenuId, CancellationToken token)
@@ -209,7 +210,7 @@ internal static class MenuEditor
             var controllers = (names.Count > 0 ? names : [fallback]).Where(name => !string.IsNullOrWhiteSpace(name))
                 .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
             var roots = new[] { Path.Combine(root, "App_Data"), Path.Combine(root, "AppData") }.Where(Directory.Exists).ToArray();
-            var kinds = new[] { "Dir", "Filter", "Grid" };
+            var kinds = new[] { "Dir", "Filter", "Grid", "Report", "Lookup", "Upload" };
             var files = controllers.Length == 0 ? [] : (roots.Length == 0 ? [root] : roots)
                 .SelectMany(folder => WorkspaceFileIndex.Files(folder, token, false))
                 .Where(path => Path.GetExtension(path).ToLowerInvariant() is ".xml" or ".f")
@@ -221,6 +222,7 @@ internal static class MenuEditor
             var pending = new Queue<string>(controllers);
             var related = new List<string>();
             var tables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var tablesByPath = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
             var timeout = TimeSpan.FromMilliseconds(300);
             while (pending.TryDequeue(out var controller))
             {
@@ -234,17 +236,22 @@ internal static class MenuEditor
                     foreach (var child in ProjectConventions.GridControllers(content))
                         if (visited.Add(child)) pending.Enqueue(child);
                     if (!isDir) continue;
+                    var fileTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                     foreach (Match match in Regex.Matches(content,
                         """(?:\s(?:table|tableName|baseTable|masterTable|detailTable)\s*=\s*['"]|<(?:table|tableName|baseTable|masterTable|detailTable)\b[^>]*>\s*)(?<table>(?:[\w$]+|\[[\w$ ]+\])(?:\.(?:[\w$]+|\[[\w$ ]+\]))?)(?=\s*(?:['"]|</))""",
                         RegexOptions.IgnoreCase, timeout))
-                        tables.Add(match.Groups["table"].Value);
+                        fileTables.Add(match.Groups["table"].Value);
+                    tables.UnionWith(fileTables);
+                    tablesByPath[path] = fileTables.Order(StringComparer.OrdinalIgnoreCase).ToArray();
                 }
             }
             var resources = kinds.Select(kind =>
             {
                 var paths = related.Where(path => HasFolder(path, kind)).Order(StringComparer.OrdinalIgnoreCase).ToArray();
-                return new Resource(kind, paths.Length == 0 ? "missing" : paths.Length == 1 ? "found" : "multiple", paths);
-            }).Append(new Resource("Main", main == null ? "missing" : "found", main == null ? [] : [Path.GetRelativePath(root, main)])).ToArray();
+                return new Resource(kind, paths.Length == 0 ? "missing" : paths.Length == 1 ? "found" : "multiple", paths,
+                    paths.Select(path => new ResourceFile(path, tablesByPath.GetValueOrDefault(path, []))).ToArray());
+            }).Append(new Resource("Main", main == null ? "missing" : "found", main == null ? [] : [Path.GetRelativePath(root, main)],
+                main == null ? [] : [new ResourceFile(Path.GetRelativePath(root, main), [])])).ToArray();
             return new ResourceResult(controllers, resources, tables.ToArray());
         }, token).ConfigureAwait(false);
     }

@@ -3134,6 +3134,10 @@ export default function App({
               onClose={closeMenuEditor} onDirtyChange={value => { menuDirty.current = value; }}
               onBusyChange={value => { menuBusy.current = value; }}
               onOpenPath={path => void guard(() => open(path))}
+              onCopy={copyWorkspaceText}
+              onReveal={revealWorkspacePath}
+              onDuplicate={path => guard(() => duplicateWorkspaceItem(path))}
+              onRename={renameWorkspaceItem}
               onOpenTable={menuEditor.appTarget ? table => {
                 const target = menuEditor.appTarget;
                 const existing = tableTabs.find(tab => tab.target?.id === target?.id && tab.table === table);

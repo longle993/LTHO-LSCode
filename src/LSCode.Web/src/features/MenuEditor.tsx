@@ -1,13 +1,21 @@
-import { useEffect, useMemo, useState } from "react";
-import { FileCode2, Plus, RefreshCw, Save, Table2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { FileCode2, FolderSearch, Plus, RefreshCw, Save, Table2 } from "lucide-react";
 import { operation, request, type Target } from "../bridge";
-import { Button, Select } from "../ui";
+import { Button, Modal, Select } from "../ui";
+import { FileActionMenu, type FileMenuItem, type FileMenuState } from "../FileActionMenu";
 import "./menuEditor.css";
 
 export type MenuCommand = {
   entry: { id: string; caption: string; sysId: string; commandId: string; link: string };
 };
 type Field = { name: string; type: string; maxLength: number; nullable: boolean; readOnly: boolean };
+type ResourceFile = { path: string; tables: string[] };
+type Resource = {
+  kind: string;
+  status: "found" | "missing" | "multiple";
+  paths: string[];
+  files?: ResourceFile[];
+};
 type Model = {
   mode: "edit" | "new";
   fields: Field[];
@@ -17,10 +25,11 @@ type Model = {
 };
 type ResourceResult = {
   controllers: string[];
-  resources: { kind: string; status: "found" | "missing" | "multiple"; paths: string[] }[];
+  resources: Resource[];
   tables: string[];
 };
-
+const resourceKinds = ["Dir", "Filter", "Grid", "Report", "Lookup", "Upload", "Main"] as const;
+type ResourceKind = typeof resourceKinds[number];
 const labels: Record<string, string> = {
   wmenu_id: "Mã cây", wmenu_id0: "Mã cha", bar: "Tên tiếng Việt", bar2: "Tên tiếng Anh",
   menu_id: "Mã command", link: "Main", parameter: "Tham số", icon_url: "Icon URL",
@@ -32,7 +41,7 @@ const technicalRows = [["parameter", "syscode", "type", "status"], ["icon_url", 
 const orderedFields = new Set([...mainRows.flat(), ...technicalRows.flat()]);
 const typeOptions = [{ value: "", label: "Trống" }, { value: "D", label: "D" }, { value: "V", label: "V" }];
 
-export function MenuEditor({ target, command, root, onClose, onSaved, onOpenPath, onOpenTable, onDirtyChange, onBusyChange }: {
+export function MenuEditor({ target, command, root, onClose, onSaved, onOpenPath, onOpenTable, onDirtyChange, onBusyChange, onCopy, onReveal, onDuplicate, onRename }: {
   onDirtyChange: (dirty: boolean) => void;
   onBusyChange: (busy: boolean) => void;
   target: Target;
@@ -41,22 +50,35 @@ export function MenuEditor({ target, command, root, onClose, onSaved, onOpenPath
   onClose: () => void;
   onSaved: (id: string) => Promise<void> | void;
   onOpenPath: (path: string) => void;
+  onCopy: (text: string) => void;
+  onReveal: (path: string) => void;
+  onDuplicate?: (path: string) => void | Promise<unknown>;
+  onRename?: (path: string, name: string) => Promise<unknown>;
   onOpenTable?: (table: string) => void;
 }) {
   const [model, setModel] = useState<Model>();
   const [values, setValues] = useState<Record<string, string | null>>({});
   const [resources, setResources] = useState<ResourceResult>();
+  const [resourceTab, setResourceTab] = useState<ResourceKind>("Dir");
   const [resourceError, setResourceError] = useState("");
   const [resourceRevision, setResourceRevision] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [recordId, setRecordId] = useState(command.entry.id);
+  const [fileMenu, setFileMenu] = useState<FileMenuState>();
+  const [renaming, setRenaming] = useState<FileMenuItem>();
+  const [newName, setNewName] = useState("");
+  const [renameBusy, setRenameBusy] = useState(false);
+  const [renameError, setRenameError] = useState("");
+  const menuOwner = useRef<HTMLButtonElement>();
+  const renameInput = useRef<HTMLInputElement>(null);
   const dirty = useMemo(() => !!model && JSON.stringify(values) !== JSON.stringify(model.values), [model, values]);
 
-  useEffect(() => { onDirtyChange(dirty); onBusyChange(busy); }, [dirty, busy, onDirtyChange, onBusyChange]);
+  useEffect(() => { onDirtyChange(dirty); onBusyChange(busy || renameBusy); }, [dirty, busy, renameBusy, onDirtyChange, onBusyChange]);
 
   async function load() {
+    setFileMenu(undefined);
     setBusy(true); setError(""); setNotice("");
     try {
       const id = recordId || command.entry.id;
@@ -66,6 +88,9 @@ export function MenuEditor({ target, command, root, onClose, onSaved, onOpenPath
     finally { setBusy(false); }
   }
   useEffect(() => { void load(); }, [target.id, command.entry.id]);
+  useEffect(() => {
+    if (renaming) renameInput.current?.focus();
+  }, [renaming]);
 
   const link = model ? values.link ?? "" : command.entry.link;
   const sysId = model ? values.sysid ?? "" : command.entry.sysId;
@@ -137,6 +162,34 @@ export function MenuEditor({ target, command, root, onClose, onSaved, onOpenPath
       />
     </label>;
   };
+  const activeResource = resources?.resources.find((resource) => resource.kind === resourceTab);
+  const resourceFiles = activeResource?.files ?? activeResource?.paths.map((path) => ({ path, tables: [] })) ?? [];
+  const resolveResourcePath = (path: string) => root + (root.endsWith("\\") || root.endsWith("/") ? "" : "\\") + path;
+  const resourceItem = (file: ResourceFile): FileMenuItem => ({
+    name: file.path.split(/[\\/]/).at(-1) ?? file.path,
+    path: resolveResourcePath(file.path),
+    directory: false,
+  });
+  function beginRename(item: FileMenuItem) {
+    setFileMenu(undefined);
+    setRenaming(item);
+    setNewName(item.name);
+    setRenameError("");
+  }
+  async function submitRename(event: FormEvent) {
+    event.preventDefault();
+    if (!renaming || !onRename || renameBusy) return;
+    setRenameBusy(true); setRenameError("");
+    try {
+      await onRename(renaming.path, newName);
+      setRenaming(undefined);
+      setResourceRevision(value => value + 1);
+    } catch (e) {
+      setRenameError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRenameBusy(false);
+    }
+  }
   const renderRow = (names: string[]) => {
     const fields = names.flatMap(name => model?.fields.find(field => field.name === name) ?? []);
     if (!fields.length) return null;
@@ -156,7 +209,7 @@ export function MenuEditor({ target, command, root, onClose, onSaved, onOpenPath
     {(error || notice) && <div role="status" className={`menu-editor-message ${error ? "error" : "success"}`}>{error || notice}</div>}
     <div className="menu-editor-body" aria-busy={busy}>
       <section className="menu-editor-form">
-        <h3>Thông tin menu</h3>
+        <h3>Thông tin từ dbo.wcommand</h3>
         {!model ? <p className="menu-editor-muted">{busy ? "Đang tải thông tin…" : "Không có dữ liệu."}</p> : <>
           <div className="menu-editor-fields">{mainRows.map(renderRow)}</div>
           <details open><summary>Thuộc tính kỹ thuật</summary><div className="menu-editor-fields technical">
@@ -177,18 +230,81 @@ export function MenuEditor({ target, command, root, onClose, onSaved, onOpenPath
               <strong>{resources ? "Chưa khai báo" : "—"}</strong>}
           </div></div>
         </div>
-        {resources ? <div className="menu-editor-file-panel">
-          <h4>File liên quan</h4>
-          {resources.resources.map(resource => <div className="menu-editor-file-group" key={resource.kind}>
-            <strong>{resource.kind}</strong>
-            {resource.paths.length ? <ul>{resource.paths.map(path => <li key={path}>
-              <button title={path} onClick={() => onOpenPath(root + (root.endsWith("\\") ? "" : "\\") + path)}>
-                <FileCode2 size={15} /><span>{path}</span>
-              </button>
-            </li>)}</ul> : <span className="menu-editor-muted">Thiếu file</span>}
-          </div>)}
-        </div> : <p role="status" className="menu-editor-muted">{resourceError || "Đang dò controller và file…"}</p>}
+        <h4>File liên quan</h4>
+        <div className="menu-editor-resource-tabs" role="tablist" aria-label="Nhóm file">
+          {resourceKinds.map((kind) => {
+            const resource = resources?.resources.find((item) => item.kind === kind);
+            const count = resource?.files?.length ?? resource?.paths.length ?? 0;
+            return <button
+              key={kind}
+              type="button"
+              role="tab"
+              aria-selected={resourceTab === kind}
+              onClick={() => setResourceTab(kind)}
+            >{kind} <span>({count})</span></button>;
+          })}
+        </div>
+        <div className="menu-editor-resource-grid" role="tabpanel">
+          <div className="menu-editor-resource-head"><span>File</span><span>Table</span></div>
+          {!resources ? (
+            <p className="menu-editor-muted"><FolderSearch size={18} />{resourceError || "Đang dò controller và file…"}</p>
+          ) : resourceFiles.length ? resourceFiles.map((file) => (
+            <button
+              className="menu-editor-resource-row"
+              type="button"
+              key={file.path}
+              title={resolveResourcePath(file.path)}
+              onClick={() => onOpenPath(resolveResourcePath(file.path))}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                event.currentTarget.focus();
+                const item = resourceItem(file);
+                menuOwner.current = event.currentTarget;
+                setFileMenu({ item, x: Math.max(8, Math.min(event.clientX, innerWidth - 248)), y: Math.max(8, Math.min(event.clientY, innerHeight - 220)) });
+              }}
+              onKeyDown={(event) => {
+                const item = resourceItem(file);
+                if (event.key === "F2" && onRename) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  beginRename(item);
+                } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onCopy(item.name);
+                }
+              }}
+            >
+              <span><FileCode2 size={15} />{file.path}</span>
+              <span>{file.tables.join(", ") || "—"}</span>
+            </button>
+          )) : <p className="menu-editor-muted">Không có file trong nhóm {resourceTab}.</p>}
+        </div>
       </aside>
     </div>
+    <FileActionMenu
+      menu={fileMenu}
+      onClose={() => setFileMenu(undefined)}
+      onCopy={onCopy}
+      onReveal={onReveal}
+      onDuplicate={onDuplicate ? (path) => { void onDuplicate(path); } : undefined}
+      onRenameRequest={onRename ? beginRename : undefined}
+      restoreFocus={() => menuOwner.current?.focus()}
+    />
+  {renaming && onRename && <Modal title="Đổi tên file" onClose={() => { if (!renameBusy) setRenaming(undefined); }}>
+    <form className="tool-body" onSubmit={submitRename}>
+      <label>Tên mới<input ref={renameInput} aria-label="Tên mới" value={newName} disabled={renameBusy}
+        onChange={(event) => setNewName(event.target.value)}
+        onFocus={(event) => {
+          const extension = newName.lastIndexOf(".");
+          event.currentTarget.setSelectionRange(0, extension > 0 ? extension : newName.length);
+        }} /></label>
+      {renameError && <p role="alert" className="form-error">{renameError}</p>}
+      <div className="inline-checks">
+        <Button type="button" disabled={renameBusy} onClick={() => setRenaming(undefined)}>Hủy</Button>
+        <Button type="submit" variant="primary" disabled={renameBusy || !newName.trim()}>{renameBusy ? "Đang đổi tên…" : "Đổi tên"}</Button>
+      </div>
+    </form>
+  </Modal>}
   </div>;
 }
