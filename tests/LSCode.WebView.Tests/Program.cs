@@ -74,6 +74,9 @@ IList<ParseError> ParseSql2008(string sql)
 }
 Check(ParseSql2008(configureTraceSql).Count == 0 && ParseSql2008(dropTraceSql).Count == 0 &&
     !Regex.IsMatch(configureTraceSql + dropTraceSql, @"\bTHROW\b", RegexOptions.IgnoreCase) &&
+    configureTraceSql.Contains("VALUES (11), (13)", StringComparison.Ordinal) &&
+    configureTraceSql.Contains("SELECT 162, id FROM @errorColumns", StringComparison.Ordinal) &&
+    configureTraceSql.Contains("(20), (35)", StringComparison.Ordinal) &&
     Regex.Matches(configureTraceSql, @"\bRAISERROR\b", RegexOptions.IgnoreCase).Count == 3 &&
     Regex.Matches(dropTraceSql, @"\bRAISERROR\b", RegexOptions.IgnoreCase).Count == 2,
     "SQL Trace setup and cleanup batches parse with the SQL Server 2008 grammar");
@@ -81,8 +84,11 @@ var startBatchMethod = typeof(ProfilerSession).GetMethod("StartBatchSql",
     System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
 var extendedStartSql = (string)startBatchMethod.Invoke(null,
     ["LSCode_fixture", "Fixture_A", ProfilerTemplate.Default("Fixture_A")])!;
-Check(!Regex.IsMatch(extendedStartSql, @"\bTHROW\b", RegexOptions.IgnoreCase),
-    "Extended Events startup no longer injects the SQL Server 2012 THROW keyword");
+Check(!Regex.IsMatch(extendedStartSql, @"\bTHROW\b", RegexOptions.IgnoreCase) &&
+    extendedStartSql.Contains("sqlserver.rpc_starting", StringComparison.Ordinal) &&
+    extendedStartSql.Contains("sqlserver.sql_batch_starting", StringComparison.Ordinal) &&
+    extendedStartSql.Contains("sqlserver.error_reported", StringComparison.Ordinal),
+    "Extended Events startup captures starting statements and user-facing SQL errors without THROW");
 await using (var provider = new ServiceCollection().AddLSCodeInfrastructure().BuildServiceProvider())
     Check(provider.GetRequiredService<IDeveloperTools>() is DeveloperTools, "Profiler resolves through its single DI registration");
 checks++;

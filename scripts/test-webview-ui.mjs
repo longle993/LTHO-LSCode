@@ -322,6 +322,46 @@ async function testProfiler(){
     await profiler.locator('.trace-sql').inputValue()==='SELECT 61' &&
     await page.evaluate(()=>window.__nativeCalls.filter(c=>c.method==='profiler.start').length===2),
     'Profiler stop and restart appends events without clearing captured data');
+  const failedSql="SELECT zczc, N'Nội dung SQL đầy đủ không bị cắt' FROM dbo.dmct WHERE ma_ct = 'PN1'";
+  await page.evaluate(sql=>window.__traceBatch.push(
+    {sequence:63,time:'2026-11-26T10:49:22.523',event:'User Error Message',database:'Fixture_App',login:'profile',session:'71',durationMs:0,reads:0,severity:16,text:"Invalid column name 'zczc'."},
+    {sequence:64,time:'2026-11-26T10:49:22.523',event:'SQL:BatchStarting',database:'Fixture_App',login:'profile',session:'71',durationMs:0,reads:0,text:sql},
+  ),failedSql);
+  await profiler.getByText(/64 sự kiện/).waitFor();
+  const failedCell=traceGrid.locator('td').filter({hasText:failedSql}).last();
+  await failedCell.waitFor();
+  const failedRow=failedCell.locator('xpath=..');
+  const errorRow=failedRow.locator('xpath=following-sibling::tr[1]');
+  check((await failedRow.getAttribute('class'))?.includes('profiler-error-source-row') &&
+    (await errorRow.getAttribute('class'))?.includes('profiler-error-message-row') &&
+    (await errorRow.textContent()).includes("Invalid column name 'zczc'."),
+    'Profiler gives failed SQL a red background and the following error message red text');
+  const copiesBeforeClick=await page.evaluate(sql=>window.__nativeCalls.filter(c=>c.method==='clipboard.write'&&c.payload.text===sql).length,failedSql);
+  await failedCell.click();
+  await page.waitForTimeout(150);
+  check(await page.evaluate(({sql,before})=>window.__nativeCalls.filter(c=>c.method==='clipboard.write'&&c.payload.text===sql).length===before,{sql:failedSql,before:copiesBeforeClick}),
+    'A single click selects SQL without copying it');
+  await failedCell.dblclick();
+  await page.waitForFunction(sql=>window.__nativeCalls.some(c=>c.method==='clipboard.write'&&c.payload.text===sql),failedSql);
+  await page.getByText('Đã sao chép SQL.',{exact:true}).waitFor();
+  check(await profiler.locator('.trace-sql').inputValue()===failedSql,
+    'Double-clicking the SQL cell copies the full statement and shows a success notice');
+  await page.getByRole('button',{name:'Đóng thông báo'}).click();
+  await profiler.getByRole('button',{name:'Theo dõi cuối lưới'}).click();
+  const warningSql='SELECT SUM(nullable_value) FROM dbo.WarningFixture';
+  const warningText='Warning: Null value is eliminated by an aggregate or other SET operation.';
+  await page.evaluate(({sql,warning})=>window.__traceBatch.push(
+    {sequence:65,time:'2026-11-26T11:03:38.300',event:'User Error Message',database:'Fixture_App',login:'profile',session:'72',durationMs:0,reads:0,severity:10,text:warning},
+    {sequence:66,time:'2026-11-26T11:03:38.300',event:'SQL:BatchStarting',database:'Fixture_App',login:'profile',session:'72',durationMs:0,reads:0,text:sql},
+    {sequence:67,time:'2026-11-26T11:03:38.400',event:'SQL:BatchCompleted',database:'Fixture_App',login:'profile',session:'72',durationMs:1,reads:1,text:sql},
+  ),{sql:warningSql,warning:warningText});
+  await profiler.getByText(/67 sự kiện/).waitFor();
+  const warningRow=traceGrid.locator('tr').filter({hasText:warningText}).last();
+  const warningSqlRow=traceGrid.locator('tr').filter({hasText:warningSql}).last();
+  await warningRow.waitFor();await warningSqlRow.waitFor();
+  check(!(await warningRow.getAttribute('class')??'').includes('profiler-error-') &&
+    !(await warningSqlRow.getAttribute('class')??'').includes('profiler-error-'),
+    'Profiler keeps severity 10 warnings and their SQL rows out of the red error style');
   await page.screenshot({path:out+'/profiler-tab-dark.png'});
   const stopsBeforeSwitch=await page.evaluate(()=>window.__nativeCalls.filter(c=>c.method==='profiler.stop').length);
   await page.locator('.document-tabs').getByRole('tab').first().click();

@@ -4,6 +4,8 @@ Mở **SQL Profiler** sẽ tự lấy server và database từ tab hiện tại 
 
 Sau khi Dừng rồi Chạy lại, SQL Profiler tiếp tục nối sự kiện mới vào lưới hiện có. Dữ liệu đã thu chỉ được xóa khi người dùng bấm **Xóa**.
 
+Trong lưới SQL Profiler, nhấp một lần vào ô cột **SQL** chỉ chọn/xem; nhấp đúp mới sao chép toàn bộ nội dung gốc và hiện thông báo **Đã sao chép SQL.**, kể cả khi ô chỉ hiển thị một phần. Sự kiện lỗi SQL có severity từ 11 phải được ghép với câu lệnh đang chạy: câu SQL gây lỗi được tô nền đỏ, còn dòng thông báo ngay sau nó hiển thị chữ đỏ. Cảnh báo severity dưới 11, gồm `Warning: Null value is eliminated...`, vẫn hiển thị nhưng không tô đỏ cảnh báo hoặc câu SQL. Bộ thu phải lấy cả sự kiện bắt đầu câu lệnh, severity và thông báo lỗi để vẫn hiển thị được câu SQL không phát sinh sự kiện hoàn tất.
+
 Khi mở hoặc chuyển sang file `.xml`, panel Kết quả/Thông báo/Vấn đề tự thu gọn để dành chiều cao cho editor. Dữ liệu trong panel được giữ nguyên và người dùng có thể mở lại ngay từ thanh panel.
 
 Trong **Dự án của bạn**, nút **Đồng bộ** đọc danh mục QLYC bằng `ns_getListDept`. Khi chưa có tên LSCode hoặc danh mục trả rỗng cho tên đã lưu, dùng `CurrUser` của FSD Studio nếu xác định được trong phiên Windows hiện tại. Đồng bộ thêm mã dự án mới, cập nhật profile đang sử dụng, giữ profile ngừng dùng và giải thích kết quả rỗng.

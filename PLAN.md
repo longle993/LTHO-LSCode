@@ -61,6 +61,13 @@
 - [x] Xử lý máy chủ SQL2014 từ chối Extended Events của tài khoản dự án. Kiểm tra SQL Trace tích hợp bằng truy vấn fixture trên LocalDB và xác nhận mở, đọc, đóng phiên đã lọc trên máy chủ tương ứng.
 - [x] Sửa lỗi SQL Server 2008 `Incorrect syntax near 'THROW'`: tự chọn SQL Trace cho version 10.x, đổi batch sang `RAISERROR + RETURN` và kiểm tra bằng parser T-SQL 100 trong bộ 109 WebView checks.
 - [x] Sửa lỗi `You do not have permission to run 'SP_TRACE_CREATE'` trên instance SQL2008 chuẩn bằng cách tự dùng tài khoản Profiler riêng thay cho tài khoản dự án; không đưa mật khẩu qua bridge hoặc UI.
+
+## Sao chép đầy đủ và đánh dấu lỗi SQL Profiler — 26/11/2026
+
+- [x] Nhấp một lần chỉ chọn/xem SQL; nhấp đúp ô SQL mới sao chép chuỗi đầy đủ và hiện toast **Đã sao chép SQL.**
+- [x] Thu `RPC:Starting`, `SQL:BatchStarting` và `User Error Message` ở SQL Trace; thu các sự kiện starting và `error_reported` tương ứng ở Extended Events.
+- [x] Ghép lỗi severity từ 11 với câu SQL cùng phiên: tô nền câu SQL gây lỗi, đặt dòng thông báo chữ đỏ ngay sau; cảnh báo severity dưới 11 không tô đỏ.
+- [ ] Smoke với một câu SQL lỗi trên instance ERP thật; kiểm chứng tự động hiện dùng fixture không chứa dữ liệu khách hàng.
 - [x] Giữ dữ liệu đã thu khi Dừng rồi Chạy lại và kiểm tra sự kiện của phiên mới được nối vào lưới.
 - [x] Tự thu gọn panel dưới khi mở hoặc chọn tab XML, giữ nguyên dữ liệu và cho phép mở lại.
 - [ ] Smoke phiên thu thật trên instance SQL Server 2008 của người dùng sau khi cài bản publish mới.
