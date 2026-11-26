@@ -29,6 +29,13 @@ var allCommandIds = Enumerable.Range(0, 10000).Select(number => $"AA.{number / 1
 try { NextCommand(allCommandIds); throw new Exception("FAIL Exhausted command IDs"); }
 catch (System.Reflection.TargetInvocationException ex) when (ex.InnerException is InvalidOperationException)
 { Check(true, "Exhausted command IDs fail instead of generating duplicates"); }
+var nextSiblingMethod = typeof(DeveloperTools).Assembly.GetType("LSCode.Infrastructure.MenuEditor")!
+    .GetMethod("NextSiblingId", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
+string? NextSibling(string selectedId, HashSet<string> used) => (string?)nextSiblingMethod.Invoke(null, [selectedId, used]);
+Check(NextSibling("03.69.43", []) == "03.69.44", "New sibling menu increments the final numeric suffix");
+Check(NextSibling("03.69.43", new(StringComparer.OrdinalIgnoreCase) { "03.69.44" }) == "03.69.45",
+    "New sibling menu skips an existing next code");
+Check(NextSibling("leaf", []) is null, "Legacy non-numeric menu codes retain the branch-code fallback");
 var debugScriptMethod = typeof(DeveloperTools).Assembly.GetType("LSCode.Infrastructure.SqlDebugLauncher")!
     .GetMethod("Script", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
 var debugScript = (string)debugScriptMethod.Invoke(null, ["server\r\nnot-a-command", "db]name", "DECLARE @id int = 7;\r\nSELECT @id;"])!;
@@ -67,6 +74,9 @@ IList<ParseError> ParseSql2008(string sql)
 }
 Check(ParseSql2008(configureTraceSql).Count == 0 && ParseSql2008(dropTraceSql).Count == 0 &&
     !Regex.IsMatch(configureTraceSql + dropTraceSql, @"\bTHROW\b", RegexOptions.IgnoreCase) &&
+    configureTraceSql.Contains("VALUES (11), (13)", StringComparison.Ordinal) &&
+    configureTraceSql.Contains("SELECT 162, id FROM @errorColumns", StringComparison.Ordinal) &&
+    configureTraceSql.Contains("(20), (35)", StringComparison.Ordinal) &&
     Regex.Matches(configureTraceSql, @"\bRAISERROR\b", RegexOptions.IgnoreCase).Count == 3 &&
     Regex.Matches(dropTraceSql, @"\bRAISERROR\b", RegexOptions.IgnoreCase).Count == 2,
     "SQL Trace setup and cleanup batches parse with the SQL Server 2008 grammar");
@@ -74,8 +84,11 @@ var startBatchMethod = typeof(ProfilerSession).GetMethod("StartBatchSql",
     System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
 var extendedStartSql = (string)startBatchMethod.Invoke(null,
     ["LSCode_fixture", "Fixture_A", ProfilerTemplate.Default("Fixture_A")])!;
-Check(!Regex.IsMatch(extendedStartSql, @"\bTHROW\b", RegexOptions.IgnoreCase),
-    "Extended Events startup no longer injects the SQL Server 2012 THROW keyword");
+Check(!Regex.IsMatch(extendedStartSql, @"\bTHROW\b", RegexOptions.IgnoreCase) &&
+    extendedStartSql.Contains("sqlserver.rpc_starting", StringComparison.Ordinal) &&
+    extendedStartSql.Contains("sqlserver.sql_batch_starting", StringComparison.Ordinal) &&
+    extendedStartSql.Contains("sqlserver.error_reported", StringComparison.Ordinal),
+    "Extended Events startup captures starting statements and user-facing SQL errors without THROW");
 await using (var provider = new ServiceCollection().AddLSCodeInfrastructure().BuildServiceProvider())
     Check(provider.GetRequiredService<IDeveloperTools>() is DeveloperTools, "Profiler resolves through its single DI registration");
 checks++;
@@ -859,6 +872,12 @@ if (args.Contains("--sql"))
         Check(menuDetails.GetProperty("values").GetProperty("bar").GetString() == "Menu" &&
             menuDetails.GetProperty("values").GetProperty("wmenu_id").GetString() == "leaf",
             "Menu editor reads schema-driven wcommand details");
+        await Call("sql.execute", new { targetId = target.Id,
+            sql = "INSERT dbo.wcommand(wmenu_id,wmenu_id0,bar,link,status,sysid,menu_id) VALUES ('03.69.43','03.69.02',N'Menu cùng cấp','','1','',NULL)" });
+        var siblingDraft = JsonSerializer.SerializeToElement(await Call("project.menu.new", new { targetId = target.Id, selectedId = "03.69.43" }), Protocol.Json);
+        Check(siblingDraft.GetProperty("values").GetProperty("wmenu_id0").GetString() == "03.69.02" &&
+            siblingDraft.GetProperty("values").GetProperty("wmenu_id").GetString() == "03.69.44",
+            "Menu editor keeps the selected parent and increments the final tree-code suffix for a new sibling");
         var menuDraft = JsonSerializer.SerializeToElement(await Call("project.menu.new", new { targetId = target.Id, selectedId = "leaf" }), Protocol.Json);
         var draftValues = menuDraft.GetProperty("values").Deserialize<Dictionary<string, string?>>(Protocol.Json)!;
         draftValues["bar"] = "Menu mới";

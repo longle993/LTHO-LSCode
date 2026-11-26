@@ -5,6 +5,12 @@
 - [x] Studio chỉ vị trí lỗi lưu và cho nhảy đến chỗ sửa. Thuộc tính template ở dưới danh sách bảng. Chọn cả dòng field để mở thuộc tính phía trên lưới.
 - [x] Studio tự lưu sau khi ngừng nhập và vẫn cho sửa trong lúc ghi. Đổi tên cạnh tên bảng hoặc field và có ví dụ JSONPath trong ô From.
 
+## Thông báo F5 cho lệnh SQL không có tập kết quả — 26/11/2026
+
+- [x] Khi F5 chạy thành công `CREATE/ALTER PROCEDURE` hoặc lệnh SQL khác không trả bảng, tự chuyển sang tab **Thông báo**.
+- [x] Giữ thông báo thật từ SQL Server; nếu server không trả nội dung, hiện **Các lệnh đã được thực hiện thành công.**
+- [x] TypeScript/Vite production build đạt; Chrome fixture riêng đạt 5 kiểm tra, gồm F5 store, câu tiếng Việt và SELECT vẫn ở tab Kết quả.
+
 - [x] Khi lưu hoặc lưu thành tệp XML, dùng UTF-8 có BOM. Cập nhật khai báo encoding nếu có.
 
 - [x] Tách tải kết nối khỏi mở dự án. SQL chưa chọn kết nối riêng chờ App của dự án trước khi chạy. Hai lệnh Close trong Lịch sử chỉ xóa lịch sử, còn đóng cửa sổ dọn phiên khôi phục sau khi xử lý tab chưa lưu.
@@ -13,7 +19,7 @@
 
 - [x] Chèn snippet SQL giữ nguyên ký tự trong tên thủ tục và giá trị tham số. Kiểm tra bằng bộ phân tích snippet của Monaco với mẫu thủ tục phân kỳ và snippet nhập nhanh.
 
-- [x] SQL Profiler dùng tài khoản thu riêng mặc định. Trong cây ERP và kết quả lọc menu, nhấp một lần để chọn, nhấp đúp tên hoặc nhấp Menu ID để mở tệp.
+- [x] SQL Profiler dùng tài khoản thu riêng mặc định. Trong cây ERP và kết quả lọc menu, nhấp tên một lần để chọn và nhấp đúp để tải cây controller; nhấp Menu ID để mở tệp chính.
 
 ## Phân loại nút và tùy chỉnh màu
 
@@ -32,6 +38,20 @@
 - [x] Build frontend và Desktop Release. Chạy 154 kiểm tra Core và 11 kiểm tra Chrome trên bản production, gồm phân trang và tìm kiếm ở chiều rộng 375 px. Probe màn chung ghi ba điểm ngoài hai khu vực thay đổi: nút **Mở thư mục** xuống dòng và nút tìm lệnh có vùng bấm dưới 24 px ở 375 px, nút **Chức năng** xuống dòng ở 1.440 px.
 - [ ] Đo thời gian và bộ nhớ trên dữ liệu ERP thực tế. Nhánh đọc SQL Server 2008 chưa được chạy trên máy chủ phiên bản đó.
 
+
+## Tạo menu cùng cấp từ menu đang chọn — 25/11/2026
+
+- [x] Đọc `wmenu_id` và `wmenu_id0` thực tế của menu đang chọn trong `dbo.wcommand`, không suy diễn mã cha từ hai đoạn đầu.
+- [x] Khi nhấn **Thêm mới**, giữ mã cha và tăng hậu tố số cuối của mã cây, giữ số 0 đầu; bỏ qua mã đã tồn tại và giữ luồng cũ cho mã không có hậu tố số.
+- [x] TypeScript/Vite production build, 114 WebView checks và Chrome `--menu-regression` 11 kiểm tra đạt. Kiểm tra tích hợp SQL đã được bổ sung nhưng chưa chạy vì máy hiện tại không có SQL instance cục bộ; chưa nghiệm thu trên SYS ERP thật.
+
+## Giữ trạng thái và làm mới cây menu ERP — 25/11/2026
+
+- [x] Nhấp đúp tên menu tải controller/diagnostics và chuyển sang tab File; component cây Chức năng vẫn giữ state để khi quay lại, các nhánh cha đang mở không bị reset.
+- [x] Tô nền và in đậm toàn bộ dòng menu đang chọn, gồm cả tên và mã menu.
+- [x] Thêm **Làm mới menu** vào menu chuột phải, gọi lại `project.commands` với `refresh: true`, giữ nhánh mở và lựa chọn nếu menu vẫn tồn tại.
+- [x] TypeScript/Vite production build và .NET build sạch; Chrome fixture `--menu-regression` đạt 11 kiểm tra, gồm chuyển sang File, quay lại giữ cây/dòng chọn và refresh menu.
+
 ## Menu Tập lệnh bằng chuột phải — 23/11/2026
 
 - [x] Nhấp chuột phải trên bề mặt dữ liệu của tab Cấu trúc và dữ liệu mở đúng menu Tập lệnh hiện có với đủ bốn thao tác: thêm key vào SQL Data, tạo bảng, INSERT kết quả hiện tại và xóa bảng.
@@ -47,6 +67,13 @@
 - [x] Xử lý máy chủ SQL2014 từ chối Extended Events của tài khoản dự án. Kiểm tra SQL Trace tích hợp bằng truy vấn fixture trên LocalDB và xác nhận mở, đọc, đóng phiên đã lọc trên máy chủ tương ứng.
 - [x] Sửa lỗi SQL Server 2008 `Incorrect syntax near 'THROW'`: tự chọn SQL Trace cho version 10.x, đổi batch sang `RAISERROR + RETURN` và kiểm tra bằng parser T-SQL 100 trong bộ 109 WebView checks.
 - [x] Sửa lỗi `You do not have permission to run 'SP_TRACE_CREATE'` trên instance SQL2008 chuẩn bằng cách tự dùng tài khoản Profiler riêng thay cho tài khoản dự án; không đưa mật khẩu qua bridge hoặc UI.
+
+## Sao chép đầy đủ và đánh dấu lỗi SQL Profiler — 26/11/2026
+
+- [x] Nhấp một lần chỉ chọn/xem SQL; nhấp đúp ô SQL mới sao chép chuỗi đầy đủ và hiện toast **Đã sao chép SQL.**
+- [x] Thu `RPC:Starting`, `SQL:BatchStarting` và `User Error Message` ở SQL Trace; thu các sự kiện starting và `error_reported` tương ứng ở Extended Events.
+- [x] Ghép lỗi severity từ 11 với câu SQL cùng phiên: tô nền câu SQL gây lỗi, đặt dòng thông báo chữ đỏ ngay sau; cảnh báo severity dưới 11 không tô đỏ.
+- [ ] Smoke với một câu SQL lỗi trên instance ERP thật; kiểm chứng tự động hiện dùng fixture không chứa dữ liệu khách hàng.
 - [x] Giữ dữ liệu đã thu khi Dừng rồi Chạy lại và kiểm tra sự kiện của phiên mới được nối vào lưới.
 - [x] Tự thu gọn panel dưới khi mở hoặc chọn tab XML, giữ nguyên dữ liệu và cho phép mở lại.
 - [ ] Smoke phiên thu thật trên instance SQL Server 2008 của người dùng sau khi cài bản publish mới.

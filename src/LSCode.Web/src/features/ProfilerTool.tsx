@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Play, Square } from "lucide-react";
-import { Button, DataGrid } from "../ui";
+import { Button, DataGrid, WorkbenchNotice } from "../ui";
 import { request, writeClipboard } from "../bridge";
 import type { Target } from "../bridge";
 import { useTask } from "./useTask";
@@ -25,7 +25,8 @@ export function ProfilerTool({ target, visible, closing, onBusyChange }: {
     [filter, setFilter] = useState(""),
     [selected, setSelected] = useState(""),
     [dropped, setDropped] = useState(0),
-    [layout, setLayout] = useState(false);
+    [layout, setLayout] = useState(false),
+    [notice, setNotice] = useState("");
   const task = useTask();
   useEffect(() => onBusyChange(task.busy), [task.busy, onBusyChange]);
   const autoStarted = useRef(false);
@@ -102,11 +103,21 @@ export function ProfilerTool({ target, visible, closing, onBusyChange }: {
     setGridVersion((old) => old + 1);
     setSelected("");
   }
+  async function copySql(text: string) {
+    await writeClipboard(text);
+    setNotice("Đã sao chép SQL.");
+  }
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(""), 2500);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+  const displayRows = useMemo(() => arrangeProfilerEvents(rows), [rows]);
   const table = useMemo(() => ({
     columns: ["Thời gian", "Event", "Database", "Login", "Duration ms", "Reads", "SQL"],
-    rows: rows.map((r) => [r.time, r.event, r.database, r.login, String(r.durationMs), String(r.reads), r.text]),
-  }), [rows]);
-  const sqlText = (followLatest ? rows.at(-1)?.text : selected) ?? "";
+    rows: displayRows.map(({ event: r }) => [r.time, r.event, r.database, r.login, String(r.durationMs), String(r.reads), r.text]),
+  }), [displayRows]);
+  const sqlText = (followLatest ? displayRows.at(-1)?.event.text : selected) ?? "";
   return (
     <div className="tool-body profiler-body" ref={(element) => { if (element) element.inert = closing; }}>
       <p className="muted" role="status">
@@ -184,7 +195,7 @@ export function ProfilerTool({ target, visible, closing, onBusyChange }: {
           aria-pressed={followLatest}
           variant={followLatest ? "secondary" : "outline"}
           onClick={() => {
-            if (followLatest) setSelected(rows.at(-1)?.text ?? "");
+            if (followLatest) setSelected(displayRows.at(-1)?.event.text ?? "");
             setFollowLatest(!followLatest);
           }}
         >
@@ -208,10 +219,19 @@ export function ProfilerTool({ target, visible, closing, onBusyChange }: {
           followEnd={visible && followLatest}
           rowOffset={offset}
           onInspect={() => {
-            if (followLatest) setSelected(rows.at(-1)?.text ?? "");
+            if (followLatest) setSelected(displayRows.at(-1)?.event.text ?? "");
             setFollowLatest(false);
           }}
           onRow={(r) => setSelected(r[6] ?? "")}
+          onCellDoubleClick={(_, column, values) => {
+            if (column !== 6 || !values[6]) return;
+            setSelected(values[6]);
+            setFollowLatest(false);
+            void task.run(() => copySql(values[6] ?? ""));
+          }}
+          rowClassName={(_, index) => displayRows[index]?.errorKind === "source"
+            ? "profiler-error-source-row"
+            : displayRows[index]?.errorKind === "message" ? "profiler-error-message-row" : undefined}
         />
         <div className="trace-detail" style={layout ? { flex: 1, maxHeight: "none" } : undefined}>
           <div className="trace-detail-toolbar">
@@ -219,7 +239,7 @@ export function ProfilerTool({ target, visible, closing, onBusyChange }: {
             <Button
               variant="ghost"
               disabled={!sqlText || task.busy}
-              onClick={() => void task.run(() => writeClipboard(sqlText))}
+              onClick={() => void task.run(() => copySql(sqlText))}
             >Sao chép SQL</Button>
           </div>
           <textarea
@@ -241,12 +261,13 @@ export function ProfilerTool({ target, visible, closing, onBusyChange }: {
                 event.stopPropagation();
                 const { selectionStart, selectionEnd } = event.currentTarget;
                 const text = selectionStart === selectionEnd ? sqlText : sqlText.slice(selectionStart, selectionEnd);
-                void task.run(() => writeClipboard(text));
+                void task.run(() => copySql(text));
               }
             }}
           />
         </div>
       </div>
+      <WorkbenchNotice status={notice} onClose={() => setNotice("")} />
       <p className="form-error">{task.error || pollError}</p>
     </div>
   );
@@ -264,5 +285,95 @@ type TraceEvent = {
   reads: number;
   writes: number;
   cpuMs: number;
+  severity?: number;
   text: string;
 };
+
+type DisplayTraceEvent = { event: TraceEvent; errorKind?: "source" | "message" };
+
+function eventKind(event: TraceEvent) {
+  const name = event.event.toLowerCase().replaceAll(/[^a-z0-9]+/g, "");
+  const message = event.text.trimStart().toLowerCase();
+  const warning = message.startsWith("warning:") || message.startsWith("cảnh báo:") ||
+    (typeof event.severity === "number" && event.severity > 0 && event.severity < 11);
+  return {
+    error: (name.includes("error") || name.includes("exception")) && !warning,
+    starting: name.includes("starting"),
+    completed: name.includes("completed"),
+    family: name.includes("rpc") ? "rpc" : name.includes("batch") ? "batch" : "",
+  };
+}
+
+function correlationKey(event: TraceEvent) {
+  return event.session || `${event.database}\u0000${event.login}`;
+}
+
+function timeDistance(left: TraceEvent, right: TraceEvent, leftIndex: number, rightIndex: number) {
+  const leftTime = Date.parse(left.time), rightTime = Date.parse(right.time);
+  return Number.isFinite(leftTime) && Number.isFinite(rightTime)
+    ? Math.abs(leftTime - rightTime)
+    : Math.abs(leftIndex - rightIndex) * 100;
+}
+
+function arrangeProfilerEvents(events: TraceEvent[]): DisplayTraceEvent[] {
+  const starts = events
+    .map((event, index) => ({ event, index, kind: eventKind(event) }))
+    .filter((item) => item.kind.starting);
+  const usedStarts = new Set<number>();
+  const errorPairs = new Map<number, number>();
+
+  events.forEach((error, errorIndex) => {
+    if (!eventKind(error).error) return;
+    const candidates = starts.filter(({ event, index }) =>
+      !usedStarts.has(index) &&
+      correlationKey(event) === correlationKey(error) &&
+      Math.abs(index - errorIndex) <= 12 &&
+      timeDistance(event, error, index, errorIndex) <= 30_000,
+    );
+    const match = candidates.sort((left, right) =>
+      timeDistance(left.event, error, left.index, errorIndex) -
+        timeDistance(right.event, error, right.index, errorIndex) ||
+      Math.abs(left.index - errorIndex) - Math.abs(right.index - errorIndex),
+    )[0];
+    if (!match) return;
+    usedStarts.add(match.index);
+    errorPairs.set(errorIndex, match.index);
+  });
+
+  const anchors = new Map<number, { start: number; error: number }>();
+  const pairedIndexes = new Set<number>();
+  errorPairs.forEach((start, error) => {
+    anchors.set(Math.min(start, error), { start, error });
+    pairedIndexes.add(start);
+    pairedIndexes.add(error);
+  });
+
+  const failedCompletions = new Set<number>();
+  errorPairs.forEach((startIndex, errorIndex) => {
+    const start = events[startIndex], startKind = eventKind(start);
+    const after = Math.max(startIndex, errorIndex);
+    const completion = events.findIndex((candidate, index) => {
+      const kind = eventKind(candidate);
+      return index > after && index - after <= 12 && kind.completed &&
+        correlationKey(candidate) === correlationKey(start) &&
+        (!startKind.family || kind.family === startKind.family) &&
+        (!start.text || !candidate.text || candidate.text === start.text);
+    });
+    if (completion >= 0) failedCompletions.add(completion);
+  });
+
+  const result: DisplayTraceEvent[] = [];
+  events.forEach((event, index) => {
+    const pair = anchors.get(index);
+    if (pair) {
+      result.push({ event: events[pair.start], errorKind: "source" });
+      result.push({ event: events[pair.error], errorKind: "message" });
+      return;
+    }
+    if (pairedIndexes.has(index) || failedCompletions.has(index)) return;
+    const kind = eventKind(event);
+    if (kind.starting) return;
+    result.push({ event, errorKind: kind.error ? "message" : undefined });
+  });
+  return result;
+}

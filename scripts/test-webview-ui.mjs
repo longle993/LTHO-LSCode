@@ -59,11 +59,22 @@ await page.addInitScript(()=>{
       case 'project.refreshConfig':result=projectRoot+'\\web.config';break;
       case 'project.structure.preview':result={path:projectRoot+'\\Controller\\Structure\\App',count:2};break;
       case 'project.structure.clear':result=2;break;
-      case 'project.commands':result=request.payload.kind==='mobile'
-        ? [{entry:{id:'mobile1',caption:'Mobile bán hàng',sysId:'MobileSales',commandId:'mobile1',link:''},children:[]}]
-        : [{entry:{id:'menu1',caption:'Nhân viên',sysId:'HR',commandId:'Dir',link:'nhanvien.aspx'},children:[]},{entry:{id:'menu2',caption:'Bộ phận',sysId:'HR',commandId:'Dept',link:'bophan.aspx'},children:[]},{entry:{id:'menu3',caption:'Thông tin nhân viên',sysId:'HR',commandId:'Info',link:'hrEmployeeInformation.aspx'},children:[]},{entry:{id:'separator',caption:'-',sysId:'',commandId:'',link:''},children:[]}];break;
+      case 'project.commands':
+        result=request.payload.kind==='mobile'
+          ? [{entry:{id:'mobile1',caption:'Mobile bán hàng',sysId:'MobileSales',commandId:'mobile1',link:''},children:[]}]
+          : [
+              {entry:{id:'menu-parent',caption:'Hệ thống',sysId:'',commandId:'',link:''},children:[
+                {entry:{id:'menu-child',caption:'Cấu hình hệ thống',sysId:'HR',commandId:'SystemConfig',link:'systemconfig.aspx'},children:[]},
+              ]},
+              {entry:{id:'menu1',caption:'Nhân viên',sysId:'HR',commandId:'Dir',link:'nhanvien.aspx'},children:[]},
+              {entry:{id:'menu2',caption:'Bộ phận',sysId:'HR',commandId:'Dept',link:'bophan.aspx'},children:[]},
+              {entry:{id:'menu3',caption:'Thông tin nhân viên',sysId:'HR',commandId:'Info',link:'hrEmployeeInformation.aspx'},children:[]},
+              {entry:{id:'separator',caption:'-',sysId:'',commandId:'',link:''},children:[]},
+              ...(request.payload.refresh?[{entry:{id:'menu4',caption:'Menu vừa thêm',sysId:'HR',commandId:'NewMenu',link:'newmenu.aspx'},children:[]}]:[]),
+            ];
+        break;
       case 'project.menu.details':{
-        const values={wmenu_id0:'',wmenu_id:'menu1',menu_id:'Dir',bar:'Nhân viên',bar2:'Employee',link:'nhanvien.aspx',sysid:'HR',parameter:'',syscode:'',type:'D',status:'1',icon_url:'',icon:''};
+        const values={wmenu_id0:'03.69.02',wmenu_id:'03.69.43',menu_id:'Dir',bar:'Nhân viên',bar2:'Employee',link:'nhanvien.aspx',sysid:'HR',parameter:'',syscode:'',type:'D',status:'1',icon_url:'',icon:''};
         result={mode:'edit',fields:Object.keys(values).map(name=>({name,type:'varchar',maxLength:80})),values,version:'fixture',canSave:true};break;
       }
       case 'project.menu.resources':result={controllers:['HR'],tables:['DanhMuc','hr.NhanVien'],resources:[
@@ -79,7 +90,10 @@ await page.addInitScript(()=>{
       ]};break;
       case 'catalogSource.preview':result={fingerprint:'catalog-fixture',hasMain:true,
         files:[{path:'App_Data\\Controllers\\Grid\\CatalogDemo.xml',text:"<grid table='DanhMucDemo' />"}]};break;
-      case 'project.menu.new':result={values:{wmenu_id0:'',wmenu_id:'',menu_id:'',bar:'',bar2:'',link:'',sysid:'',status:'1'}};break;
+      case 'project.menu.new':{
+        const values={wmenu_id0:'03.69.02',wmenu_id:'03.69.44',menu_id:'AA.00.01',bar:'',bar2:'',link:'',sysid:'',parameter:'',syscode:'',type:'',status:'1',icon_url:'',icon:''};
+        result={mode:'new',fields:Object.keys(values).map(name=>({name,type:'varchar',maxLength:80})),values,version:'',canSave:true};break;
+      }
       case 'catalogDescription.preview':result={fingerprint:'catalog-description-fixture',
         sql:'CREATE TABLE [dbo].['+request.payload.design.table+'] (...);',
         files:[{path:'App_Data\\Controllers\\Dir\\'+request.payload.design.source.controller+'.xml',text:'<controller />'}]};break;
@@ -177,6 +191,9 @@ await page.addInitScript(()=>{
       case 'sql.execute':
         if(window.__failSql){error={code:'sql_error',message:'Lỗi SQL fixture'};break;}
         if(request.payload.sql.includes('CREATE TABLE dbo.BangMoiFixture')) window.__createdTableTarget=request.payload.targetId;
+        if(/\b(?:CREATE|ALTER)\s+(?:PROC|PROCEDURE)\b/i.test(request.payload.sql)){
+          result={tables:[],messages:[],durationMs:8,truncated:false};break;
+        }
         result={tables:[{columns:['Mã','Tên','Giá trị'],rows:Array.from({length:5000},(_,i)=>[String(i),'Tiếng Việt '+i,i===0?null:'1000000000.123456789'])},{columns:['Bảng phụ'],rows:[['Dòng bảng hai']]}],messages:['Query fixture'],durationMs:12,truncated:true};break;
       case 'sql.complete':result=request.payload.text===''?['COUNT','AS','IS NOT NULL','AND','BETWEEN','DESC','ASC'].map(text=>({text,isSnippet:false})):[];break;
       case 'javascript.complete':result=[];break;
@@ -267,6 +284,13 @@ await page.addInitScript(()=>{
 });
 const out='artifacts/webview-ui';mkdirSync(out,{recursive:true});
 let checks=0;const check=(value,name)=>{if(!value)throw Error('FAIL '+name);checks++;console.log('PASS '+name);};
+const waitForInputValue=async(locator,value)=>{
+  for(let attempt=0;attempt<50;attempt++){
+    if(await locator.inputValue()===value)return;
+    await page.waitForTimeout(100);
+  }
+  throw Error(`Timed out waiting for input value ${value}`);
+};
 async function testProfiler(){
   await page.getByRole('button',{name:'SQL Profiler',exact:true}).click();
   const profiler=page.getByRole('tabpanel',{name:'SQL Profiler'});
@@ -323,6 +347,46 @@ async function testProfiler(){
     await profiler.locator('.trace-sql').inputValue()==='SELECT 61' &&
     await page.evaluate(()=>window.__nativeCalls.filter(c=>c.method==='profiler.start').length===2),
     'Profiler stop and restart appends events without clearing captured data');
+  const failedSql="SELECT zczc, N'Nội dung SQL đầy đủ không bị cắt' FROM dbo.dmct WHERE ma_ct = 'PN1'";
+  await page.evaluate(sql=>window.__traceBatch.push(
+    {sequence:63,time:'2026-11-26T10:49:22.523',event:'User Error Message',database:'Fixture_App',login:'profile',session:'71',durationMs:0,reads:0,severity:16,text:"Invalid column name 'zczc'."},
+    {sequence:64,time:'2026-11-26T10:49:22.523',event:'SQL:BatchStarting',database:'Fixture_App',login:'profile',session:'71',durationMs:0,reads:0,text:sql},
+  ),failedSql);
+  await profiler.getByText(/64 sự kiện/).waitFor();
+  const failedCell=traceGrid.locator('td').filter({hasText:failedSql}).last();
+  await failedCell.waitFor();
+  const failedRow=failedCell.locator('xpath=..');
+  const errorRow=failedRow.locator('xpath=following-sibling::tr[1]');
+  check((await failedRow.getAttribute('class'))?.includes('profiler-error-source-row') &&
+    (await errorRow.getAttribute('class'))?.includes('profiler-error-message-row') &&
+    (await errorRow.textContent()).includes("Invalid column name 'zczc'."),
+    'Profiler gives failed SQL a red background and the following error message red text');
+  const copiesBeforeClick=await page.evaluate(sql=>window.__nativeCalls.filter(c=>c.method==='clipboard.write'&&c.payload.text===sql).length,failedSql);
+  await failedCell.click();
+  await page.waitForTimeout(150);
+  check(await page.evaluate(({sql,before})=>window.__nativeCalls.filter(c=>c.method==='clipboard.write'&&c.payload.text===sql).length===before,{sql:failedSql,before:copiesBeforeClick}),
+    'A single click selects SQL without copying it');
+  await failedCell.dblclick();
+  await page.waitForFunction(sql=>window.__nativeCalls.some(c=>c.method==='clipboard.write'&&c.payload.text===sql),failedSql);
+  await page.getByText('Đã sao chép SQL.',{exact:true}).waitFor();
+  check(await profiler.locator('.trace-sql').inputValue()===failedSql,
+    'Double-clicking the SQL cell copies the full statement and shows a success notice');
+  await page.getByRole('button',{name:'Đóng thông báo'}).click();
+  await profiler.getByRole('button',{name:'Theo dõi cuối lưới'}).click();
+  const warningSql='SELECT SUM(nullable_value) FROM dbo.WarningFixture';
+  const warningText='Warning: Null value is eliminated by an aggregate or other SET operation.';
+  await page.evaluate(({sql,warning})=>window.__traceBatch.push(
+    {sequence:65,time:'2026-11-26T11:03:38.300',event:'User Error Message',database:'Fixture_App',login:'profile',session:'72',durationMs:0,reads:0,severity:10,text:warning},
+    {sequence:66,time:'2026-11-26T11:03:38.300',event:'SQL:BatchStarting',database:'Fixture_App',login:'profile',session:'72',durationMs:0,reads:0,text:sql},
+    {sequence:67,time:'2026-11-26T11:03:38.400',event:'SQL:BatchCompleted',database:'Fixture_App',login:'profile',session:'72',durationMs:1,reads:1,text:sql},
+  ),{sql:warningSql,warning:warningText});
+  await profiler.getByText(/67 sự kiện/).waitFor();
+  const warningRow=traceGrid.locator('tr').filter({hasText:warningText}).last();
+  const warningSqlRow=traceGrid.locator('tr').filter({hasText:warningSql}).last();
+  await warningRow.waitFor();await warningSqlRow.waitFor();
+  check(!(await warningRow.getAttribute('class')??'').includes('profiler-error-') &&
+    !(await warningSqlRow.getAttribute('class')??'').includes('profiler-error-'),
+    'Profiler keeps severity 10 warnings and their SQL rows out of the red error style');
   await page.screenshot({path:out+'/profiler-tab-dark.png'});
   const stopsBeforeSwitch=await page.evaluate(()=>window.__nativeCalls.filter(c=>c.method==='profiler.stop').length);
   await page.locator('.document-tabs').getByRole('tab').first().click();
@@ -359,6 +423,16 @@ async function testMenuEditor(functionRow){
   await menuPanel.getByRole('tab',{name:'Grid (1)',exact:true}).click();
   await resourcePanel.getByRole('button',{name:/nhanvien\.f/}).waitFor();
   await menuPanel.getByRole('tab',{name:'Dir (1)',exact:true}).click();
+
+  await menuPanel.getByRole('button',{name:'Thêm mới',exact:true}).click();
+  const parentInput=menuPanel.getByLabel(/^Mã cha/);
+  const treeInput=menuPanel.getByLabel(/^Mã cây/);
+  await waitForInputValue(treeInput,'03.69.44');
+  check(await parentInput.inputValue()==='03.69.02' && await treeInput.inputValue()==='03.69.44',
+    'New ERP menu keeps the selected parent and increments the final tree-code suffix');
+  await menuPanel.getByRole('button',{name:'Tải lại',exact:true}).click();
+  await waitForInputValue(treeInput,'03.69.43');
+  await menuPanel.getByRole('button',{name:'hr.NhanVien',exact:true}).waitFor();
   await menuPanel.screenshot({path:out+'/erp-menu-editor.png'});
   const shell=menuPanel.locator('.menu-editor-shell');
   await shell.evaluate(element=>{element.style.width='375px';});
@@ -725,7 +799,6 @@ Trạng thái: 1-Còn sử dụng, 0-Không còn sử dụng`);
       await page.evaluate(()=>!window.__nativeCalls.some(c=>c.method==='project.controller')),
     'A single click selects the ERP menu without loading source');
     await menuEntry.dblclick();
-    await page.getByRole('tab',{name:'nhanvien.aspx',exact:true}).waitFor();
     const diagnosticPath='C:\\Fixture\\App_Data\\Controllers\\Filter\\nhanvien.xml';
     const fileTree=page.locator('.project-file-tree');
     const diagnosticFile=fileTree.getByTitle(diagnosticPath,{exact:true});
@@ -773,10 +846,54 @@ Trạng thái: 1-Còn sử dụng, 0-Không còn sử dụng`);
     await page.waitForFunction(()=>window.__nativeCalls.some(c=>c.method==='settings.save' &&
       c.payload.settings.profiler18Path==='C:\\CustomSSMS\\PROFILER.EXE'));
     check(errors.length===0,'No uncaught browser errors');
+  } else if(process.argv.includes('--sql-success-message-regression')){
+    await page.locator('.project-row').filter({hasText:'Dự án thử UI'}).click();
+    await page.locator('dialog').waitFor({state:'detached'});
+    await page.getByRole('button',{name:'SQL mới',exact:true}).click();
+    await page.locator('.monaco-editor').first().click({position:{x:160,y:35}});
+    await page.keyboard.insertText('ALTER PROCEDURE dbo.StoreFixture AS SELECT 1;');
+    await page.keyboard.press('F5');
+    const messagePanel=page.locator('#results-panel .messages');
+    await messagePanel.getByText('Các lệnh đã được thực hiện thành công.',{exact:true}).waitFor();
+    check(await page.locator('#results-panel').getByRole('button',{name:'Thông báo',exact:true}).getAttribute('aria-selected')==='true',
+      'F5 switches to Messages when a stored procedure script finishes without a result set');
+    check((await messagePanel.textContent()).trim()==='Các lệnh đã được thực hiện thành công.',
+      'Successful stored procedure execution shows the Vietnamese completion message');
+    await page.locator('.monaco-editor').first().click({position:{x:160,y:35}});
+    await page.keyboard.press('Control+a');
+    await page.keyboard.insertText('SELECT 1 AS value;');
+    await page.keyboard.press('F5');
+    await page.locator('#results-panel .data-grid').waitFor();
+    check(await page.locator('#results-panel .panel-tabs button').filter({hasText:'Kết quả'}).first().getAttribute('aria-selected')==='true',
+      'A query with a result set still stays on the Results tab');
+    check(errors.length===0,'No uncaught browser errors');
   } else if(process.argv.includes('--menu-regression')){
     await page.locator('.project-row').filter({hasText:'Dự án thử UI'}).click();
     await page.locator('dialog').waitFor({state:'detached'});
     await page.getByRole('button',{name:'Chức năng',exact:true}).click();
+    const menuParent=page.getByRole('button',{name:'Hệ thống',exact:true});
+    await menuParent.click();
+    const menuChild=page.getByRole('button',{name:'Cấu hình hệ thống',exact:true});
+    await menuChild.dblclick();
+    await page.waitForFunction(()=>window.__nativeCalls.some(call=>call.method==='project.controller'&&call.payload.link==='systemconfig.aspx'));
+    const selectedMenuRow=menuChild.locator('xpath=..');
+    const fileNav=page.getByRole('button',{name:'File',exact:true});
+    check(await fileNav.getAttribute('aria-selected')==='true' && !(await menuChild.isVisible()),
+      'Selecting a function switches to the File tab and shows its controller tree');
+    await page.getByRole('button',{name:'Chức năng',exact:true}).click();
+    check(await menuParent.getAttribute('aria-expanded')==='true' &&
+      await selectedMenuRow.getAttribute('data-selected')==='true' &&
+      await menuChild.evaluate(element=>Number.parseInt(getComputedStyle(element).fontWeight,10)>=700),
+      'Returning to Functions keeps its parent expanded and emphasizes the selected menu row');
+    await menuChild.click({button:'right'});
+    const refreshMenu=page.getByRole('button',{name:'Làm mới menu',exact:true});
+    await refreshMenu.waitFor();
+    await refreshMenu.click();
+    await page.getByRole('button',{name:'Menu vừa thêm',exact:true}).waitFor();
+    check(await page.evaluate(()=>window.__nativeCalls.some(call=>call.method==='project.commands'&&call.payload.kind==='web'&&call.payload.refresh===true)) &&
+      await menuParent.getAttribute('aria-expanded')==='true' &&
+      await selectedMenuRow.getAttribute('data-selected')==='true',
+      'Context refresh reloads newly added menus without resetting expansion or selection');
     await testMenuEditor(page.getByRole('button',{name:'Nhân viên',exact:true}));
     check(errors.length===0,'No uncaught browser errors');
   } else if(process.argv.includes('--studio-discovery-regression')){

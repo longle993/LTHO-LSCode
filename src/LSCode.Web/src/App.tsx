@@ -1340,11 +1340,15 @@ export default function App({
     runRef.current = op;
     try {
       const r = await op.promise;
-      resultsByTab.current.set(queryDocument.id, r);
+      const displayed = r.tables.length === 0 && r.messages.length === 0
+        ? { ...r, messages: ["Các lệnh đã được thực hiện thành công."] }
+        : r;
+      resultsByTab.current.set(queryDocument.id, displayed);
       queryDurationByTab.current.set(queryDocument.id, r.durationMs);
       if (latest.current.activeId === queryDocument.id) {
-        setResult(r);
+        setResult(displayed);
         setResultIndex(0);
+        if (r.tables.length === 0) setBottom("messages");
         setQueryElapsedMs(r.durationMs);
       }
       setStatus(
@@ -2076,7 +2080,7 @@ export default function App({
       void guard(() => openController(node.entry.link, false, node.entry.sysId, false, true));
       return;
     }
-    void guard(() => openController(node.entry.link, false, node.entry.sysId, true));
+    void guard(() => openController(node.entry.link, false, node.entry.sysId));
   }
   function exportCsv() {
     if (!result?.tables[resultIndex]) return;
@@ -2772,8 +2776,8 @@ export default function App({
                 )}
               </>
             )}
-            {nav === "functions" && (
-              <>
+            <div aria-hidden={nav !== "functions"}
+              style={{ display: nav === "functions" ? "contents" : "none" }}>
                 {(commandsByKind.mobile.length > 0 || menuKind === "mobile") && (
                 <div className="menu-kind-tabs" role="tablist" aria-label="Loại chức năng ERP">
                   <button type="button" role="tab" aria-selected={menuKind === "web"}
@@ -2814,7 +2818,7 @@ export default function App({
                     />
                   )}
                   {(menuQuery ? matches : []).map((n, i) => (
-                    <div className="function-row" key={n.entry.id}>
+                    <div className="function-row" data-selected={selectedCommand === n.entry.id ? "true" : undefined} key={n.entry.id}>
                       <button
                         className="search-hit"
                         aria-current={
@@ -2866,8 +2870,7 @@ export default function App({
                     <div className="empty">Chọn dự án có kết nối SYS để tải chức năng.</div>
                   )}
                 </div>
-              </>
-            )}
+            </div>
             <WorkspaceResizeHandle width={settings.explorerWidth ?? 264} onCommit={(explorerWidth) => {
               const next = { ...latest.current.settings, explorerWidth };
               latest.current.settings = next;
@@ -2885,7 +2888,7 @@ export default function App({
           </div>
         </Modal>}
         {menuContext && <div className="table-action-menu explorer-action-menu" role="menu"
-          style={{ left: Math.max(8, Math.min(menuContext.x, window.innerWidth - 248)), top: Math.max(8, Math.min(menuContext.y, window.innerHeight - 136)) }}
+          style={{ left: Math.max(8, Math.min(menuContext.x, window.innerWidth - 248)), top: Math.max(8, Math.min(menuContext.y, window.innerHeight - 176)) }}
           onPointerDown={(event) => event.stopPropagation()}>
           <Button variant="ghost" onClick={() => { const command = menuContext.command; setMenuContext(undefined); openMenuEditor(command); }}>
             Sửa thông tin menu<kbd>F3</kbd>
@@ -2899,6 +2902,14 @@ export default function App({
               setMenuContext(undefined);
               setDialog("catalog");
             }}>Dùng làm mẫu tạo danh mục</Button>
+          <Button variant="ghost" disabled={menuLoading} onClick={() => {
+            const kind = menuKind;
+            setMenuContext(undefined);
+            void guard(async () => {
+              await loadCommands(kind, true);
+              setStatus(`Đã tải lại menu ${kind === "web" ? "Web" : "Mobile"}.`);
+            });
+          }}>Làm mới menu</Button>
         </div>}
         <main className="editor-area">
           <div
@@ -3852,7 +3863,7 @@ function FunctionTree({
           />
         ) : (
           <li key={node.entry.id}>
-            <div className="function-row">
+            <div className="function-row" data-selected={selected === node.entry.id ? "true" : undefined}>
               <button
                 className="tree-row"
                  aria-label={node.entry.caption}

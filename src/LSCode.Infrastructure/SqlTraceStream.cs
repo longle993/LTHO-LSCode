@@ -14,11 +14,19 @@ internal sealed class SqlTraceStream(SqlTarget target, string databasePrefix)
     private const int QueueLimit = 5000;
     private const string ConfigureSql = """
         DECLARE @result int;
-        DECLARE @columns table (id int);
-        INSERT @columns VALUES (1), (8), (10), (11), (12), (13), (14), (16), (17), (18), (35);
+        DECLARE @columns table (eventId int, columnId int);
+        DECLARE @completedColumns table (id int);
+        INSERT @completedColumns VALUES (1), (8), (10), (11), (12), (13), (14), (16), (17), (18), (35);
+        INSERT @columns SELECT eventId, id FROM (VALUES (10), (12)) AS completed(eventId) CROSS JOIN @completedColumns;
+        DECLARE @contextColumns table (id int);
+        INSERT @contextColumns VALUES (1), (8), (10), (11), (12), (14), (35);
+        INSERT @columns SELECT eventId, id FROM (VALUES (11), (13)) AS contextual(eventId) CROSS JOIN @contextColumns;
+        DECLARE @errorColumns table (id int);
+        INSERT @errorColumns VALUES (1), (8), (10), (11), (12), (14), (20), (35);
+        INSERT @columns SELECT 162, id FROM @errorColumns;
         DECLARE @event int, @column int, @enabled bit = 1;
         DECLARE trace_columns CURSOR LOCAL FAST_FORWARD FOR
-            SELECT eventid, id FROM (VALUES (10), (12)) AS trace_events(eventid) CROSS JOIN @columns;
+            SELECT eventId, columnId FROM @columns;
         OPEN trace_columns;
         FETCH NEXT FROM trace_columns INTO @event, @column;
         WHILE @@FETCH_STATUS = 0
@@ -130,7 +138,7 @@ internal sealed class SqlTraceStream(SqlTarget target, string databasePrefix)
             var column = rows.GetInt32(0);
             if (column > 64)
             {
-                if (eventClass is 10 or 12) Publish(eventClass, fields);
+                if (eventClass is 10 or 11 or 12 or 13 or 162) Publish(eventClass, fields);
                 fields.Clear();
                 eventClass = column == 65526 && rows.GetValue(2) is byte[] { Length: >= 2 } marker
                     ? BinaryPrimitives.ReadUInt16LittleEndian(marker) : 0;
@@ -161,9 +169,19 @@ internal sealed class SqlTraceStream(SqlTarget target, string databasePrefix)
             try { time = new DateTime(Part(0), Part(2), Part(6), Part(8), Part(10), Part(12), Part(14)); }
             catch (ArgumentOutOfRangeException) { }
         }
-        events.Enqueue(new(++sequence, time, eventClass == 10 ? "RPC:Completed" : "SQL:BatchCompleted",
+        var eventName = eventClass switch
+        {
+            10 => "RPC:Completed",
+            11 => "RPC:Starting",
+            12 => "SQL:BatchCompleted",
+            13 => "SQL:BatchStarting",
+            162 => "User Error Message",
+            _ => "SQL Trace " + eventClass.ToString(CultureInfo.InvariantCulture)
+        };
+        events.Enqueue(new(++sequence, time, eventName,
             database, Text(11), Text(8), application, Number(12).ToString(CultureInfo.InvariantCulture),
-            Number(13) / 1000d, Number(16), Number(17), Number(18), Text(1)));
+            Number(13) / 1000d, Number(16), Number(17), Number(18), Text(1))
+        { Severity = (int)Number(20) });
         while (events.Count > QueueLimit && events.TryDequeue(out _)) Interlocked.Increment(ref dropped);
     }
 

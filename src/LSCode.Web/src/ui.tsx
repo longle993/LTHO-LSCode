@@ -289,6 +289,8 @@ export function Modal({
 export function DataGrid({
   table,
   onRow,
+  onCellDoubleClick,
+  rowClassName,
   selectedRows,
   onSelectionChange,
   onRowContextMenu,
@@ -299,6 +301,8 @@ export function DataGrid({
 }: {
   table: Table;
   onRow?: (row: (string | null)[]) => void;
+  onCellDoubleClick?: (row: number, column: number, values: (string | null)[]) => void;
+  rowClassName?: (row: (string | null)[], index: number) => string | undefined;
   selectedRows?: number[];
   onSelectionChange?: (rows: number[]) => void;
   onRowContextMenu?: (row: number, event: React.MouseEvent<HTMLTableRowElement>) => void;
@@ -316,7 +320,18 @@ export function DataGrid({
   }>();
   const [copyError, setCopyError] = useState("");
   const grid = useRef<HTMLDivElement>(null);
-  const drag = useRef<{ pointer: number; kind: "cell" | "row"; x: number; y: number }>();
+  const drag = useRef<{
+    pointer: number;
+    kind: "cell" | "row";
+    x: number;
+    y: number;
+    originX: number;
+    originY: number;
+    row: number;
+    column: number;
+    moved: boolean;
+  }>();
+  const lastClick = useRef<{ row: number; column: number; time: number }>();
   const dragFrame = useRef(0);
   const priorOffset = useRef(rowOffset);
   const rowHeight = 32;
@@ -441,7 +456,17 @@ export function DataGrid({
         e.currentTarget.focus({ preventScroll: true });
         e.currentTarget.setPointerCapture(e.pointerId);
         const kind = cell.column < 0 ? "row" : "cell";
-        drag.current = { pointer: e.pointerId, kind, x: e.clientX, y: e.clientY };
+        drag.current = {
+          pointer: e.pointerId,
+          kind,
+          x: e.clientX,
+          y: e.clientY,
+          originX: e.clientX,
+          originY: e.clientY,
+          row: cell.row,
+          column: cell.column,
+          moved: false,
+        };
         select(cell.row, Math.max(0, cell.column), e.shiftKey, kind);
         onRow?.(table.rows[cell.row]);
       }}
@@ -450,8 +475,19 @@ export function DataGrid({
         if (active?.pointer !== e.pointerId) return;
         active.x = e.clientX;
         active.y = e.clientY;
+        if (Math.abs(active.x - active.originX) > 4 || Math.abs(active.y - active.originY) > 4)
+          active.moved = true;
         cancelAnimationFrame(dragFrame.current);
         extendDrag();
+      }}
+      onPointerUp={(e) => {
+        const active = drag.current;
+        if (active?.pointer !== e.pointerId || active.moved || active.kind !== "cell") return;
+        const now = performance.now(), previous = lastClick.current;
+        if (previous && previous.row === active.row && previous.column === active.column && now - previous.time <= 500) {
+          lastClick.current = undefined;
+          onCellDoubleClick?.(active.row, active.column, table.rows[active.row]);
+        } else lastClick.current = { row: active.row, column: active.column, time: now };
       }}
       onLostPointerCapture={() => {
         drag.current = undefined;
@@ -531,6 +567,7 @@ export function DataGrid({
           {table.rows.slice(first, last).map((row, i) => (
             <tr
               key={first + i}
+              className={rowClassName?.(row, first + i)}
               aria-selected={
                 followEnd && first + i === table.rows.length - 1
                   ? true
@@ -585,7 +622,13 @@ export function DataGrid({
                   className={
                     isSelected(first + i, k) ? "grid-selected" : undefined
                   }
-                  onClick={(e) => { if (!rangeSelection) select(first + i, k, e.shiftKey); }}
+                  onClick={(e) => {
+                    if (!rangeSelection) select(first + i, k, e.shiftKey);
+                  }}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    onCellDoubleClick?.(first + i, k, row);
+                  }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") select(first + i, k, e.shiftKey);
                   }}

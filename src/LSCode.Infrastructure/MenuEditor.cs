@@ -329,9 +329,6 @@ internal static class MenuEditor
 
     private static async Task<(string Id, string Parent)> GenerateIdAsync(SqlConnection connection, SqlTransaction? transaction, string selectedId, CancellationToken token)
     {
-        var parts = selectedId.Split('.', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-        var prefix = parts.Length >= 2 ? string.Join('.', parts.Take(2)) : parts.FirstOrDefault() ?? "AA";
-        var parent = parts.Length >= 3 ? prefix + ".00" : selectedId;
         var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var hasMenuId = await HasColumnAsync(connection, transaction, "dbo.wcommand", "menu_id", token).ConfigureAwait(false);
         var usedSql = hasMenuId
@@ -346,12 +343,55 @@ internal static class MenuEditor
             await using var reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);
             while (await reader.ReadAsync(token).ConfigureAwait(false)) used.Add(reader.GetString(0));
         }
+
+        var selectedTreeId = selectedId.Trim();
+        string? selectedParent = null;
+        await using (var command = new SqlCommand(
+            "SELECT RTRIM(wmenu_id), COALESCE(RTRIM(wmenu_id0),'') FROM dbo.wcommand WHERE RTRIM(wmenu_id)=@id",
+            connection, transaction) { CommandTimeout = 0 })
+        {
+            command.Parameters.AddWithValue("@id", selectedTreeId);
+            await using var reader = await command.ExecuteReaderAsync(CommandBehavior.SingleRow, token).ConfigureAwait(false);
+            if (await reader.ReadAsync(token).ConfigureAwait(false))
+            {
+                selectedTreeId = reader.GetString(0);
+                selectedParent = reader.GetString(1);
+            }
+        }
+
+        if (selectedParent is not null && NextSiblingId(selectedTreeId, used) is { } siblingId)
+            return (siblingId, selectedParent);
+
+        var parts = selectedTreeId.Split('.', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        var fallbackPrefix = parts.Length >= 2 ? string.Join('.', parts.Take(2)) : parts.FirstOrDefault() ?? "AA";
+        var fallbackParent = parts.Length >= 3 ? fallbackPrefix + ".00" : selectedTreeId;
         for (var number = 1; number <= 99; number++)
         {
-            var candidate = prefix + "." + number.ToString("00");
-            if (!used.Contains(candidate)) return (candidate, parent);
+            var candidate = fallbackPrefix + "." + number.ToString("00", CultureInfo.InvariantCulture);
+            if (!used.Contains(candidate)) return (candidate, fallbackParent);
         }
-        throw new InvalidOperationException("Không còn mã trống trong nhánh " + prefix + ".xx.");
+        throw new InvalidOperationException("Không còn mã trống trong nhánh " + fallbackPrefix + ".xx.");
+    }
+
+    internal static string? NextSiblingId(string selectedTreeId, IReadOnlySet<string> used)
+    {
+        var suffix = Regex.Match(selectedTreeId, @"^(?<prefix>.*?)(?<number>\d+)$", RegexOptions.CultureInvariant,
+            TimeSpan.FromMilliseconds(250));
+        if (!suffix.Success ||
+            !long.TryParse(suffix.Groups["number"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var selectedNumber))
+            return null;
+
+        var prefix = suffix.Groups["prefix"].Value;
+        var width = suffix.Groups["number"].Value.Length;
+        for (var number = selectedNumber + 1; number > selectedNumber; number++)
+        {
+            var numberText = number.ToString($"D{width}", CultureInfo.InvariantCulture);
+            if (numberText.Length > width) break;
+            var candidate = prefix + numberText;
+            if (!used.Contains(candidate)) return candidate;
+            if (number == long.MaxValue) break;
+        }
+        throw new InvalidOperationException("Không còn mã cùng cấp sau " + selectedTreeId + ".");
     }
 
     private static async Task<string> GenerateCommandIdAsync(SqlConnection connection, CancellationToken token)

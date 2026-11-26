@@ -298,7 +298,7 @@ Chọn menu trong **Chức năng ERP** chỉ tải cây controller vào File. �
 - Web lấy `wcommand` theo quy tắc quyền/Startup hiện hữu. Mobile lấy `dbo.dvcommand`, hiển thị cây theo `wmenu_id0`, nhãn `bar` (fallback `bar2`) và dùng `sysid` để tìm controller.
 - Ô tìm lọc tên, sysid và mã trên dữ liệu đã tải. Chuyển Web/Mobile giữ từ khóa và cây riêng, không truy vấn SQL theo từng ký tự.
 - Nút **Tải lại** bỏ qua cache của tab đang chọn. Cache tối đa 8 ngữ cảnh và hết hạn sau 5 phút; lưu menu Web cũng xóa cache liên quan.
-- Nhấp đúp hoặc bấm mã của node để dựng cây source trong File; không tự mở Main. Khi Generate Update đang chọn yêu cầu, thao tác menu tiếp tục đưa cây source vào luồng chọn file.
+- Nhấp tên node một lần để chọn và nhấp đúp để dựng cây source, chuyển sang File. Bấm mã menu để mở tệp chính. Khi quay lại Chức năng, nhánh đang mở và dòng vừa chọn được giữ nguyên. Khi Generate Update đang chọn yêu cầu, thao tác menu tiếp tục đưa cây source vào luồng chọn file.
 - F3, F12 và menu chuột phải sửa/xuất INSERT chỉ dành cho Web. Mobile chưa có trình sửa `dvcommand`; nếu dự án không có bảng này, lỗi chỉ hiện trong vùng Mobile và không ảnh hưởng cây Web.
 
 ### Check Mail
