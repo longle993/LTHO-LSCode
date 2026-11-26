@@ -1326,11 +1326,15 @@ export default function App({
     runRef.current = op;
     try {
       const r = await op.promise;
-      resultsByTab.current.set(queryDocument.id, r);
+      const displayed = r.tables.length === 0 && r.messages.length === 0
+        ? { ...r, messages: ["Các lệnh đã được thực hiện thành công."] }
+        : r;
+      resultsByTab.current.set(queryDocument.id, displayed);
       queryDurationByTab.current.set(queryDocument.id, r.durationMs);
       if (latest.current.activeId === queryDocument.id) {
-        setResult(r);
+        setResult(displayed);
         setResultIndex(0);
+        if (r.tables.length === 0) setBottom("messages");
         setQueryElapsedMs(r.durationMs);
       }
       setStatus(
