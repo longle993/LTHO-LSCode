@@ -1,5 +1,11 @@
 # Kế hoạch và nghiệm thu
 
+## Thông báo F5 cho lệnh SQL không có tập kết quả — 26/11/2026
+
+- [x] Khi F5 chạy thành công `CREATE/ALTER PROCEDURE` hoặc lệnh SQL khác không trả bảng, tự chuyển sang tab **Thông báo**.
+- [x] Giữ thông báo thật từ SQL Server; nếu server không trả nội dung, hiện **Các lệnh đã được thực hiện thành công.**
+- [x] TypeScript/Vite production build đạt; Chrome fixture riêng đạt 5 kiểm tra, gồm F5 store, câu tiếng Việt và SELECT vẫn ở tab Kết quả.
+
 - [x] Khi lưu hoặc lưu thành tệp XML, dùng UTF-8 có BOM. Cập nhật khai báo encoding nếu có.
 
 - [x] Tách tải kết nối khỏi mở dự án. SQL chưa chọn kết nối riêng chờ App của dự án trước khi chạy. Hai lệnh Close trong Lịch sử chỉ xóa lịch sử, còn đóng cửa sổ dọn phiên khôi phục sau khi xử lý tab chưa lưu.

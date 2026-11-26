@@ -167,6 +167,9 @@ await page.addInitScript(()=>{
       case 'sql.execute':
         if(window.__failSql){error={code:'sql_error',message:'Lỗi SQL fixture'};break;}
         if(request.payload.sql.includes('CREATE TABLE dbo.BangMoiFixture')) window.__createdTableTarget=request.payload.targetId;
+        if(/\b(?:CREATE|ALTER)\s+(?:PROC|PROCEDURE)\b/i.test(request.payload.sql)){
+          result={tables:[],messages:[],durationMs:8,truncated:false};break;
+        }
         result={tables:[{columns:['Mã','Tên','Giá trị'],rows:Array.from({length:5000},(_,i)=>[String(i),'Tiếng Việt '+i,i===0?null:'1000000000.123456789'])},{columns:['Bảng phụ'],rows:[['Dòng bảng hai']]}],messages:['Query fixture'],durationMs:12,truncated:true};break;
       case 'sql.complete':result=request.payload.text===''?['COUNT','AS','IS NOT NULL','AND','BETWEEN','DESC','ASC'].map(text=>({text,isSnippet:false})):[];break;
       case 'javascript.complete':result=[];break;
@@ -760,6 +763,27 @@ Trạng thái: 1-Còn sử dụng, 0-Không còn sử dụng`);
     await page.getByRole('button',{name:'Lưu cài đặt',exact:true}).click();
     await page.waitForFunction(()=>window.__nativeCalls.some(c=>c.method==='settings.save' &&
       c.payload.settings.profiler18Path==='C:\\CustomSSMS\\PROFILER.EXE'));
+    check(errors.length===0,'No uncaught browser errors');
+  } else if(process.argv.includes('--sql-success-message-regression')){
+    await page.locator('.project-row').filter({hasText:'Dự án thử UI'}).click();
+    await page.locator('dialog').waitFor({state:'detached'});
+    await page.getByRole('button',{name:'SQL mới',exact:true}).click();
+    await page.locator('.monaco-editor').first().click({position:{x:160,y:35}});
+    await page.keyboard.insertText('ALTER PROCEDURE dbo.StoreFixture AS SELECT 1;');
+    await page.keyboard.press('F5');
+    const messagePanel=page.locator('#results-panel .messages');
+    await messagePanel.getByText('Các lệnh đã được thực hiện thành công.',{exact:true}).waitFor();
+    check(await page.locator('#results-panel').getByRole('button',{name:'Thông báo',exact:true}).getAttribute('aria-selected')==='true',
+      'F5 switches to Messages when a stored procedure script finishes without a result set');
+    check((await messagePanel.textContent()).trim()==='Các lệnh đã được thực hiện thành công.',
+      'Successful stored procedure execution shows the Vietnamese completion message');
+    await page.locator('.monaco-editor').first().click({position:{x:160,y:35}});
+    await page.keyboard.press('Control+a');
+    await page.keyboard.insertText('SELECT 1 AS value;');
+    await page.keyboard.press('F5');
+    await page.locator('#results-panel .data-grid').waitFor();
+    check(await page.locator('#results-panel .panel-tabs button').filter({hasText:'Kết quả'}).first().getAttribute('aria-selected')==='true',
+      'A query with a result set still stays on the Results tab');
     check(errors.length===0,'No uncaught browser errors');
   } else if(process.argv.includes('--menu-regression')){
     await page.locator('.project-row').filter({hasText:'Dự án thử UI'}).click();
