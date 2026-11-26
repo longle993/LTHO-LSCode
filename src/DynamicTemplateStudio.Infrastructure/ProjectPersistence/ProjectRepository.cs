@@ -14,6 +14,10 @@ public sealed class ProjectRepository(ITemplateSerializer serializer)
     public Action<string>? AfterCommitFile { get; set; }
     private readonly SemaphoreSlim writes = new(1);
     private readonly Dictionary<string, string> fingerprints = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<string> skippedTemplates = [];
+    private readonly HashSet<string> discoveredTemplateCodes = new(StringComparer.OrdinalIgnoreCase);
+    public IReadOnlyList<string> SkippedTemplates => skippedTemplates;
+    public IReadOnlySet<string> DiscoveredTemplateCodes => discoveredTemplateCodes;
     public static string SafePath(string root, string relative)
     {
         root = Path.GetFullPath(root);
@@ -28,14 +32,46 @@ public sealed class ProjectRepository(ITemplateSerializer serializer)
     {
         if (File.Exists(SafePath(folder, ".studio/transaction.json"))) throw new IOException("An interrupted save was detected. Use Recover interrupted save before opening this folder.");
         var manifestPath = SafePath(folder, "project.json");
-        var manifest = JsonNode.Parse(await File.ReadAllTextAsync(manifestPath, cancellation))!.AsObject();
+        var manifestText = await File.ReadAllTextAsync(manifestPath, cancellation);
+        var manifest = JsonNode.Parse(manifestText)!.AsObject();
         if (manifest["schemaVersion"]?.GetValue<int>() != 1) throw new IOException("Unsupported project schema version.");
         var project = new ProjectDefinition { ProjectName = manifest["projectName"]!.GetValue<string>(), Description = manifest["description"]?.GetValue<string>() ?? "", Extra = manifest.Where(p => !new[] { "projectName", "description", "schemaVersion", "templates" }.Contains(p.Key)).ToDictionary(p => p.Key, p => JsonSerializer.SerializeToElement(p.Value)) };
         var codes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        skippedTemplates.Clear();
+        discoveredTemplateCodes.Clear();
         foreach (var codeNode in manifest["templates"]!.AsArray())
         {
             var code = codeNode!.GetValue<string>();
             if (!TemplateValidator.SafeCode(code) || !codes.Add(code)) throw new IOException("Invalid or duplicate template code in manifest.");
+            await LoadTemplateAsync(code);
+        }
+
+        var templateDirectory = SafePath(folder, "templates");
+        if (Directory.Exists(templateDirectory))
+        {
+            var paths = Directory.EnumerateFiles(templateDirectory, "*.json")
+                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase);
+            foreach (var path in paths)
+            {
+                cancellation.ThrowIfCancellationRequested();
+                var code = Path.GetFileNameWithoutExtension(path);
+                if (codes.Contains(code)) continue;
+                try
+                {
+                    if (!TemplateValidator.SafeCode(code)) throw new IOException("Invalid template filename.");
+                    await LoadTemplateAsync(code);
+                    codes.Add(code);
+                    discoveredTemplateCodes.Add(code);
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                {
+                    skippedTemplates.Add(Path.GetFileName(path));
+                }
+            }
+        }
+
+        async Task LoadTemplateAsync(string code)
+        {
             var path = SafePath(folder, "templates/" + code + ".json");
             try
             {
@@ -63,10 +99,14 @@ public sealed class ProjectRepository(ITemplateSerializer serializer)
                         c.Description = m.Tables.FirstOrDefault(x => x.Name == table.Name)?.Columns.FirstOrDefault(x => x.Name == c.Name)?.Description ?? "";
             }
         }
-        fingerprints[manifestPath] = Hash(await File.ReadAllTextAsync(manifestPath, cancellation));
+        fingerprints[manifestPath] = Hash(manifestText);
         return project;
     }
     public async Task<bool> SaveAsync(ProjectDefinition project, string folder, CancellationToken cancellation = default)
+        => (await SaveWithDiagnosticsAsync(project, folder, cancellation)).Count == 0;
+
+    public async Task<IReadOnlyList<(int TemplateIndex, Diagnostic Issue)>> SaveWithDiagnosticsAsync(
+        ProjectDefinition project, string folder, CancellationToken cancellation = default)
     {
         await writes.WaitAsync(cancellation);
         try
@@ -74,7 +114,8 @@ public sealed class ProjectRepository(ITemplateSerializer serializer)
             Directory.CreateDirectory(folder);
             ValidateProject(project);
             if (File.Exists(SafePath(folder, ".studio/transaction.json"))) throw new IOException("Recover the interrupted save first.");
-            var errors = project.Templates.SelectMany(t => TemplateValidator.Validate(t, true)).ToList();
+            var errors = project.Templates.SelectMany((template, index) => TemplateValidator.Validate(template, true)
+                .Select(issue => (TemplateIndex: index, Issue: issue))).ToList();
             if (errors.Count > 0)
             {
                 await AtomicWriteAsync(SafePath(folder, ".studio/draft.json"), DocumentState.Capture(project), cancellation);
@@ -84,7 +125,7 @@ public sealed class ProjectRepository(ITemplateSerializer serializer)
                     var text = JsonSerializer.Serialize(new { projectName = project.ProjectName, description = project.Description, schemaVersion = 1, templates = Array.Empty<string>() });
                     await AtomicWriteAsync(initialManifest, text, cancellation); fingerprints[initialManifest] = Hash(text);
                 }
-                return false;
+                return errors;
             }
             var files = new Dictionary<string, string?>();
             foreach (var t in project.Templates)
@@ -101,8 +142,14 @@ public sealed class ProjectRepository(ITemplateSerializer serializer)
             if (File.Exists(manifestPath))
             {
                 var previous = JsonNode.Parse(await File.ReadAllTextAsync(manifestPath, cancellation))!.AsObject();
-                foreach (var old in previous["templates"]!.AsArray().Select(x => x!.GetValue<string>()).Where(code => !project.Templates.Any(t => t.TemplateCode.Equals(code, StringComparison.OrdinalIgnoreCase))))
+                var templateDirectory = SafePath(folder, "templates");
+                var loadedCodes = fingerprints.Keys.Where(path => Path.GetDirectoryName(path)?.Equals(templateDirectory, StringComparison.OrdinalIgnoreCase) == true)
+                    .Select(Path.GetFileNameWithoutExtension);
+                var retainedCodes = project.Templates.Select(t => t.TemplateCode).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var previousCodes = previous["templates"]!.AsArray().Select(x => x!.GetValue<string>());
+                foreach (var old in previousCodes.Concat(loadedCodes).Distinct(StringComparer.OrdinalIgnoreCase))
                 {
+                    if (old is null || retainedCodes.Contains(old)) continue;
                     if (!TemplateValidator.SafeCode(old)) throw new IOException("Unsafe code in original manifest.");
                     files["templates/" + old + ".json"] = null;
                     files["samples/" + old + ".sample.json"] = null;
@@ -132,7 +179,7 @@ public sealed class ProjectRepository(ITemplateSerializer serializer)
             }
             File.Delete(journal);
             var draft = SafePath(folder, ".studio/draft.json"); if (File.Exists(draft)) File.Delete(draft);
-            return true;
+            return [];
         }
         finally { writes.Release(); }
     }

@@ -79,7 +79,7 @@ import {
   xmlIncludeBuffers,
 } from "./editor";
 import type { EditorDiagnostic, EditorHandle } from "./editor";
-import { Button, IconButton, Select, Modal, DataGrid, WorkbenchNotice } from "./ui";
+import { Button, IconButton, Select, Modal, DataGrid, WorkbenchNotice, ConfirmDialog } from "./ui";
 import { applyButtonTheme } from "./buttonTheme";
 import {
   ToolDialog,
@@ -309,6 +309,20 @@ export default function App({
   const [studioOpen, setStudioOpen] = useState(false);
   const studioDirty = useRef(false);
   const studioBusy = useRef(false);
+  const studioConfirming = useRef(false);
+  const [studioConfirmation, setStudioConfirmation] = useState<{
+    message: string; resolve: (confirmed: boolean) => void;
+  }>();
+  const confirmStudio = useCallback((message: string) => {
+    if (studioConfirming.current) return Promise.resolve(false);
+    studioConfirming.current = true;
+    return new Promise<boolean>(resolve => setStudioConfirmation({ message, resolve }));
+  }, []);
+  function finishStudioConfirmation(confirmed: boolean) {
+    studioConfirming.current = false;
+    setStudioConfirmation(undefined);
+    studioConfirmation?.resolve(confirmed);
+  }
   const [advanceNoteOpen, setAdvanceNoteOpen] = useState(false);
   const [advanceMenuPick, setAdvanceMenuPick] = useState<(AdvanceNoteMenu & { sequence: number })>();
   const [advanceDataCapture, setAdvanceDataCapture] = useState<AdvanceNoteDataCapture>();
@@ -964,7 +978,7 @@ export default function App({
     if (menuBusy.current) { setStatus("Menu đang xử lý. Thử đóng lại khi hoàn tất."); return; }
     if (menuDirty.current && !window.confirm("Menu ERP còn thay đổi chưa lưu. Đóng ứng dụng?")) return;
     if (studioBusy.current) { setStatus("Studio đang xử lý. Thử đóng lại khi hoàn tất."); return; }
-    if (studioDirty.current && !window.confirm("Dynamic Template Studio còn thay đổi chưa lưu. Đóng ứng dụng?"))
+    if (studioDirty.current && !await confirmStudio("Dynamic Template Studio còn thay đổi chưa lưu. Đóng ứng dụng?"))
       return;
     if (
       toolDirty.current &&
@@ -1561,7 +1575,7 @@ export default function App({
         else if (selectedTool === "advance-note") closeAdvanceNote();
         else if (profilerSelected) await closeProfilerTab();
         else if (selectedTool === "check-mail") closeCheckMail();
-        else if (selectedTool === "template-studio") closeStudio();
+        else if (selectedTool === "template-studio") await closeStudio();
         else if (tableTab) closeTableTab(tableTab.id);
         else if (active) await closeTab(active);
         break;
@@ -1764,9 +1778,9 @@ export default function App({
     setTableTabs((tabs) => tabs.filter((tab) => tab.id !== id));
     setSelectedTool((current) => current === id ? next?.id : current);
   }
-  function closeStudio() {
+  async function closeStudio() {
     if (studioBusy.current) { setStatus("Studio đang xử lý. Thử đóng lại khi hoàn tất."); return; }
-    if (studioDirty.current && !window.confirm("Bỏ thay đổi chưa lưu trong Studio?")) return;
+    if (studioDirty.current && !await confirmStudio("Bỏ thay đổi chưa lưu trong Studio?")) return;
     studioDirty.current = false;
     setStudioOpen(false);
     setSelectedTool((current) => current === "template-studio" ? undefined : current);
@@ -3145,7 +3159,7 @@ export default function App({
           </section>}
           {studioOpen && <section id="template-studio-panel" className="profiler-panel" role="tabpanel"
             aria-labelledby="template-studio-tab" hidden={selectedTool !== "template-studio"}>
-            <TemplateStudio onDirty={(dirty) => { studioDirty.current = dirty; }}
+            <TemplateStudio confirm={confirmStudio} confirming={!!studioConfirmation} onDirty={(dirty) => { studioDirty.current = dirty; }}
               onBusy={(busy) => { studioBusy.current = busy; }} />
           </section>}
           {advanceNoteOpen && project && <section id="advance-note-panel" className="profiler-panel" role="tabpanel"
@@ -3706,6 +3720,8 @@ export default function App({
           onOpen={(p) => void guard(() => open(p))}
         />
       )}
+      {studioConfirmation && <ConfirmDialog title="Dynamic Template Studio" message={studioConfirmation.message}
+        onConfirm={() => finishStudioConfirmation(true)} onClose={() => finishStudioConfirmation(false)} />}
       {unsavedPrompt && (
         <Modal
           title="Lưu thay đổi trước khi đóng?"

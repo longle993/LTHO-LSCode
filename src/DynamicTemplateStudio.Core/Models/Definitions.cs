@@ -109,6 +109,9 @@ public sealed class ColumnDefinition : Bindable
 
 public sealed record Diagnostic(string Message, string Table = "", string Field = "", string Location = "", bool IsWarning = false)
 {
+    public int? TableIndex { get; init; }
+    public int? FieldIndex { get; init; }
+
     public override string ToString() => $"{(IsWarning ? "Warning" : "Error")} · {Table}{(Field.Length > 0 ? "." + Field : "")} {Location} — {Message}";
 }
 

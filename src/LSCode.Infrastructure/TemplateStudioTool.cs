@@ -16,9 +16,23 @@ internal sealed class TemplateStudioTool
     private ProjectRepository? repository;
     private string? folder;
 
+    private static object[] SaveIssues(ProjectDefinition project, IReadOnlyList<(int TemplateIndex, Diagnostic Issue)> issues)
+        => issues.Select(entry => (object)new
+        {
+            templateCode = project.Templates[entry.TemplateIndex].TemplateCode,
+            entry.Issue.Table,
+            entry.Issue.Field,
+            entry.Issue.TableIndex,
+            entry.Issue.FieldIndex,
+            entry.Issue.Location,
+            entry.Issue.Message
+        }).ToArray();
+
     public async Task<object> ExecuteAsync(string method, JsonElement payload, CancellationToken token)
     {
-        await gate.WaitAsync(token);
+        var usesRepository = method is "templateStudio.open" or "templateStudio.create" or "templateStudio.recover"
+            or "templateStudio.save" or "templateStudio.saveTemplate" or "templateStudio.export";
+        if (usesRepository) await gate.WaitAsync(token);
         try
         {
             if (method is "templateStudio.open" or "templateStudio.create" or "templateStudio.recover")
@@ -26,6 +40,11 @@ internal sealed class TemplateStudioTool
                 var path = payload.GetProperty("folder").GetString() ?? "";
                 if (!Path.IsPathFullyQualified(path))
                     throw new ArgumentException("Chọn thư mục project Studio.");
+                var selected = new DirectoryInfo(path);
+                if (method != "templateStudio.create" && selected.Name.Equals("templates", StringComparison.OrdinalIgnoreCase)
+                    && !File.Exists(Path.Combine(path, "project.json")) && selected.Parent is { } parent
+                    && File.Exists(Path.Combine(parent.FullName, "project.json")))
+                    path = parent.FullName;
                 var next = new ProjectRepository(serializer);
                 if (method == "templateStudio.recover") await next.RecoverAsync(path);
                 ProjectDefinition project;
@@ -39,16 +58,28 @@ internal sealed class TemplateStudioTool
                 var draftPath = ProjectRepository.SafePath(path, ".studio/draft.json");
                 var draft = File.Exists(draftPath)
                     ? DocumentState.Restore(await File.ReadAllTextAsync(draftPath, token)) : null;
+                if (draft is not null)
+                {
+                    var draftCodes = draft.Templates.Select(item => item.TemplateCode).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    var draftIds = draft.Templates.Select(item => item.Id).ToHashSet();
+                    foreach (var item in project.Templates.Where(item => next.DiscoveredTemplateCodes.Contains(item.TemplateCode)
+                        && !draftCodes.Contains(item.TemplateCode) && !draftIds.Contains(item.Id)))
+                        draft.Templates.Add(item);
+                }
                 repository = next;
                 folder = path;
-                return new { project, draft };
+                return new { project, draft, skippedTemplates = next.SkippedTemplates.ToArray() };
             }
 
             if ((method is "templateStudio.save" or "templateStudio.export") && repository is not null && folder is not null)
             {
                 var project = payload.GetProperty("project").Deserialize<ProjectDefinition>(Json)
                     ?? throw new ArgumentException("Thiếu project Studio.");
-                if (method == "templateStudio.save") return await repository.SaveAsync(project, folder, token);
+                if (method == "templateStudio.save")
+                {
+                    var issues = await repository.SaveWithDiagnosticsAsync(project, folder, token);
+                    return new { valid = issues.Count == 0, issues = SaveIssues(project, issues) };
+                }
                 await repository.ExportAsync(project, payload.GetProperty("folder").GetString() ?? "");
                 return true;
             }
@@ -65,8 +96,8 @@ internal sealed class TemplateStudioTool
                     ?? persisted.Templates.FirstOrDefault(item => item.TemplateCode.Equals(selected.TemplateCode, StringComparison.OrdinalIgnoreCase));
                 if (existing is null) persisted.Templates.Add(selected);
                 else persisted.Templates[persisted.Templates.IndexOf(existing)] = selected;
-                var valid = await repository.SaveAsync(persisted, folder, token);
-                return new { valid, project = persisted };
+                var issues = await repository.SaveWithDiagnosticsAsync(persisted, folder, token);
+                return new { valid = issues.Count == 0, project = persisted, issues = SaveIssues(persisted, issues) };
             }
 
             if (method == "templateStudio.exportTemplate")
@@ -132,6 +163,6 @@ internal sealed class TemplateStudioTool
 
             throw new InvalidOperationException("Mở project Studio trước khi lưu.");
         }
-        finally { gate.Release(); }
+        finally { if (usesRepository) gate.Release(); }
     }
 }

@@ -83,6 +83,28 @@ await page.addInitScript(()=>{
         files:[{path:'App_Data\\Controllers\\Dir\\'+request.payload.design.source.controller+'.xml',text:'<controller />'}]};break;
       case 'catalogDescription.apply':result=['C:\\Fixture\\App_Data\\Controllers\\Dir\\zdm_diem_danh_gia_theo_he_so.xml'];break;
       case 'workspace.folder':result='C:\\Fixture\\Output';break;
+      case 'templateStudio.open':result={project:{projectName:'Studio mẫu',templates:[
+        {templateCode:'registered',execute:'dbo.usp_Registered',sampleJson:'{}',tables:[]},
+        {templateCode:'existing',execute:'dbo.usp_Existing',sampleJson:'{}',tables:[
+          {name:'#Master',from:'$',mode:'object',columns:[{name:'Code',path:'$.code',type:'varchar(16)',key:false,required:false}]},
+        ]},
+      ]},skippedTemplates:['invalid.json']};break;
+      case 'templateStudio.save':{
+        (window.__studioSaves??=[]).push(request.payload.project);
+        const issues=request.payload.project.templates.flatMap(template=>template.tables.flatMap((table,tableIndex)=>
+          table.columns.flatMap((field,fieldIndex)=>field.defaultJson==='{'?[{
+            templateCode:template.templateCode,table:table.name,tableIndex,field:field.name,fieldIndex,
+            location:'Default (JSON)',message:'Default/constant: Invalid JSON.',
+          }]:[])));
+        result={valid:issues.length===0,issues};break;
+      }
+      case 'templateStudio.renameTable':
+      case 'templateStudio.renameField':{
+        const {template,table,field,name}=request.payload;
+        if(field===undefined) template.tables[table].name=name;
+        else template.tables[table].columns[field].name=name;
+        result=template;break;
+      }
       case 'catalogSource.export':result={folder:'C:\\Fixture\\Output\\CatalogDemo',files:['CatalogDemo.xml']};break;
       case 'project.menu.insertScript':result="-- dbo.wcommand\r\nINSERT INTO dbo.wcommand ([wmenu_id]) VALUES ('menu1')\r\nGO\r\n\r\n-- dbo.command\r\nINSERT INTO dbo.command ([menu_id]) VALUES ('Dir')\r\nGO\r\n";break;
       case 'project.employeeTabs':result=[{sysId:'hrPIGeneralInformation',caption:'Thông tin chung'},{sysId:'hrPIPassportVisa',caption:'Hộ chiếu, thị thực'}];break;
@@ -236,6 +258,7 @@ await page.addInitScript(()=>{
     } else if (request.method==='project.targets'&&window.__holdProjectTargets) window.__releaseProjectTargets=reply;
     else if (request.method==='project.menu.resources'&&window.__holdMenuResources) window.__releaseMenuResources=reply;
     else if (request.method==='table.catalog'&&window.__holdTableCatalog) window.__releaseTableCatalog=reply;
+    else if (request.method==='templateStudio.save'&&window.__holdStudioSave) window.__releaseStudioSave=reply;
     else setTimeout(reply,10);
   }};
   window.chrome=window.chrome??{};window.chrome.webview=native;
@@ -739,6 +762,101 @@ Trạng thái: 1-Còn sử dụng, 0-Không còn sử dụng`);
     await page.getByRole('button',{name:'Chức năng',exact:true}).click();
     await testMenuEditor(page.getByRole('button',{name:'Nhân viên',exact:true}));
     check(errors.length===0,'No uncaught browser errors');
+  } else if(process.argv.includes('--studio-discovery-regression')){
+    await page.getByRole('dialog',{name:'Dự án của bạn'}).getByRole('button',{name:'Đóng',exact:true}).click();
+    await page.locator('.command-search').click();
+    await page.getByRole('textbox',{name:'Tìm lệnh hoặc file'}).fill('Thiết kế template API');
+    await page.getByRole('dialog').getByRole('button',{name:'Thiết kế template API',exact:true}).click();
+    await page.getByRole('button',{name:'Mở project Studio',exact:true}).click();
+    await page.getByRole('button',{name:'Template',exact:true}).click();
+    await page.getByRole('option',{name:'existing',exact:true}).waitFor();
+    check(await page.getByRole('option',{name:'registered',exact:true}).isVisible(),
+      'Studio shows registered and discovered templates together');
+    await page.screenshot({path:out+'/studio-discovered-templates.png',animations:'disabled'});
+    await page.getByRole('searchbox',{name:'Tìm template',exact:true}).fill('existing');
+    await page.getByRole('option',{name:'existing',exact:true}).click();
+    check((await page.getByRole('button',{name:'Template',exact:true}).textContent()).includes('existing'),
+      'Studio finds and opens a template discovered on disk');
+    const notice=page.locator('.table-notice').filter({hasText:'invalid.json'});
+    await notice.waitFor();
+    await notice.getByRole('button',{name:'Đóng thông báo'}).click();
+    await notice.waitFor({state:'detached'});
+    const from=page.getByRole('textbox',{name:'From',exact:true});
+    check((await from.getAttribute('placeholder')).includes('$.header'),'Studio shows a JSONPath example in From');
+    await page.evaluate(()=>window.__holdStudioSave=true);
+    await from.fill('$.header');
+    await page.waitForFunction(()=>window.__releaseStudioSave);
+    check(await from.isEditable(),'Studio keeps inputs editable while autosave is pending');
+    await from.fill('$.edited');
+    const tableHeading=page.locator('.studio-table-settings .studio-name');
+    await tableHeading.getByRole('button',{name:'Đổi tên bảng',exact:true}).click();
+    const tableName=tableHeading.getByRole('textbox',{name:'Tên bảng mới',exact:true});
+    check(await tableName.evaluate(input=>input===document.activeElement),'Studio focuses the inline table rename input');
+    await tableName.fill('#Edited');
+    await tableName.press('Enter');
+    await tableHeading.getByText('#Edited',{exact:true}).waitFor();
+    const fieldCell=page.locator('#studio-field-0 td:nth-child(3)');
+    await fieldCell.getByRole('button',{name:'Đổi tên field Code',exact:true}).click();
+    const fieldName=fieldCell.getByRole('textbox',{name:'Tên field mới',exact:true});
+    await fieldName.fill('ItemCode');
+    await page.screenshot({path:out+'/studio-inline-rename.png',animations:'disabled'});
+    await fieldName.press('Enter');
+    await page.getByRole('button',{name:'Đổi tên field ItemCode',exact:true}).waitFor();
+    await page.evaluate(()=>{window.__holdStudioSave=false;window.__releaseStudioSave();});
+    await page.waitForFunction(()=>window.__studioSaves?.length===2 &&
+      window.__studioSaves[1].templates[1].tables[0].from==='$.edited' &&
+      window.__studioSaves[1].templates[1].tables[0].name==='#Edited' &&
+      window.__studioSaves[1].templates[1].tables[0].columns[0].name==='ItemCode');
+    await page.waitForFunction(()=>[...document.querySelectorAll('.studio-project-toolbar button')]
+      .some(button=>button.textContent==='Lưu project' && button.disabled));
+    check(true,'Autosave follows the first pending write with the new From and inline names');
+    await page.getByRole('checkbox',{name:'Tự lưu',exact:true}).uncheck();
+    check(await page.locator('.studio-design-sidebar .studio-settings').isVisible(),
+      'Template properties appear beneath the table list in the left pane');
+    await page.getByRole('button',{name:'Template',exact:true}).click();
+    await page.getByRole('option',{name:'registered',exact:true}).click();
+    await page.getByRole('button',{name:'Template',exact:true}).click();
+    await page.getByRole('option',{name:'existing',exact:true}).click();
+    await page.locator('.studio-inspector').waitFor({state:'detached'});
+    await page.locator('#studio-field-0 td:nth-child(5)').click();
+    const inspector=page.locator('.studio-inspector');
+    const defaultJson=inspector.getByRole('textbox',{name:'Default (JSON)',exact:true});
+    check(await defaultJson.isVisible() && await page.evaluate(()=>
+      document.querySelector('.studio-inspector').getBoundingClientRect().bottom <=
+      document.querySelector('.studio-grid-scroll').getBoundingClientRect().top),
+      'Clicking a field row outside its name shows its properties above the grid');
+    await defaultJson.fill('{');
+    await page.getByRole('button',{name:'Lưu project',exact:true}).click();
+    const issues=page.getByRole('region',{name:'Lỗi khi lưu',exact:true});
+    await issues.waitFor();
+    await page.getByRole('button',{name:'Template',exact:true}).click();
+    await page.getByRole('option',{name:'registered',exact:true}).click();
+    await issues.getByRole('button',{name:/existing › #Edited › ItemCode › Default \(JSON\)/}).click();
+    await page.waitForFunction(()=>document.activeElement?.getAttribute('data-studio-location')==='Default (JSON)');
+    check(await defaultJson.getAttribute('aria-invalid')==='true','Clicking a save issue focuses and marks the affected input');
+    await page.screenshot({path:out+'/studio-save-issues.png',animations:'disabled'});
+    await defaultJson.fill('');
+    await page.getByRole('button',{name:'Lưu project',exact:true}).click();
+    await issues.waitFor({state:'detached'});
+    await page.getByRole('button',{name:'Thêm template',exact:true}).click();
+    const create=page.getByRole('dialog',{name:'Thêm template',exact:true});
+    await create.getByRole('textbox',{name:'Mã template',exact:true}).fill('existing');
+    await create.getByRole('button',{name:'Thêm',exact:true}).click();
+    await create.getByRole('alert').waitFor();
+    await create.getByRole('textbox',{name:'Mã template',exact:true}).fill('added.template');
+    await create.getByRole('button',{name:'Thêm',exact:true}).click();
+    await create.waitFor({state:'detached'});
+    await page.getByRole('button',{name:'Đóng Dynamic Template Studio',exact:true}).click();
+    const confirmation=page.getByRole('dialog',{name:'Dynamic Template Studio',exact:true});
+    await confirmation.waitFor();
+    await page.screenshot({path:out+'/studio-confirmation.png',animations:'disabled'});
+    await confirmation.getByRole('button',{name:'Hủy',exact:true}).click();
+    check(await page.getByRole('tab',{name:'Dynamic Template Studio',exact:true}).isVisible(),
+      'Studio uses in-app notices, a validated template form and a cancellable confirmation');
+    await page.getByRole('button',{name:'Đóng Dynamic Template Studio',exact:true}).click();
+    await confirmation.getByRole('button',{name:'Tiếp tục',exact:true}).click();
+    await page.getByRole('tab',{name:'Dynamic Template Studio',exact:true}).waitFor({state:'detached'});
+    check(true,'Confirming discards the pending Studio edit and closes the tab');
   } else if(process.argv.includes('--project-target-regression')){
     await page.evaluate(()=>window.__holdProjectTargets=true);
     await page.locator('.project-row').filter({hasText:'Dự án thử UI'}).click();

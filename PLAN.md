@@ -1,5 +1,10 @@
 # Kế hoạch và nghiệm thu
 
+- [x] Dynamic Template Studio tải các template trong manifest và tệp template hợp lệ chưa đăng ký trong thư mục `templates`. Kiểm tra mở, lưu và mở lại sau khi đổi mã template.
+- [x] Studio dùng thẻ thông báo, hộp xác nhận và hộp nhập mã template nội bộ của LSCode.
+- [x] Studio chỉ vị trí lỗi lưu và cho nhảy đến chỗ sửa. Thuộc tính template ở dưới danh sách bảng. Chọn cả dòng field để mở thuộc tính phía trên lưới.
+- [x] Studio tự lưu sau khi ngừng nhập và vẫn cho sửa trong lúc ghi. Đổi tên cạnh tên bảng hoặc field và có ví dụ JSONPath trong ô From.
+
 - [x] Khi lưu hoặc lưu thành tệp XML, dùng UTF-8 có BOM. Cập nhật khai báo encoding nếu có.
 
 - [x] Tách tải kết nối khỏi mở dự án. SQL chưa chọn kết nối riêng chờ App của dự án trước khi chạy. Hai lệnh Close trong Lịch sử chỉ xóa lịch sử, còn đóng cửa sổ dọn phiên khôi phục sau khi xử lý tab chưa lưu.

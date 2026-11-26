@@ -26,11 +26,15 @@ Cung cấp một IDE Windows cho người phát triển và bảo trì FAST ERP.
 
 Xem [ma trận WebView](docs/specifications/WEBVIEW-MIGRATION.vi.md) và [đặc tả Table Designer](docs/specifications/CATALOG-TABLE-DESIGNER.vi.md) để tra tiêu chí chi tiết. [PLAN.md](PLAN.md) ghi phạm vi còn cần nghiệm thu theo các tài liệu hiện có.
 
+Trong **Dynamic Template Studio**, tự lưu chờ 800 ms sau chỉnh sửa và ghi nền theo từng lượt. Các thay đổi thực hiện trong lúc ghi được lưu ở lượt tiếp theo. Nút bút chì cạnh tên bảng hoặc field mở ngay ô đổi tên tại chỗ. Ô From hiển thị ví dụ JSONPath theo chế độ Object hoặc Array khi chưa có giá trị.
+
 Lưới Cấu trúc và dữ liệu hiện viền trên mỗi ô được quét và dùng nền xám cho ô nhập. Lưu hoặc Ctrl+S ghi cả lô dữ liệu, gồm thay đổi khóa cho phép ghi. Khi có xung đột khóa, toàn bộ lần lưu được hoàn tác và các ô khóa của dòng lỗi được đánh dấu sau khi khôi phục giá trị.
 
 Sau khi tạo bảng trong LSCode, ô FROM tìm được bảng mới ngay khi quay lại tab Cấu trúc và dữ liệu trên cùng kết nối. Chọn bảng tải được cấu trúc và dữ liệu ngay lần đầu. Tập lệnh INSERT của bảng dùng `dd/MM/yyyy` cho `smalldatetime` và `dd/MM/yyyy HH:mm` cho `datetime`, với chuyển đổi ngày tường minh để chạy được trên phiên SQL Server dùng `mdy`. Lỗi SQL và lỗi tra cứu bảng hiện trong thông báo nổi có thể đóng mà không thay đổi vị trí vùng làm việc.
 
 Trong **Cấu trúc và dữ liệu** của WebView, truy vấn có thể duyệt qua dòng thứ 1.000 bằng các nút chuyển trang. SQL chỉ đọc dữ liệu của từng trang có giới hạn dung lượng, còn lưới chỉ dựng các hàng gần vùng đang xem. Chuyển trang dùng SELECT, WHERE và ORDER BY của lần chạy hiện tại. Các thao tác chọn, sửa, xóa, sao chép và xuất INSERT áp dụng cho dữ liệu trên trang đang xem. Ô **Tìm kiếm** ở thanh bên trái tự tìm theo nội dung khi gõ, hiện mỗi tệp khớp một lần và mở đến vị trí khớp đầu tiên.
+
+Khi lưu **Dynamic Template Studio**, lỗi kiểm tra dữ liệu chỉ rõ template, bảng, field và ô nhập nếu xác định được. Chọn lỗi sẽ mở đúng vị trí sửa. Thuộc tính template nằm dưới danh sách bảng ở cột trái. Chọn một dòng field sẽ mở thuộc tính field phía trên lưới.
 
 ## Tải menu nhanh và menu Mobile
 

@@ -75,6 +75,8 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
         if (method == "mail.sendTest")
             return await CheckMail.SendAsync(p.Deserialize<LSCode.Contracts.CheckMailRequest>(Json)
                 ?? throw new ArgumentException("Cấu hình SMTP không hợp lệ."), ct);
+        if (method == "templateStudio.save")
+            return await Task.Run(() => templateStudio.ExecuteAsync(method, p, ct), ct);
         if (method.StartsWith("templateStudio.", StringComparison.Ordinal))
             return await templateStudio.ExecuteAsync(method, p, ct);
         if (method.StartsWith("catalog.", StringComparison.Ordinal)) return await catalog.ExecuteAsync(method, p, Target(p), ct);

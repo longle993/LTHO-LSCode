@@ -1266,6 +1266,54 @@ if (args.Contains("--sql"))
         await Call("sql.execute", new { targetId = admin.Id, sql = "ALTER DATABASE [" + database + "] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [" + database + "]" });
     }
 }
+{
+    var folder = Path.Combine(root, "StudioDiscovery");
+    var templates = Directory.CreateDirectory(Path.Combine(folder, "templates")).FullName;
+    const string manifest = """{"projectName":"Discovery","schemaVersion":1,"templates":["registered"]}""";
+    var manifestPath = Path.Combine(folder, "project.json");
+    await File.WriteAllTextAsync(manifestPath, manifest);
+    const string registered = """{"template":"registered","execute":"dbo.usp_Import","tables":[{"name":"#Rows","from":"$","mode":"object","columns":{"id":{"path":"$.id","type":"int"}}}]}""";
+    await File.WriteAllTextAsync(Path.Combine(templates, "registered.json"), registered);
+    var importedPath = Path.Combine(templates, "existing.json");
+    await File.WriteAllTextAsync(importedPath, registered.Replace("registered", "existing", StringComparison.Ordinal));
+    var invalidPath = Path.Combine(templates, "invalid.json");
+    await File.WriteAllTextAsync(invalidPath, "{}");
+    await using var studio = new DeveloperTools();
+    async Task<JsonElement> StudioCall(string method, object payload) =>
+        JsonSerializer.SerializeToElement(await studio.ExecuteAsync("templateStudio." + method,
+            JsonSerializer.SerializeToElement(payload, Protocol.Json), default), Protocol.Json);
+    var opened = await StudioCall("open", new { folder = templates });
+    var projectElement = opened.GetProperty("project");
+    Check(projectElement.GetProperty("templates").EnumerateArray().Select(item => item.GetProperty("templateCode").GetString())
+        .SequenceEqual(new[] { "registered", "existing" }) &&
+        opened.GetProperty("skippedTemplates")[0].GetString() == "invalid.json" &&
+        await File.ReadAllTextAsync(manifestPath) == manifest,
+        "Studio discovers templates absent from the manifest and reports invalid files without writing");
+    var project = System.Text.Json.Nodes.JsonNode.Parse(projectElement.GetRawText())!;
+    project["templates"]![1]!["templateCode"] = "renamed";
+    var column = project["templates"]![1]!["tables"]![0]!["columns"]![0]!;
+    column["defaultJson"] = "{";
+    foreach (var invalidSave in new[] { await StudioCall("save", new { project }), await StudioCall("saveTemplate", new { project, template = 1 }) })
+    {
+        var issue = invalidSave.GetProperty("issues")[0];
+        Check(!invalidSave.GetProperty("valid").GetBoolean() &&
+            issue.GetProperty("templateCode").GetString() == "renamed" &&
+            issue.GetProperty("table").GetString() == "Rows" &&
+            issue.GetProperty("tableIndex").GetInt32() == 0 &&
+            issue.GetProperty("field").GetString() == "id" &&
+            issue.GetProperty("fieldIndex").GetInt32() == 0 &&
+            issue.GetProperty("location").GetString() == "Default (JSON)" &&
+            File.Exists(Path.Combine(folder, ".studio", "draft.json")) && await File.ReadAllTextAsync(manifestPath) == manifest,
+            "Studio invalid save reports template, table, field and setting and retains the runtime manifest");
+    }
+    column["defaultJson"] = "";
+    Check((await StudioCall("save", new { project })).GetProperty("valid").GetBoolean(), "Studio saves a project with a discovered template");
+    var reopened = await StudioCall("open", new { folder });
+    Check(reopened.GetProperty("project").GetProperty("templates").EnumerateArray()
+        .Select(item => item.GetProperty("templateCode").GetString()).SequenceEqual(new[] { "registered", "renamed" }) &&
+        !File.Exists(importedPath) && File.Exists(invalidPath),
+        "Renamed discovered template is not rediscovered and invalid JSON is preserved");
+}
 if (Environment.GetEnvironmentVariable("LSCODE_STUDIO_SAMPLE") is { } studioSample)
 {
     var studioFolder = Path.Combine(root, "Studio");
@@ -1301,7 +1349,7 @@ if (Environment.GetEnvironmentVariable("LSCODE_STUDIO_SAMPLE") is { } studioSamp
         "Studio materializes a new master key in the child table");
     Check(synchronizedTables[1].GetProperty("parentKey").GetProperty("pairs").GetArrayLength() == 2,
         "Studio refreshes composite child-parent key pairs when the master key changes");
-    Check((await StudioCall("save", new { project })).GetBoolean(), "Studio saves edited project");
+    Check((await StudioCall("save", new { project })).GetProperty("valid").GetBoolean(), "Studio saves edited project");
     var reopened = await StudioCall("open", new { folder = studioFolder });
     Check(reopened.GetProperty("project").GetProperty("templates")[0].GetProperty("execute").GetString() == "dbo.usp_ImportOrderEdited",
         "Studio reopens the saved edit");

@@ -18,18 +18,23 @@ public static class TemplateValidator
     public static List<Diagnostic> Validate(TemplateDefinition template, bool runtimeExport = false)
     {
         List<Diagnostic> errors = [];
-        void Add(string text, TableDefinition? t = null, ColumnDefinition? c = null) => errors.Add(new(text, t?.Name ?? "", c?.Name ?? ""));
-        if (!SafeCode(template.TemplateCode)) Add("Template code must be a safe, unique filename (letters, numbers, dot, dash, underscore).");
-        if (!Regex.IsMatch(template.Execute, @"^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*$")) Add("Procedure must be schema.name; SQL scripts are not allowed.");
-        if (template.Version < 1) Add("Version must be positive.");
-        if (template.Tables.Count == 0) Add("Add at least one table.");
+        void Add(string text, TableDefinition? t = null, ColumnDefinition? c = null, string location = "") =>
+            errors.Add(new(text, t?.Name ?? "", c?.Name ?? "", location)
+            {
+                TableIndex = t is null ? null : template.Tables.IndexOf(t),
+                FieldIndex = c is null || t is null ? null : t.Columns.IndexOf(c)
+            });
+        if (!SafeCode(template.TemplateCode)) Add("Template code must be a safe, unique filename (letters, numbers, dot, dash, underscore).", location: "Template");
+        if (!Regex.IsMatch(template.Execute, @"^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*$")) Add("Procedure must be schema.name; SQL scripts are not allowed.", location: "Execute");
+        if (template.Version < 1) Add("Version must be positive.", location: "Phiên bản");
+        if (template.Tables.Count == 0) Add("Add at least one table.", location: "Bảng");
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var t in template.Tables)
         {
             if (!Identifier(GraphEditor.ShortName(t.Name)) || t.Name.StartsWith("##")) Add("Invalid table identifier (maximum 116 characters).", t);
             if (!names.Add(GraphEditor.ShortName(t.Name))) Add("Duplicate table name.", t);
-            if (t.Mode is not ("array" or "object")) Add("Mode must be object or array.", t);
-            try { PathExpression.Parse(t.From); } catch (FormatException e) { Add(e.Message, t); }
+            if (t.Mode is not ("array" or "object")) Add("Mode must be object or array.", t, location: "Chế độ nguồn");
+            try { PathExpression.Parse(t.From); } catch (FormatException e) { Add(e.Message, t, location: "From"); }
             var ancestor = t; var seen = new HashSet<TableDefinition>();
             while (!string.IsNullOrEmpty(ancestor.Parent))
             {
@@ -45,10 +50,10 @@ public static class TemplateValidator
                 if (!Identifier(c.Name)) Add("Invalid field identifier.", t, c);
                 if (!fieldNames.Add(c.Name)) Add("Duplicate field name.", t, c);
                 if (c.Name.Equals("_RowKey", StringComparison.OrdinalIgnoreCase)) Add("_RowKey is reserved for generated values.", t, c);
-                if (!ValidType(c.Type)) Add("Unsupported data type or decimal precision/scale.", t, c);
-                if (c.MaxLength is <= 0) Add("Max length must be positive.", t, c);
-                if (SqlTypes.Base(c.Type) is "char" or "varchar" or "nvarchar" && c.MaxLength > (SqlTypes.Base(c.Type) == "nvarchar" ? 4000 : 8000)) Add("Max length exceeds the SQL type limit.", t, c);
-                if (c.MaxLength.HasValue && !SqlTypes.IsText(c.Type)) Add("Max length is only valid for text types.", t, c);
+                if (!ValidType(c.Type)) Add("Unsupported data type or decimal precision/scale.", t, c, "Kiểu SQL");
+                if (c.MaxLength is <= 0) Add("Max length must be positive.", t, c, "Max length");
+                if (SqlTypes.Base(c.Type) is "char" or "varchar" or "nvarchar" && c.MaxLength > (SqlTypes.Base(c.Type) == "nvarchar" ? 4000 : 8000)) Add("Max length exceeds the SQL type limit.", t, c, "Max length");
+                if (c.MaxLength.HasValue && !SqlTypes.IsText(c.Type)) Add("Max length is only valid for text types.", t, c, "Max length");
                 try
                 {
                     var allowed = AllowedValuesRule.Parse(c.AllowedValuesText);
@@ -86,10 +91,10 @@ public static class TemplateValidator
                         }
                         path = "$";
                     }
-                    try { PathExpression.Parse(path); } catch (FormatException e) { Add(e.Message, t, c); }
+                    try { PathExpression.Parse(path); } catch (FormatException e) { Add(e.Message, t, c, "Property"); }
                 }
-                foreach (var json in new[] { c.DefaultJson, c.ConstantJson }.Where(x => x.Length > 0))
-                    try { using var doc = JsonDocument.Parse(json); var converted = ValueConverter.Convert(doc.RootElement, c.Type, c.MaxLength); AllowedValuesRule.Validate(c, converted); } catch (Exception e) when (e is FormatException or JsonException or OverflowException or InvalidOperationException) { Add("Default/constant: " + e.Message, t, c); }
+                foreach (var (json, location) in new[] { (c.DefaultJson, "Default (JSON)"), (c.ConstantJson, "Constant (JSON)") }.Where(x => x.Item1.Length > 0))
+                    try { using var doc = JsonDocument.Parse(json); var converted = ValueConverter.Convert(doc.RootElement, c.Type, c.MaxLength); AllowedValuesRule.Validate(c, converted); } catch (Exception e) when (e is FormatException or JsonException or OverflowException or InvalidOperationException) { Add(e.Message, t, c, location); }
                 if (runtimeExport && (c.ConstantJson.Length > 0 || c.MaxLength.HasValue && SqlTypes.Base(c.Type) == "string" || c.References.Length > 0)) Add("Engine contract for constant/legacy string length/references is not confirmed. Save as Studio draft instead.", t, c);
             }
             if (parent is not null)
