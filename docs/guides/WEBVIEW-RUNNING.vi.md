@@ -50,6 +50,8 @@ dotnet run --project tests/LSCode.WebView.Tests -c Release -- --sql
 4. F5 chạy selection nếu có, nếu không chạy cả document. Nút Dừng hủy SqlCommand. Kết quả có nhiều result sets và xuất CSV.
 5. Ctrl+Shift+P tìm mọi công cụ: danh mục, XML/XPath/include, snippets, compare, Profiler, dịch, Crystal và cài đặt.
 
+Nếu F5 gặp lỗi SQL, tab **Thông báo** trong panel dưới tự mở để hiện nội dung SQL Server; tab **Vấn đề** giữ dòng/cột để quay lại câu lệnh. Lỗi SQL không dùng banner đỏ phía trên editor. Banner này chỉ hiện lỗi XML/DTD của file `.xml`/`.f`, như entity chưa khai báo, và tự mất sau khi khai báo được sửa đúng.
+
 Trong trình soạn thảo XML, khối CDATA dùng màu cú pháp SQL, còn CDATA trong `<script>` dùng màu JavaScript. Các thẻ `<sql>` và `<query>` cũng tô màu SQL trực tiếp. Với XML ERP có `<fields>` và `<views>` cùng cấp, khung **Vấn đề** báo field thiếu trong tất cả view, tên field khai báo trùng, ID view trùng và field lặp trong cùng một view. Tham chiếu `[field].Label` được tính là nhãn. Bấm cảnh báo để nhảy đến dòng liên quan.
 
 - Kiểm tra XML và xem trước Grid/Dir đọc include theo đường dẫn của file đang mở. LSCode lần theo `DOCTYPE` và khai báo `SYSTEM`/`PUBLIC`, dò thư mục của file khai báo và các thư mục `Include/XML` của dự án. Nội dung include đang sửa trong editor được ưu tiên. Lệnh mở include cũng dùng cùng quy tắc dò đường dẫn.
@@ -298,7 +300,7 @@ Chọn menu trong **Chức năng ERP** chỉ tải cây controller vào File. �
 - Web lấy `wcommand` theo quy tắc quyền/Startup hiện hữu. Mobile lấy `dbo.dvcommand`, hiển thị cây theo `wmenu_id0`, nhãn `bar` (fallback `bar2`) và dùng `sysid` để tìm controller.
 - Ô tìm lọc tên, sysid và mã trên dữ liệu đã tải. Chuyển Web/Mobile giữ từ khóa và cây riêng, không truy vấn SQL theo từng ký tự.
 - Nút **Tải lại** bỏ qua cache của tab đang chọn. Cache tối đa 8 ngữ cảnh và hết hạn sau 5 phút; lưu menu Web cũng xóa cache liên quan.
-- Nhấp tên node một lần để dựng cây source và chuyển sang File mà không tự mở Main. Bấm mã menu để mở tệp chính. Khi quay lại Chức năng, nhánh đang mở và dòng vừa chọn được giữ nguyên. Khi Generate Update đang chọn yêu cầu, thao tác menu tiếp tục đưa cây source vào luồng chọn file.
+- Nhấp tên node để dựng cây source và chuyển sang File. Bấm mã menu Web để sửa menu như F3. Khi quay lại Chức năng, nhánh đang mở và dòng vừa chọn được giữ nguyên. Khi Generate Update đang chọn yêu cầu, thao tác menu tiếp tục đưa cây source vào luồng chọn file.
 - F3, F12 và menu chuột phải sửa/xuất INSERT chỉ dành cho Web. Mobile chưa có trình sửa `dvcommand`; nếu dự án không có bảng này, lỗi chỉ hiện trong vùng Mobile và không ảnh hưởng cây Web.
 
 ### Check Mail

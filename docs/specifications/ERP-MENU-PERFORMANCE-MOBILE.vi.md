@@ -41,7 +41,7 @@ Audit: React 18, Tailwind 4, Lucide, component nội bộ; token `--primary`, `-
 - Mobile chỉ tải khi chọn lần đầu. Mỗi loại menu giữ cây, từ khóa, mục chọn và nhánh mở riêng trong dự án hiện tại.
 - Lần đầu: placeholder dạng hàng cây trong vùng menu. Refresh cùng ngữ cảnh: giữ cây hiện có và thanh tiến trình mảnh; lỗi giữ cây cũ cùng thông báo thử lại. Đổi dự án không được hiện cây dự án trước.
 - Thiếu bảng Mobile: thông báo “Dự án chưa hỗ trợ menu Mobile”, giữ tab để người dùng hiểu; không gỡ tab âm thầm như Fcode. Phân biệt thiếu quyền, mất kết nối và không có menu.
-- Nhấp tên node một lần mở cây source tương ứng và chuyển sang File nhưng không tự mở Main; bấm mã menu mở tệp chính. Khi quay lại Chức năng, giữ nhánh đang mở và dòng đã chọn. Khi Generate Update đang mở yêu cầu, đưa source Mobile vào cây chọn của yêu cầu theo luồng hiện có.
+- Nhấp tên node một lần mở cây source tương ứng và chuyển sang File nhưng không mở hoặc tô chọn Main/file đang active từ trước; bấm mã menu Web mở form sửa như F3. Khi quay lại Chức năng, giữ nhánh đang mở và dòng đã chọn. Khi Generate Update đang mở yêu cầu, đưa source Mobile vào cây chọn của yêu cầu theo luồng hiện có.
 - Tìm theo tên, mã, controller trong bộ dữ liệu đã tải; không gọi SQL trên mỗi phím. Trường tìm bổ sung chỉ đưa vào sau khi xác minh schema Fcode.
 - F3/F12 đang dành cho wcommand/command: không được áp dụng mù lên Mobile. Giai đoạn đầu vô hiệu hóa thao tác sửa/xuất menu Web trên node Mobile; triển khai tương đương chỉ sau khi có đặc tả bảng Mobile.
 - Phím Tab, mũi tên và Enter hoạt động, tên dài có tooltip, theme sáng/tối dùng token hiện có. Kiểm tra panel hẹp 260px, cửa sổ 1024/1440px và DPI 125/150%.
