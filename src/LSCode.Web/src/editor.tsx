@@ -10,12 +10,13 @@ import type { DocumentInfo, Snippet, Target } from "./bridge";
 import { xmlLanguage } from "./xmlLanguage";
 
 type XmlProblem = { line: number; column: number; message: string };
-export type EditorDiagnostic = XmlProblem & { severity: "error" | "warning" };
+export type EditorDiagnostic = XmlProblem & { severity: "error" | "warning"; owner?: string };
 const toDiagnostic = (marker: monaco.editor.IMarker): EditorDiagnostic => ({
   line: marker.startLineNumber,
   column: marker.startColumn,
   message: marker.message,
   severity: marker.severity === monaco.MarkerSeverity.Warning ? "warning" : "error",
+  owner: marker.owner,
 });
 
 (self as unknown as { MonacoEnvironment: unknown }).MonacoEnvironment = {

@@ -1,5 +1,7 @@
 using System.IO;
+using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace LSCode.Shell.Services;
 
@@ -31,10 +33,25 @@ public static class SettingsStore
 {
     public static string Root => Environment.GetEnvironmentVariable("LSCODE_DATA_HOME") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LSCode");
     public static string FilePath => Path.Combine(Root, "settings.json");
+    public static string ShortcutFilePath => Path.Combine(Root, "shortcuts.dat");
     public static StudioSettings Load()
     {
-        try { return File.Exists(FilePath) ? JsonSerializer.Deserialize<StudioSettings>(File.ReadAllText(FilePath)) ?? new() : new(); }
-        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException) { return new(); }
+        StudioSettings settings;
+        try { settings = File.Exists(FilePath) ? JsonSerializer.Deserialize<StudioSettings>(File.ReadAllText(FilePath)) ?? new() : new(); }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException) { settings = new(); }
+        try
+        {
+            if (File.Exists(ShortcutFilePath))
+            {
+                var plaintext = ProtectedData.Unprotect(File.ReadAllBytes(ShortcutFilePath), null, DataProtectionScope.CurrentUser);
+                settings.Shortcuts = JsonSerializer.Deserialize<Dictionary<string, string[]>>(plaintext) ?? settings.Shortcuts;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException or CryptographicException)
+        {
+            System.Diagnostics.Trace.TraceWarning("Không đọc được cấu hình phím tắt: " + ex.Message);
+        }
+        return settings;
     }
     public static void Save(StudioSettings settings)
     {
@@ -54,8 +71,24 @@ public static class SettingsStore
                 }
             }
         Directory.CreateDirectory(Root);
-        var temp = FilePath + ".tmp";
-        File.WriteAllText(temp, JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true }));
-        File.Move(temp, FilePath, true);
+        var json = JsonSerializer.SerializeToNode(settings)!.AsObject();
+        json.Remove(nameof(StudioSettings.Shortcuts));
+        var encrypted = ProtectedData.Protect(JsonSerializer.SerializeToUtf8Bytes(settings.Shortcuts), null, DataProtectionScope.CurrentUser);
+        WriteAtomic(ShortcutFilePath, encrypted);
+        WriteAtomic(FilePath, JsonSerializer.SerializeToUtf8Bytes(json, new JsonSerializerOptions { WriteIndented = true }));
+    }
+
+    private static void WriteAtomic(string path, byte[] bytes)
+    {
+        var temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.WriteAllBytes(temp, bytes);
+            File.Move(temp, path, true);
+        }
+        finally
+        {
+            if (File.Exists(temp)) File.Delete(temp);
+        }
     }
 }

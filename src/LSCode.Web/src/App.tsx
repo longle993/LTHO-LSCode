@@ -25,6 +25,7 @@ import {
   Play,
   Square,
   Settings2,
+  Settings as SettingsIcon,
   Code2,
   ChevronRight,
   ChevronDown,
@@ -348,6 +349,7 @@ export default function App({
     };
   }, [formatMenuOpen]);
   const setActiveId = (id: string) => {
+    setSuppressControllerFileSelection(false);
     setSelectedTool(undefined);
     setActiveIdRaw(id);
     setPaneIds((old) => old.map((v, i) => (i === paneRef.current ? id : v)));
@@ -401,6 +403,7 @@ export default function App({
     [controllerRequests, setControllerRequests] = useState(0),
     [controllers, setControllers] = useState<ControllerGroup[]>([]),
     [expandedController, setExpandedController] = useState<string>();
+  const [suppressControllerFileSelection, setSuppressControllerFileSelection] = useState(false);
   const controller = controllers.find((entry) => entry.id === expandedController);
   const controllerRequest = useRef(0);
   const controllerSelection = useRef(0);
@@ -467,13 +470,13 @@ export default function App({
   const commandEntityPeekId = useRef<string>();
   useEffect(() => {
     if (!peeks.length) return;
-    const insidePeek = (target: EventTarget | null) =>
-      target instanceof Element && Boolean(target.closest(".entity-peek"));
+    const isEditorBackground = (target: EventTarget | null) =>
+      target instanceof Element && Boolean(target.closest(".editors")) && !target.closest(".entity-peek");
     const blockWheel = (event: WheelEvent) => {
-      if (!insidePeek(event.target)) event.preventDefault();
+      if (isEditorBackground(event.target)) event.preventDefault();
     };
     const blockTouchMove = (event: TouchEvent) => {
-      if (!insidePeek(event.target)) event.preventDefault();
+      if (isEditorBackground(event.target)) event.preventDefault();
     };
     document.body.classList.add("entity-peek-scroll-locked");
     window.addEventListener("wheel", blockWheel, { capture: true, passive: false });
@@ -1334,7 +1337,7 @@ export default function App({
       if (latest.current.activeId === queryDocument.id) {
         setResult(displayed);
         setResultIndex(0);
-        if (r.tables.length === 0) setBottom("messages");
+        setBottom(r.tables.length === 0 ? "messages" : "results");
         setQueryElapsedMs(r.durationMs);
       }
       setStatus(
@@ -1345,9 +1348,19 @@ export default function App({
         code?: string;
         details?: { line: number; message: string; procedure: string }[];
       };
+      const elapsed = performance.now() - startedAt;
+      queryDurationByTab.current.set(queryDocument.id, elapsed);
       if (failure.code === "cancelled") setStatus("Đã dừng query");
       else {
-        setError(failure.message);
+        const failedResult: QueryResult = {
+          tables: [],
+          messages: failure.details?.length
+            ? failure.details.map((detail) => detail.message)
+            : [failure.message],
+          durationMs: elapsed,
+          truncated: false,
+        };
+        resultsByTab.current.set(queryDocument.id, failedResult);
         setStatus("SQL gặp lỗi");
         if (failure.details)
           markSqlErrors(
@@ -1356,9 +1369,13 @@ export default function App({
             selected ? selection?.startLineNumber : 1,
             selected ? selection?.startColumn : 1,
           );
+        if (latest.current.activeId === queryDocument.id) {
+          setResult(failedResult);
+          setResultIndex(0);
+          setBottom("messages");
+          setPanel(true);
+        }
       }
-      const elapsed = performance.now() - startedAt;
-      queryDurationByTab.current.set(queryDocument.id, elapsed);
       if (latest.current.activeId === queryDocument.id) setQueryElapsedMs(elapsed);
     } finally {
       invalidateTableCatalog(targetId);
@@ -1780,6 +1797,12 @@ export default function App({
   useEffect(() => {
     const keys = (e: KeyboardEvent) => {
       if (e.isComposing) return;
+      if (e.key === "Escape" && peeksRef.current.length && !document.querySelector("dialog[open]")) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!e.repeat) closeEntityPeek();
+        return;
+      }
       const key = keyboardGesture(e);
       if (e.target instanceof HTMLElement &&
         (key === "Ctrl+Space" && e.target.closest('.table-inspection [role="combobox"]') ||
@@ -1929,7 +1952,7 @@ export default function App({
   const flatCommands = (nodes: CommandNode[]): CommandNode[] =>
     nodes.flatMap((n) => [n, ...flatCommands(n.children)]);
   const matches = useMemo(() => flatCommands(commands).filter((n) =>
-    [n.entry.caption, n.entry.sysId, n.entry.commandId, n.entry.id].some((v) =>
+    [n.entry.caption, n.entry.sysId, n.entry.commandId, n.entry.id, n.entry.link].some((v) =>
       v.toLowerCase().includes(menuQuery.toLowerCase()),
     ),
   ), [commands, menuQuery]);
@@ -2066,12 +2089,14 @@ export default function App({
       void guard(() => openController(node.entry.link, false, node.entry.sysId, false, true));
       return;
     }
+    setSuppressControllerFileSelection(true);
     void guard(() => openController(node.entry.link, false, node.entry.sysId));
   }
   function exportCsv() {
     if (!result?.tables[resultIndex]) return;
     const table = result.tables[resultIndex];
-    const csv = [table.columns, ...table.rows]
+    // Excel uses the UTF-8 BOM to recognize Unicode when opening a CSV directly.
+    const csv = "\uFEFF" + [table.columns, ...table.rows]
       .map((row) =>
         row.map((v) => '"' + (v ?? "").replaceAll('"', '""') + '"').join(","),
       )
@@ -2559,7 +2584,7 @@ export default function App({
                             files={group.files}
                             problemsByPath={controllerProblemsByPath(group.problems)}
                             emptyMessage="Controller chưa có file."
-                            activePath={active?.path}
+                            activePath={suppressControllerFileSelection ? null : active?.path}
                             onOpen={(p) => void guard(() => open(p))}
                             onCopy={copyWorkspaceText}
                             onReveal={revealWorkspacePath}
@@ -2775,7 +2800,7 @@ export default function App({
                 <div className="side-form">
                   <input
                     aria-label="Tìm chức năng"
-                    placeholder={`Tìm ${menuKind === "web" ? "Web" : "Mobile"}: tên / sysid / mã`}
+                    placeholder={`Tìm ${menuKind === "web" ? "Web" : "Mobile"}: tên / sysid / mã / Main`}
                     value={menuQuery}
                     onChange={(e) => setMenuQuery(e.target.value)}
                     onKeyDown={(e) => {
@@ -2834,13 +2859,14 @@ export default function App({
                       >
                         <strong>{n.entry.caption}</strong>
                       </button>
-                      {!n.children.length && (n.entry.link || n.entry.sysId) ? <button
+                      {menuKind === "web" || (!n.children.length && (n.entry.link || n.entry.sysId)) ? <button
                         type="button"
                         className="function-menu-id"
-                        title="Mở source tại File"
+                        title={menuKind === "web" ? "Sửa thông tin menu (F3)" : "Mở source tại File"}
                         onClick={(event) => {
                           event.stopPropagation();
                           setSelectedCommand(n.entry.id);
+                          if (menuKind === "web") { openMenuEditor(n); return; }
                           void guard(() => openController(n.entry.link, false, n.entry.sysId, true));
                         }}
                       >{n.entry.id}</button> : <small className="function-menu-id">{n.entry.id}</small>}
@@ -3204,7 +3230,8 @@ export default function App({
                   const doc =
                     tabs.find((t) => t.id === paneIds[pane]) ?? active;
                   const paneDiagnostics = diagnosticsByDocument[doc.id] ?? [];
-                  const paneError = paneDiagnostics.find((problem) => problem.severity === "error");
+                  const paneError = paneDiagnostics.find((problem) =>
+                    problem.severity === "error" && problem.owner === "xml");
                   return (
                     <div
                       key={pane}
@@ -3317,7 +3344,8 @@ export default function App({
             )}
             {peeks.length > 0 && (
               <>
-                <div className="entity-peek-scroll-lock" aria-hidden="true" />
+                <div className="entity-peek-scroll-lock" aria-hidden="true"
+                  onClick={() => closeEntityPeek()} />
                 {peeks.map((peek, index) => (
                   <aside
                     key={peek.id}
@@ -3559,7 +3587,9 @@ export default function App({
       {palette && (
         <Palette
           kind={palette}
-          commands={commandList}
+          commands={commandList.map(([id, label, key]) =>
+            [id, label, (settings.shortcuts[id] ?? [key]).filter(Boolean).join(" / ")])}
+          onEditShortcuts={() => { setPalette(""); setDialog("shortcut-settings"); }}
           workspace={workspace}
           tabs={tabs}
           onClose={() => setPalette("")}
@@ -3614,13 +3644,14 @@ export default function App({
           onOpen={openProject}
         />
       )}
-      {dialog === "settings" && (
+      {(dialog === "settings" || dialog === "shortcut-settings") && (
         <SettingsDialog
+          initialSection={dialog === "shortcut-settings" ? "shortcuts" : "general"}
           settings={settings}
           commands={commandList}
           onClose={() => setDialog("")}
           onSave={async (next) => {
-            await request("settings.save", { settings: next });
+            await request("settings.save", { settings: next, saveShortcuts: true });
             setSettings(next);
             setDialog("");
           }}
@@ -3670,7 +3701,7 @@ export default function App({
         onOpenRequestTracking={() => setDialog("request.tracking")} />}
       {dialog === "request.tracking" && <RequestTracking targets={targets} defaultTargetId={target?.id}
         onClose={() => setDialog("")} />}
-      {dialog && !["connection", "projects", "settings", "editor.sections", "editor.controllerPreview", "request.command", "request.tracking"].includes(dialog) && (
+      {dialog && !["connection", "projects", "settings", "shortcut-settings", "editor.sections", "editor.controllerPreview", "request.command", "request.tracking"].includes(dialog) && (
         <ToolDialog
           onDirtyChange={(dirty) => {
             toolDirty.current = dirty;
@@ -3898,14 +3929,15 @@ function FunctionTree({
                 )}
                 <span className="min-w-0 truncate">{node.entry.caption}</span>
               </button>
-              {!node.children.length && (node.entry.link || node.entry.sysId) ? <button
+              {allowMenuActions || (!node.children.length && (node.entry.link || node.entry.sysId)) ? <button
                 type="button"
                 className="function-menu-id"
-                title="Mở source tại File"
+                title={allowMenuActions ? "Sửa thông tin menu (F3)" : "Mở source tại File"}
                 onClick={(event) => {
                   event.stopPropagation();
                   onSelect(node.entry.id);
-                  onOpenSource(node);
+                  if (allowMenuActions) onEdit(node);
+                  else onOpenSource(node);
                 }}
               >{node.entry.id}</button> : <small className="function-menu-id">{node.entry.id}</small>}
             </div>
@@ -4032,6 +4064,7 @@ function Palette({
   workspace,
   tabs,
   onCommand,
+  onEditShortcuts,
   onOpen,
   onClose,
 }: {
@@ -4040,6 +4073,7 @@ function Palette({
   workspace: string;
   tabs: Tab[];
   onCommand: (id: string) => void;
+  onEditShortcuts: () => void;
   onOpen: (p: string) => void;
   onClose: () => void;
 }) {
@@ -4062,6 +4096,10 @@ function Palette({
     <Modal
       title={kind === "files" ? "Mở nhanh file" : "Bảng lệnh"}
       onClose={onClose}
+      headerActions={kind === "files" ? undefined :
+        <IconButton label="Chỉnh sửa phím tắt" onClick={onEditShortcuts}>
+          <SettingsIcon size={17} />
+        </IconButton>}
     >
       <input
         ref={inputRef}

@@ -31,14 +31,25 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
     private readonly ConcurrentDictionary<string, TableSnapshot> tableSnapshots = new();
     public DeveloperTools() => http.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "Mozilla/5.0");
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
-    private sealed record SourceVersion(string Version, string[] Roots);
+    private sealed record SourceVersion(string Group, string Version, string[] Roots);
+    private static string SourceVersionGroup(string root)
+    {
+        var parts = root.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
+        var collection = Array.FindIndex(parts, part => part.Equals("SourceCollection", StringComparison.OrdinalIgnoreCase));
+        return collection >= 0 && collection + 1 < parts.Length ? parts[collection + 1] : "";
+    }
     private static SourceVersion[] SourceVersions() => ProjectStore.Load()
-        .Select(project => new { Version = project.Field("ProjectVersion").Trim(), Root = project.SourcePath.Trim() })
+        .Select(project => new { Group = SourceVersionGroup(project.SourcePath), Version = project.Field("ProjectVersion").Trim(), Root = project.SourcePath.Trim() })
         .Where(item => item.Version.Length != 0 && Path.IsPathFullyQualified(item.Root))
-        .Concat(SourceVersionCatalog.Load().Select(item => new { item.Version, item.Root }))
+        .Concat(SourceVersionCatalog.Load().Select(item => new { item.Group, item.Version, item.Root }))
         .GroupBy(item => item.Version, StringComparer.OrdinalIgnoreCase)
-        .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
-        .Select(group => new SourceVersion(group.Key, group.Select(item => item.Root).Distinct(StringComparer.OrdinalIgnoreCase).ToArray()))
+        .Select(group => new SourceVersion(
+            group.Select(item => item.Group).FirstOrDefault(value => value.Length > 0) ?? "Khác",
+            group.Key,
+            group.Select(item => item.Root).Distinct(StringComparer.OrdinalIgnoreCase).ToArray()))
+        .OrderBy(item => item.Group.Equals("Khác", StringComparison.OrdinalIgnoreCase) ? 1 : 0)
+        .ThenBy(item => item.Group, StringComparer.OrdinalIgnoreCase)
+        .ThenByDescending(item => item.Version, StringComparer.OrdinalIgnoreCase)
         .ToArray();
     private (SqlTarget Connection, bool IsProjectSys) RegisteredTarget(JsonElement p) =>
         targets.TryGetValue(p.GetProperty("targetId").GetString() ?? "", out var t)
@@ -163,6 +174,8 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                 {
                     var preferences = p.GetProperty("settings").Deserialize<StudioSettings>(Json) ?? throw new ArgumentException("Settings không hợp lệ.");
                     var storedPreferences = SettingsStore.Load();
+                    if (!B("saveShortcuts"))
+                        preferences.Shortcuts = storedPreferences.Shortcuts;
                     preferences.SourceCollectionVersion = storedPreferences.SourceCollectionVersion;
                     foreach (var (id, timestamp) in storedPreferences.ProjectLastAccess)
                         if (!preferences.ProjectLastAccess.TryGetValue(id, out var previousAccess) || timestamp > previousAccess)
@@ -665,9 +678,9 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                     var root = S("root");
                     var link = S("link");
                     var file = ProjectConventions.ResolveMenuFile(root, link);
-                    var names = file != null && Path.GetExtension(file).Equals(".aspx", StringComparison.OrdinalIgnoreCase)
-                        ? ProjectConventions.Controllers(await File.ReadAllTextAsync(file, ct))
-                        : Array.Empty<string>();
+                    var mainSource = file != null && Path.GetExtension(file).Equals(".aspx", StringComparison.OrdinalIgnoreCase)
+                        ? await File.ReadAllTextAsync(file, ct) : "";
+                    var names = ProjectConventions.Controllers(mainSource);
                     if (!Directory.Exists(Path.Combine(root, "Main")))
                     {
                         var metadataController = ProjectConventions.ControllerFromPageMetadata(root, S("sysId"), link);
@@ -681,12 +694,19 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                     if(files.Length>100000)throw new IOException("Project vượt 100000 file; cần thu hẹp thư mục.");
                     var stem = Path.GetFileNameWithoutExtension(file ?? Uri.UnescapeDataString(link.Split('?', '#')[0]));
                     var related = new HashSet<string>(names.Count == 0 ? [stem] : names, StringComparer.OrdinalIgnoreCase);
+                    related.UnionWith(ProjectConventions.FormControllers(mainSource));
                     var byName = files.ToLookup(f => Path.GetFileNameWithoutExtension(f), StringComparer.OrdinalIgnoreCase);
                     var pending = new Queue<string>(related);
                     while (pending.TryDequeue(out var name))
+                    {
+                        ct.ThrowIfCancellationRequested();
                         foreach (var definition in byName[name].Where(f => Path.GetExtension(f).ToLowerInvariant() is ".xml" or ".f"))
-                            foreach (var child in ProjectConventions.GridControllers(await File.ReadAllTextAsync(definition, ct)))
+                        {
+                            var source = await File.ReadAllTextAsync(definition, ct);
+                            foreach (var child in ProjectConventions.GridControllers(source).Concat(ProjectConventions.FormControllers(source)))
                                 if (related.Add(child)) pending.Enqueue(child);
+                        }
+                    }
                     var matches = files.Where(f => related.Contains(Path.GetFileNameWithoutExtension(f))).ToArray();
                     if (file == null && matches.Length == 0) throw new FileNotFoundException("Không tìm thấy file controller.");
                     var entry = file ?? matches[0];
