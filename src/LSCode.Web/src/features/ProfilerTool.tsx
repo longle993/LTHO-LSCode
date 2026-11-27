@@ -104,7 +104,7 @@ export function ProfilerTool({ target, visible, closing, onBusyChange }: {
     setSelected("");
   }
   async function copySql(text: string) {
-    await writeClipboard(text);
+    await writeClipboard(text.replaceAll("\0", ""));
     setNotice("Đã sao chép SQL.");
   }
   useEffect(() => {
@@ -114,9 +114,19 @@ export function ProfilerTool({ target, visible, closing, onBusyChange }: {
   }, [notice]);
   const displayRows = useMemo(() => arrangeProfilerEvents(rows), [rows]);
   const table = useMemo(() => ({
-    columns: ["Thời gian", "Event", "Database", "Login", "Duration ms", "Reads", "SQL"],
-    rows: displayRows.map(({ event: r }) => [r.time, r.event, r.database, r.login, String(r.durationMs), String(r.reads), r.text]),
+    columns: ["Thời gian", "Event", "Database", "Login", "ID", "Duration ms", "Reads", "SQL"],
+    rows: displayRows.map(({ event: r }) => [
+      r.time,
+      r.event,
+      r.database,
+      r.login,
+      r.application,
+      String(r.durationMs),
+      String(r.reads),
+      r.text,
+    ]),
   }), [displayRows]);
+  const sqlColumnIndex = table.columns.length - 1;
   const sqlText = (followLatest ? displayRows.at(-1)?.event.text : selected) ?? "";
   return (
     <div className="tool-body profiler-body" ref={(element) => { if (element) element.inert = closing; }}>
@@ -222,12 +232,13 @@ export function ProfilerTool({ target, visible, closing, onBusyChange }: {
             if (followLatest) setSelected(displayRows.at(-1)?.event.text ?? "");
             setFollowLatest(false);
           }}
-          onRow={(r) => setSelected(r[6] ?? "")}
+          onRow={(r) => setSelected(r[sqlColumnIndex] ?? "")}
           onCellDoubleClick={(_, column, values) => {
-            if (column !== 6 || !values[6]) return;
-            setSelected(values[6]);
+            const sql = values[sqlColumnIndex] ?? "";
+            if (column !== sqlColumnIndex || !sql) return;
+            setSelected(sql);
             setFollowLatest(false);
-            void task.run(() => copySql(values[6] ?? ""));
+            void task.run(() => copySql(sql));
           }}
           rowClassName={(_, index) => displayRows[index]?.errorKind === "source"
             ? "profiler-error-source-row"
@@ -256,11 +267,21 @@ export function ProfilerTool({ target, visible, closing, onBusyChange }: {
               }
             }}
             onKeyDown={(event) => {
-              if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c") {
+              const modifier = event.ctrlKey || event.metaKey;
+              const key = event.key.toLowerCase();
+              if (modifier && key === "a") {
+                event.preventDefault();
+                event.stopPropagation();
+                event.currentTarget.setSelectionRange(0, event.currentTarget.value.length);
+              } else if (modifier && key === "c") {
                 event.preventDefault();
                 event.stopPropagation();
                 const { selectionStart, selectionEnd } = event.currentTarget;
-                const text = selectionStart === selectionEnd ? sqlText : sqlText.slice(selectionStart, selectionEnd);
+                const visibleText = event.currentTarget.value;
+                const text = selectionStart === selectionEnd ||
+                  (selectionStart === 0 && selectionEnd === visibleText.length)
+                  ? sqlText
+                  : visibleText.slice(selectionStart, selectionEnd);
                 void task.run(() => copySql(text));
               }
             }}

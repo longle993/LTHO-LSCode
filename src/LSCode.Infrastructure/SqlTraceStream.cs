@@ -151,7 +151,7 @@ internal sealed class SqlTraceStream(SqlTarget target, string databasePrefix)
 
     private void Publish(int eventClass, IReadOnlyDictionary<int, byte[]> fields)
     {
-        string Text(int id) => fields.TryGetValue(id, out var bytes) ? Encoding.Unicode.GetString(bytes).TrimEnd('\0') : "";
+        string Text(int id) => fields.TryGetValue(id, out var bytes) ? DecodeText(bytes) : "";
         long Number(int id) => fields.GetValueOrDefault(id) switch
         {
             { Length: 8 } bytes => BinaryPrimitives.ReadInt64LittleEndian(bytes),
@@ -184,6 +184,11 @@ internal sealed class SqlTraceStream(SqlTarget target, string databasePrefix)
         { Severity = (int)Number(20) });
         while (events.Count > QueueLimit && events.TryDequeue(out _)) Interlocked.Increment(ref dropped);
     }
+
+    // The rowset trace provider can leave UTF-16 NUL separators inside long TextData values.
+    // CF_UNICODETEXT treats the first NUL as the end of the clipboard string, so remove every
+    // separator instead of trimming only the padding at the end.
+    private static string DecodeText(byte[] bytes) => Encoding.Unicode.GetString(bytes).Replace("\0", "");
 
     public async Task<ProfilerBatch> ReadAsync()
     {
