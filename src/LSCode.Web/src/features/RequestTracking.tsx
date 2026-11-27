@@ -13,6 +13,20 @@ const periods = [...Array.from({ length: 12 }, (_, index) => ({
 })), { label: "Tổng", requests: "Tổng YC", quantity: "Tổng SL" },
 { label: "TB", requests: "TB YC", quantity: "TB SL" }];
 
+function subtotal(values: string[], decimals: number) {
+  // The SQL bridge returns invariant decimal strings. Sum exact scaled units to preserve their precision.
+  const total = values.reduce((sum, value) => {
+    const match = /^(-?)(\d+)(?:\.(\d+))?$/.exec(value.trim());
+    if (!match) return sum;
+    const [, sign, whole, fraction = ""] = match;
+    return sum + BigInt(sign + whole + fraction.padEnd(decimals, "0").slice(0, decimals));
+  }, 0n);
+  if (!decimals) return total.toString();
+  const sign = total < 0 ? "-" : "";
+  const digits = (total < 0 ? -total : total).toString().padStart(decimals + 1, "0");
+  return sign + digits.slice(0, -decimals) + "." + digits.slice(-decimals);
+}
+
 // Keep reading the local roster saved by earlier TSV builds.
 function parseRoster(text: string): Employee[] {
   const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/).filter(line => line.trim());
@@ -224,7 +238,8 @@ function StatisticsGrid({ table }: { table: Table }) {
         {visibleGroups.map(key => {
           const rows = groups.get(key) ?? [];
           const groupIndex = departments.indexOf(key);
-          const offset = departments.slice(0, groupIndex).reduce((sum, name) => sum + (groups.get(name)?.length ?? 0), 0);
+          const offset = departments.slice(0, groupIndex).reduce((sum, name) => sum + (groups.get(name)?.length ?? 0) + 1, 0);
+          const metrics = columns.flatMap(period => period.metrics);
           const ordered = sort ? [...rows].sort((left, right) => {
             const column = sort.column;
             const comparison = column === "code" || column === "name"
@@ -239,10 +254,20 @@ function StatisticsGrid({ table }: { table: Table }) {
             {ordered.map((row, index) => <tr key={row.code}>
               <td className="request-identity request-code" {...cell(offset + index, 0)}>{row.code}</td>
               <th className="request-identity request-name" scope="row" {...cell(offset + index, 1)}>{row.name}</th>
-              {columns.flatMap(period => period.metrics).map((metric, column) => <td key={metric.column}
+              {metrics.map((metric, column) => <td key={metric.column}
                 {...cell(offset + index, column + 2)}
                 className={metric.quantity ? "request-quantity" : undefined}>{value(row.data, metric.column)}</td>)}
             </tr>)}
+            <tr className="request-department-total">
+              <th className="request-identity request-code" scope="row" {...cell(offset + rows.length, 0)}>Tổng {key}</th>
+              <td className="request-identity request-name" {...cell(offset + rows.length, 1)} />
+              {metrics.map((metric, column) => {
+                const decimals = metric.column.startsWith("TB ") ? 2 : metric.quantity ? 4 : 0;
+                return <td key={metric.column} {...cell(offset + rows.length, column + 2)}>
+                  {subtotal(rows.map(row => value(row.data, metric.column)), decimals)}
+                </td>;
+              })}
+            </tr>
           </tbody>;
         })}
       </table>
@@ -255,6 +280,45 @@ const isoDate = (date: Date) => {
   return local.toISOString().slice(0, 10);
 };
 
+function RequestCategories({ requestId, targetId, legacy }: { requestId: string; targetId: string; legacy: boolean }) {
+  const [result, setResult] = useState<Table | Error>();
+  useEffect(() => {
+    if (!requestId) return;
+    let active = true;
+    void request<Table>("requestTracking.categories", { targetId, legacy, requestId }).then(
+      table => { if (active) setResult(table); },
+      error => { if (active) setResult(new Error((error as Error).message)); },
+    );
+    return () => { active = false; };
+  }, [requestId, targetId, legacy]);
+
+  return <section className="request-category" aria-labelledby="request-category-title">
+    <div className="request-tracking-heading">
+      <strong id="request-category-title">Category</strong>
+      {requestId && <span title={requestId}>{requestId}</span>}
+    </div>
+    {!requestId ? <div className="empty">Chọn một yêu cầu để xem đầu mục.</div>
+      : !result ? <div className="empty" role="status">Đang tải đầu mục…</div>
+      : result instanceof Error ? <p className="request-tracking-error" role="alert">{result.message}</p>
+      : !result.rows.length ? <div className="empty">Chưa có đầu mục.</div>
+      : <div className="request-category-scroll scrollbar-clean" role="region" aria-label="Bảng đầu mục" tabIndex={0}>
+        <table>
+          <thead>
+            <tr><th scope="col">Chọn</th><th scope="col">Đầu mục</th><th scope="col">Số lượng</th>
+              <th scope="col">Lập trình</th><th scope="col">Tester</th></tr>
+          </thead>
+          <tbody>{result.rows.map(([code, name, selected, quantity, developer, tester]) => <tr key={code}>
+            <td><input type="checkbox" aria-label={name ?? code ?? "Đầu mục"} checked={selected === "1"} disabled /></td>
+            <th scope="row">{name || "—"}</th>
+            <td>{quantity || "0"}</td>
+            <td>{developer || "—"}</td>
+            <td>{tester || "—"}</td>
+          </tr>)}</tbody>
+        </table>
+      </div>}
+  </section>;
+}
+
 export function RequestTracking({ targets, defaultTargetId, onClose }: {
   targets: Target[];
   defaultTargetId?: string;
@@ -262,24 +326,34 @@ export function RequestTracking({ targets, defaultTargetId, onClose }: {
 }) {
   const today = useMemo(() => new Date(), []);
   const first = useMemo(() => new Date(today.getFullYear(), today.getMonth(), 1), [today]);
+  const [ready, setReady] = useState(false);
   const [legacyAvailable, setLegacyAvailable] = useState(false);
   const [source, setSource] = useState(defaultTargetId ?? targets[0]?.id ?? "");
   const [user, setUser] = useState("");
+  const userEdited = useRef(false);
   const [from, setFrom] = useState(isoDate(first));
   const [to, setTo] = useState(isoDate(today));
   const [year, setYear] = useState(String(today.getFullYear()));
   const [mode, setMode] = useState<"requests" | "statistics">("requests");
   const [table, setTable] = useState<Table>(emptyTable);
+  const [requestRevision, setRequestRevision] = useState(0);
+  const [requestId, setRequestId] = useState("");
+  const requestIdIndex = table.columns.indexOf("Số yêu cầu");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    void request<{ legacyAvailable: boolean }>("requestTracking.info")
+    let active = true;
+    void request<{ legacyAvailable: boolean; defaultUser?: string }>("requestTracking.info")
       .then((info) => {
+        if (!active) return;
         setLegacyAvailable(info.legacyAvailable);
         if (info.legacyAvailable) setSource("legacy");
+        if (!userEdited.current) setUser(info.defaultUser?.trim() ?? "");
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => { if (active) setReady(true); });
+    return () => { active = false; };
   }, []);
 
   const options = [
@@ -290,7 +364,10 @@ export function RequestTracking({ targets, defaultTargetId, onClose }: {
   async function loadRequests() {
     setBusy(true); setError("");
     try {
-      setTable(await request<Table>("requestTracking.list", { ...payload, user, from, to }));
+      const requests = await request<Table>("requestTracking.list", { ...payload, user, from, to });
+      setTable(requests);
+      setRequestId(requests.rows[0]?.[requests.columns.indexOf("Số yêu cầu")]?.trim() ?? "");
+      setRequestRevision(previous => previous + 1);
       setMode("requests");
     } catch (exception) {
       setError((exception as Error).message);
@@ -310,15 +387,18 @@ export function RequestTracking({ targets, defaultTargetId, onClose }: {
     <Modal title="QLYC" onClose={onClose} wide className="request-tracking-modal">
       <div className="request-tracking-body">
         <div className="request-tracking-toolbar">
-          <Select label="Kết nối QLYC" value={source} options={options} onChange={(value) => {
-            setSource(value); setTable(emptyTable); setError("");
-          }} floating searchOptions="Tìm kết nối" />
           {mode === "requests" ? <>
-            <label><span>Người xử lý</span><input value={user} onChange={(event) => setUser(event.target.value)} placeholder="Tất cả" /></label>
+            <Select label="Kết nối QLYC" value={source} options={options} disabled={busy || !ready} onChange={(value) => {
+              setSource(value); setTable(emptyTable); setRequestId(""); setError("");
+            }} floating searchOptions="Tìm kết nối" />
+            <label><span>Người xử lý</span><input value={user} onChange={(event) => {
+              userEdited.current = true;
+              setUser(event.target.value);
+            }} placeholder="Tất cả" /></label>
             <label><span>Từ ngày</span><input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
             <label><span>Đến ngày</span><input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label>
-            <Button variant="primary" disabled={busy || !source} onClick={() => void loadRequests()}>{busy ? "Đang tải…" : "Tải dữ liệu"}</Button>
-            <Button disabled={busy || !source} onClick={() => {
+            <Button variant="primary" disabled={busy || !ready || !source} onClick={() => void loadRequests()}>{busy ? "Đang tải…" : "Tải dữ liệu"}</Button>
+            <Button disabled={busy || !ready || !source} onClick={() => {
               const selectedYear = Number(to.slice(0, 4)) || today.getFullYear();
               setYear(String(selectedYear));
               void loadStatistics(selectedYear);
@@ -327,7 +407,7 @@ export function RequestTracking({ targets, defaultTargetId, onClose }: {
             <label><span>Năm</span><input className="request-year" type="number" min="2000" max="9999" value={year}
               onChange={(event) => setYear(event.target.value)} /></label>
             <Button variant="primary" disabled={busy || !source} onClick={() => void loadStatistics()}>{busy ? "Đang tải…" : "Xem thống kê"}</Button>
-            <Button onClick={() => { setMode("requests"); setTable(emptyTable); setError(""); }}>Quay lại QLYC</Button>
+            <Button disabled={busy} onClick={() => { setMode("requests"); setTable(emptyTable); setRequestId(""); setError(""); }}>Quay lại QLYC</Button>
           </>}
         </div>
         <div className="request-tracking-heading">
@@ -335,10 +415,16 @@ export function RequestTracking({ targets, defaultTargetId, onClose }: {
           <span>{table.rows.length ? `${table.rows.length} dòng` : "Chưa có dữ liệu"}</span>
         </div>
         {error && <p className="request-tracking-error" role="alert">{error}</p>}
-        {!options.length ? <div className="empty">Chưa có kết nối QLYC. Hãy kết nối SQL trước.</div>
-          : mode === "statistics" && table.columns.length ? <StatisticsGrid table={table} />
-          : table.columns.length ? <DataGrid table={table} rangeSelection />
-          : <div className="empty">{busy ? "Đang tải dữ liệu…" : "Chọn điều kiện rồi tải dữ liệu."}</div>}
+        {!ready ? <div className="empty" role="status">Đang kiểm tra kết nối QLYC…</div>
+          : !options.length ? <div className="empty">Chưa có kết nối QLYC. Hãy kết nối SQL trước.</div>
+          : mode === "statistics" ? table.columns.length ? <StatisticsGrid table={table} /> : <div className="empty">Chưa có dữ liệu thống kê.</div>
+          : <div className="request-tracking-content">
+            {table.columns.length ? <DataGrid table={table} rangeSelection
+              onRow={row => setRequestId(row[requestIdIndex]?.trim() ?? "")}
+              rowClassName={row => requestId && row[requestIdIndex]?.trim() === requestId ? "request-selected" : undefined} />
+              : <div className="empty">{busy ? "Đang tải dữ liệu…" : "Chọn điều kiện rồi tải dữ liệu."}</div>}
+            <RequestCategories key={JSON.stringify([source, requestRevision, requestId])} requestId={requestId} {...payload} />
+          </div>}
       </div>
     </Modal>
   );

@@ -55,6 +55,33 @@ internal static class RequestTracking
             new SqlParameter("@to", to.Date));
     }
 
+    public static Task<DataTable> ReadCategoriesAsync(SqlTarget target, string requestId, CancellationToken token)
+    {
+        if (string.IsNullOrWhiteSpace(requestId)) throw new ArgumentException("Cần số yêu cầu để xem đầu mục.");
+
+        const string sql = """
+            IF OBJECT_ID(N'dbo.nbdsdaumuclt', N'U') IS NULL OR OBJECT_ID(N'dbo.nbctdaumuc', N'U') IS NULL
+            BEGIN
+                RAISERROR(N'Kết nối QLYC chưa có dữ liệu danh mục hoặc chi tiết đầu mục.', 16, 1);
+                RETURN;
+            END;
+
+            SELECT RTRIM(c.ma_daumuc) AS [Mã đầu mục], RTRIM(c.ten_daumuc) AS [Đầu mục],
+                CASE WHEN LTRIM(RTRIM(CONVERT(varchar(20), d.chon))) = '1' THEN 1 ELSE 0 END AS [Chọn],
+                COALESCE(d.so_luong, 0) AS [Số lượng],
+                RTRIM(d.ma_lt) AS [Lập trình], RTRIM(d.ma_tester) AS [Tester]
+            FROM dbo.nbdsdaumuclt c
+            OUTER APPLY (
+                SELECT TOP (1) chon, so_luong, ma_lt, ma_tester
+                FROM dbo.nbctdaumuc
+                WHERE stt_rec = @requestId AND ma_daumuc = c.ma_daumuc
+                ORDER BY stt DESC, stt_rec0 DESC
+            ) d
+            ORDER BY c.ma_daumuc;
+            """;
+        return ProjectDatabase.ReadAsync(target, sql, token, new SqlParameter("@requestId", requestId.Trim()));
+    }
+
     public static async Task<DataTable> StatisticsAsync(
         SqlTarget target,
         int year,
@@ -152,9 +179,10 @@ internal static class RequestTracking
                 target = new SqlTarget(builder.DataSource, builder.InitialCatalog, builder.ConnectionString);
                 return true;
             }
-            catch (Exception exception) when (exception is FormatException or CryptographicException or ArgumentException)
+            catch (Exception exception) when (exception is FormatException or CryptographicException or ArgumentException
+                or UnauthorizedAccessException or System.Security.SecurityException)
             {
-                // The legacy setting is optional. An invalid value must not block the normal LSCode connection flow.
+                // Continue with the LSCode connection when the optional legacy setting is unreadable or invalid.
             }
         }
         return false;

@@ -667,6 +667,13 @@ await using (var projectTools = new DeveloperTools())
     await CallProject("settings.save", new { settings = new { theme = "Dark" } });
     Check((string?)await CallProject("sourceCollection.default.read", new { }) == "SP30",
         "Source Collection default version persists through ordinary settings saves");
+    var syncedSettings = SettingsStore.Load();
+    syncedSettings.StandardCatalogUser = "DEV02";
+    SettingsStore.Save(syncedSettings);
+    await CallProject("settings.save", new { settings = new { theme = "Dark", standardCatalogUser = "DEV01" } });
+    var trackingInfo = JsonSerializer.SerializeToElement(await CallProject("requestTracking.info", new { }), Protocol.Json);
+    Check(trackingInfo.GetProperty("defaultUser").GetString() == "DEV02",
+        "QLYC reads the latest project sync user after a save with stale preferences");
     await CallProject("sourceCollection.default.save", new { version = "" });
     Check((string?)await CallProject("sourceCollection.default.read", new { }) == "",
         "Source Collection default version can be cleared");
@@ -798,12 +805,17 @@ if (args.Contains("--sql"))
         await Call("sql.execute", new { targetId = target.Id, sql = """
             CREATE TABLE dbo.nbphyc (stt_rec varchar(20), ma_da varchar(20), ngay_ht datetime,
                 ma_lt1 varchar(20), trang_thai varchar(2), noi_dung nvarchar(200));
-            CREATE TABLE dbo.nbctdaumuc (stt_rec varchar(20), ma_lt varchar(20), so_luong decimal(18,2));
+            CREATE TABLE dbo.nbdsdaumuclt (ma_daumuc varchar(20), ten_daumuc nvarchar(200));
+            CREATE TABLE dbo.nbctdaumuc (stt_rec varchar(20), stt_rec0 varchar(20), ma_daumuc varchar(20),
+                ten_daumuc nvarchar(200), chon bit, so_luong decimal(18,2), ma_lt varchar(20), ma_tester varchar(20), stt int);
             INSERT dbo.nbphyc VALUES
                 ('YC01','DA01','20261105 08:30','DEV01','HT',N'Hoàn thành'),
                 ('YC02','DA02','20261106 09:15','DEV01','UP',N'Cập nhật'),
                 ('YC03','DA03','20261107 10:00','DEV02','MO',N'Đang mở');
-            INSERT dbo.nbctdaumuc VALUES ('YC01','DEV01',2),('YC02','DEV01',3);
+            INSERT dbo.nbdsdaumuclt VALUES ('01',N'Bổ sung chứng từ'),('02',N'Thêm báo cáo');
+            INSERT dbo.nbctdaumuc VALUES
+                ('YC01','001','01',N'Bổ sung chứng từ',1,2,'DEV01','QA01',1),
+                ('YC02','001','02',N'Thêm báo cáo',1,3,'DEV01','QA02',1);
             """ });
         var requestRows = (ResultSet)(await Call("requestTracking.list", new
         {
@@ -819,6 +831,20 @@ if (args.Contains("--sql"))
         Check(decimal.Parse(devStatistics[14]!, System.Globalization.CultureInfo.InvariantCulture) == 2m &&
             decimal.Parse(devStatistics[28]!, System.Globalization.CultureInfo.InvariantCulture) == 5m,
             "QLYC View All returns request and quantity totals without hard-coded employee groups");
+        var requestCategories = (ResultSet)(await Call("requestTracking.categories", new
+        {
+            targetId = target.Id, legacy = false, requestId = "YC01"
+        }))!;
+        var pickedCategory = requestCategories.Rows.Single(row => row[0] == "01");
+        var remainingCategory = requestCategories.Rows.Single(row => row[0] == "02");
+        Check(pickedCategory[1] == "Bổ sung chứng từ" && pickedCategory[2] == "1" &&
+            decimal.Parse(pickedCategory[3]!, System.Globalization.CultureInfo.InvariantCulture) == 2m &&
+            pickedCategory[4] == "DEV01" && pickedCategory[5] == "QA01",
+            "QLYC categories show assigned details for the selected request");
+        Check(remainingCategory[1] == "Thêm báo cáo" && remainingCategory[2] == "0" &&
+            decimal.Parse(remainingCategory[3]!, System.Globalization.CultureInfo.InvariantCulture) == 0m &&
+            string.IsNullOrEmpty(remainingCategory[4]) && string.IsNullOrEmpty(remainingCategory[5]),
+            "QLYC categories include unassigned master entries without borrowing details from other requests");
         await Call("sql.execute", new { targetId = admin.Id, sql = $"CREATE DATABASE [{menuAppDatabase}]" });
         menuAppCreated = true;
         var menuAppTarget = (TargetInfo)(await Call("sql.connect", new { server, database = menuAppDatabase, integratedSecurity = true, trustCertificate = true }))!;

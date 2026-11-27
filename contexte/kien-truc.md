@@ -69,6 +69,10 @@ Modal Ctrl+G dùng hai cột TAG và DETAIL theo bố cục tham chiếu FCodeVi
 
 `RequestTracking.cs` ưu tiên đọc kết nối QLYC tương thích từ `HKCU\\Software\\FCoder\\Qlcv` ở cả Registry 32/64-bit và giải mã theo định dạng FCode cũ. Nếu không có, giao diện dùng một target SQL đã đăng ký trong LSCode. Truy vấn dùng `CommandTimeout = 0` qua `ProjectDatabase`, tham số hóa người dùng/ngày/năm, dùng `RAISERROR + RETURN` để tương thích SQL Server FAST cũ và không chứa dữ liệu nhân viên cụ thể. Phạm vi kiểm chứng ngày 18/11/2026: frontend build, Infrastructure/Desktop build, 155 WebView checks có SQL fixture, 146 Core checks và 12 smoke WebView2; chưa kiểm chứng cơ sở dữ liệu QLYC thật trên máy không có cấu hình Registry.
 
+Ngày 27/11/2026, đối chiếu luồng Category trong `fcontrol/frmQLCV.cs`, lớp được `FcodeViewer` gọi khi mở QLYC. Fcode tải danh mục từ `dbo.nbdsdaumuclt` và ghép chi tiết `dbo.nbctdaumuc` theo `stt_rec` của yêu cầu và `ma_daumuc` của đầu mục. Cột Chọn phản ánh `chon`, Số lượng phản ánh `so_luong`, Lập trình phản ánh `ma_lt` và Tester phản ánh `ma_tester`. Thao tác ghi của Fcode có điều kiện theo người dùng và máy. LSCode dùng Category để xem dữ liệu của yêu cầu đang chọn.
+
+QLYC lấy tên mặc định từ `StandardCatalogUser` của lần đồng bộ danh mục chuẩn đã lưu. Luồng lưu thiết lập thông thường giữ lại trường này vì giao diện có thể đang giữ bản thiết lập cũ. **View All** dùng kết nối danh sách đang chọn. Dòng tổng bộ phận cộng theo từng cột, gồm cả các giá trị TB đã tính cho từng nhân viên. Các luồng được kiểm chứng bằng bài kiểm thử WebView với SQL Server cục bộ và trình duyệt Chromium dùng dữ liệu fixture. Chưa kiểm chứng trên cơ sở dữ liệu QLYC đang sử dụng.
+
 ### Callout entity F12
 
 Từ 20/11/2026, `XmlIncludes.Find` trả thêm tên và phạm vi `Start/Length`. Với entity nội tuyến, phạm vi là riêng nội dung trong dấu nháy; với entity `SYSTEM` hoặc DOCTYPE, phạm vi là file đích. Chỉ số được tính trên bản đã che comment nhưng giữ nguyên độ dài và xuống dòng, nên vẫn ánh xạ đúng về buffer gốc, kể cả buffer chưa lưu.

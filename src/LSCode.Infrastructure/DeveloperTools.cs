@@ -166,6 +166,7 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                     var preferences = p.GetProperty("settings").Deserialize<StudioSettings>(Json) ?? throw new ArgumentException("Settings không hợp lệ.");
                     var storedPreferences = SettingsStore.Load();
                     preferences.SourceCollectionVersion = storedPreferences.SourceCollectionVersion;
+                    preferences.StandardCatalogUser = storedPreferences.StandardCatalogUser;
                     foreach (var (id, timestamp) in storedPreferences.ProjectLastAccess)
                         if (!preferences.ProjectLastAccess.TryGetValue(id, out var previousAccess) || timestamp > previousAccess)
                             preferences.ProjectLastAccess[id] = timestamp;
@@ -450,7 +451,7 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                 var jsSnippets = CompletionSnippets.Read(await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "Assets", "jssnippet.xml"), ct));
                 return CompletionSnippets.Get(jsSnippets, S("beforeCaret")).ToArray();
             case "requestTracking.info":
-                return new { legacyAvailable = RequestTracking.LegacyConnectionAvailable };
+                return new { legacyAvailable = RequestTracking.LegacyConnectionAvailable, defaultUser = SettingsStore.Load().StandardCatalogUser };
             case "requestTracking.list":
             {
                 var useLegacy = B("legacy");
@@ -459,6 +460,12 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                 if (!DateTime.TryParse(S("from"), out var from) || !DateTime.TryParse(S("to"), out var to))
                     throw new ArgumentException("Khoảng ngày QLYC không hợp lệ.");
                 return Table(await RequestTracking.ReadAsync(requestTarget, S("user"), from, to, ct));
+            }
+            case "requestTracking.categories":
+            {
+                var selected = S("targetId").Length > 0 ? Target(p) : null;
+                var requestTarget = RequestTracking.Resolve(selected, B("legacy"));
+                return Table(await RequestTracking.ReadCategoriesAsync(requestTarget, S("requestId"), ct));
             }
             case "requestTracking.statistics":
             {

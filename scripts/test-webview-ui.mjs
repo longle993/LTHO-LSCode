@@ -23,6 +23,12 @@ await page.addInitScript(()=>{
   const entityMainText="<!DOCTYPE root [<!ENTITY % graph SYSTEM 'graph.dtd'>%graph;]><root>&UnitBeforeInsert;</root>";
   const fixtureProject={id:'fixture',name:'Dự án thử UI',code:'Dự án thử UI',title:'Dự án thử UI',active:true,server:'.',database:'Fixture_App',sourcePath:projectRoot};
   const otherProject={id:'other',name:'Dự án lịch sử',code:'Dự án lịch sử',title:'Dự án lịch sử',active:true,server:'.',database:'Other_App',sourcePath:'C:\\Other'};
+  const requestFixture=new URLSearchParams(location.search).has('requestFixture');
+  if(requestFixture){
+    localStorage.setItem('lscode.qlyc.roster',[
+      'ma_bp\tma_nv\tten_nv','LTHO\tDEV01\tNhân viên A','LTHO\tDEV02\tNhân viên B','FSD\tDEV03\tNhân viên C',
+    ].join('\n'));
+  }
   const pastFile='C:\\Other\\Controller\\Main\\past.xml';
   const controllerDiagnosticPath=projectRoot+'\\App_Data\\Controllers\\Filter\\nhanvien.xml';
   const history=new Map([['other',[pastFile]]]);
@@ -35,6 +41,10 @@ await page.addInitScript(()=>{
     projectRoot+'\\App_Data\\Controllers\\Dashboard\\Template\\unused.xml',
     projectRoot+'\\App_Data\\Controllers\\About.xml',...controllerFiles('nhanvien'),...controllerFiles('bophan')];
   const settings={theme:'Light',workspace:'C:\\Fixture',server:'.',database:'Fixture_App',integratedSecurity:true,sqlUser:'',trustCertificate:true,crystalPath:'',profiler18Path:'',shortcuts:{},activityCommands:null,projectLastAccess:{other:'2026-11-12T03:00:00Z'}};
+  if(requestFixture){
+    settings.standardCatalogUser='DEV01';
+    settings.activityCommands=['request.command'];
+  }
   const native={addEventListener:(_,fn)=>listeners.push(fn),postMessage:request=>{window.__nativeCalls.push(request);let result,error;
     switch(request.method){
       case 'studio.bootstrap':result={settings,projects:[fixtureProject,otherProject],snippets:[{key:'select',category:'SQL',body:'SELECT * FROM {{table}};',description:'Mẫu SELECT',position:0,param:''}],version:'ui-test'};break;
@@ -264,6 +274,37 @@ await page.addInitScript(()=>{
       case 'profiler.read':result={events:window.__traceBatch.splice(0),dropped:0,truncated:false};break;
       case 'project.discover':result=[{name:'Project Fixture',folder:'C:\\Fixture\\Application',configPath:'C:\\Fixture\\Application\\web.config'}];break;
       case 'project.sync':result=true;break;
+      case 'project.standard.sync':{
+        settings.standardCatalogUser=request.payload.currentUser;
+        result={currentUser:settings.standardCatalogUser,summary:{added:0,updated:0,unchanged:2,skipped:0},projects:[fixtureProject,otherProject]};
+        break;
+      }
+      case 'requestTracking.info':result={legacyAvailable:true,defaultUser:settings.standardCatalogUser??''};break;
+      case 'requestTracking.list':result={columns:['Khách hàng','Người xử lý','Số yêu cầu'],rows:[
+        ['Yêu cầu mẫu A','DEV03','fixture-a'],['Yêu cầu mẫu B','DEV03','fixture-b'],
+      ]};break;
+      case 'requestTracking.categories':{
+        const {requestId}=request.payload;
+        if(window.__requestCategoryError){
+          error={code:'fixture',message:'Nguồn thử chưa cấu hình Category.'};
+          break;
+        }
+        const columns=['Mã đầu mục','Đầu mục','Chọn','Số lượng','Lập trình','Tester'];
+        const rows=requestId==='fixture-a' ? [['01','Bổ sung chứng từ','1','2','DEV03','QA01']]
+          : [['02','Thêm báo cáo','0','0','','']];
+        result={columns,rows};
+        break;
+      }
+      case 'requestTracking.statistics':{
+        const months=Array.from({length:12},(_,index)=>[`T${index+1}`,`SL T${index+1}`]).flat();
+        const makeRow=(code,jan,other,totals)=>[code,...jan,...other,...Array(20).fill('0'),...totals];
+        result={columns:['Nhân viên',...months,'Tổng YC','Tổng SL','TB YC','TB SL'],rows:[
+          makeRow('DEV01',['2','1.2500'],['1','0.5000'],['3','1.7500','1.50','0.88']),
+          makeRow('DEV02',['4','2.3750'],[null,null],['4','2.3750','2.00','1.19']),
+          makeRow('DEV03',['5','7.5000'],['0','0.0000'],['5','7.5000','2.50','3.75']),
+        ]};
+        break;
+      }
       case 'project.list':result=[fixtureProject,otherProject];break;
       case 'catalog.references':result={columns:['Schema','Table','Column','Type'],rows:[]};break;
       case 'catalog.load':result={signature:'fixture-schema',columns:[{name:'code',type:'nvarchar',nullable:false,identity:false,computed:false,generated:0,managed:false,hasDefault:false},{name:'label',type:'nvarchar',nullable:true,identity:false,computed:false,generated:0,managed:false,hasDefault:false},...['user_id0','user_id2','datetime0','datetime2'].map(name=>({name,type:name.startsWith('user')?'int':'datetime',nullable:true,identity:false,computed:false,generated:0,managed:true,hasDefault:false}))],data:{columns:['code','label','user_id0','user_id2','datetime0','datetime2'],rows:[['one',null,null,null,null,null],[':null','literal',null,null,null,null]]}};break;
@@ -278,6 +319,7 @@ await page.addInitScript(()=>{
     else if (request.method==='project.menu.resources'&&window.__holdMenuResources) window.__releaseMenuResources=reply;
     else if (request.method==='table.catalog'&&window.__holdTableCatalog) window.__releaseTableCatalog=reply;
     else if (request.method==='templateStudio.save'&&window.__holdStudioSave) window.__releaseStudioSave=reply;
+    else if (request.method==='requestTracking.categories'&&request.payload.requestId==='fixture-a'&&window.__holdRequestCategories) window.__releaseRequestCategories=reply;
     else setTimeout(reply,10);
   }};
   window.chrome=window.chrome??{};window.chrome.webview=native;
@@ -291,6 +333,114 @@ const waitForInputValue=async(locator,value)=>{
   }
   throw Error(`Timed out waiting for input value ${value}`);
 };
+async function testRequestTracking(){
+  await page.getByRole('button',{name:'DEV01',exact:true}).click();
+  await page.getByLabel('Người sử dụng',{exact:true}).fill(' DEV02 ');
+  await page.getByRole('button',{name:'Đồng bộ',exact:true}).click();
+  await page.getByRole('button',{name:'DEV02',exact:true}).waitFor();
+  await page.locator('.project-row').filter({hasText:'Dự án thử UI'}).click();
+  await page.locator('dialog').waitFor({state:'detached'});
+  await page.getByRole('button',{name:'Mở ô lệnh QLYC',exact:true}).click();
+  await page.getByRole('dialog',{name:'Lệnh',exact:true}).getByLabel('Nhập lệnh').fill('@@');
+  await page.getByRole('button',{name:'Mở',exact:true}).click();
+  const requests=page.getByRole('dialog',{name:'QLYC',exact:true});
+  const assignee=requests.getByLabel('Người xử lý',{exact:true});
+  const source=requests.getByRole('button',{name:'Kết nối QLYC',exact:true});
+  await waitForInputValue(assignee,'DEV02');
+  check(true,'QLYC defaults to the latest assignee entered during project sync');
+  await source.click();
+  await page.getByRole('option',{name:'Fixture_App · .',exact:true}).click();
+  await assignee.fill('DEV03');
+  await page.evaluate(()=>{window.__holdRequestCategories=true;});
+  await requests.getByRole('button',{name:'Tải dữ liệu',exact:true}).click();
+  await requests.getByRole('cell',{name:'Yêu cầu mẫu A',exact:true}).waitFor();
+  check(await page.evaluate(()=>window.__nativeCalls.some(call=>call.method==='requestTracking.list'&&
+    call.payload.targetId==='project-app'&&call.payload.user==='DEV03'&&!call.payload.legacy)),
+    'QLYC list uses the manually edited assignee and chosen connection');
+
+  await page.waitForFunction(()=>typeof window.__releaseRequestCategories==='function');
+  await requests.getByRole('cell',{name:'Yêu cầu mẫu B',exact:true}).click();
+  await requests.getByText('Thêm báo cáo',{exact:true}).waitFor();
+  await page.evaluate(()=>{window.__holdRequestCategories=false;window.__releaseRequestCategories();});
+  check(await requests.getByText('Thêm báo cáo',{exact:true}).isVisible()&&
+    await requests.getByText('Bổ sung chứng từ',{exact:true}).count()===0,
+    'Category follows the selected request even when an earlier request completes late');
+  await requests.getByRole('cell',{name:'Yêu cầu mẫu A',exact:true}).click();
+  const categoryRow=requests.getByRole('row').filter({hasText:'Bổ sung chứng từ'});
+  await categoryRow.waitFor();
+  check(await categoryRow.getByRole('checkbox').isChecked()&&await categoryRow.getByRole('checkbox').isDisabled()&&
+    await categoryRow.getByRole('cell',{name:'2',exact:true}).isVisible()&&
+    await categoryRow.getByRole('cell',{name:'DEV03',exact:true}).isVisible()&&
+    await categoryRow.getByRole('cell',{name:'QA01',exact:true}).isVisible(),
+    'Category displays the selected flag, quantity, programmer and tester for the current request');
+  await requests.screenshot({path:out+'/qlyc-category.png',animations:'disabled'});
+  await page.setViewportSize({width:375,height:700});
+  check(await requests.evaluate(dialog=>dialog.getBoundingClientRect().right<=innerWidth&&
+    document.documentElement.scrollWidth<=innerWidth),'QLYC request and category panels fit the 375px viewport');
+  await requests.screenshot({path:out+'/qlyc-category-narrow.png',animations:'disabled'});
+  await page.setViewportSize({width:375,height:320});
+  await categoryRow.scrollIntoViewIfNeeded();
+  check(await categoryRow.evaluate(row=>{
+    const bounds=row.getBoundingClientRect();
+    const body=row.closest('.request-tracking-body');
+    return body.scrollTop>0&&bounds.top>=body.getBoundingClientRect().top&&bounds.bottom<=innerHeight;
+  }),'Category remains reachable by scrolling the dialog in a short window');
+  await page.setViewportSize({width:1440,height:1000});
+  await page.evaluate(()=>{window.__requestCategoryError=true;});
+  await requests.getByRole('button',{name:'Tải dữ liệu',exact:true}).click();
+  await requests.getByText('Nguồn thử chưa cấu hình Category.',{exact:false}).waitFor();
+  check(await requests.getByRole('cell',{name:'Yêu cầu mẫu A',exact:true}).isVisible(),
+    'A Category error leaves the request list usable');
+  await page.evaluate(()=>{window.__requestCategoryError=false;});
+  await requests.getByRole('button',{name:'Tải dữ liệu',exact:true}).click();
+  await categoryRow.waitFor();
+  check(true,'Reloading the same request retries its Category query');
+
+  await requests.getByRole('button',{name:'View All',exact:true}).click();
+  const totalRows=requests.locator('.request-department-total');
+  const lthoTotal=totalRows.filter({hasText:'Tổng LTHO'});
+  await lthoTotal.waitFor();
+  check(await source.count()===0,'Statistics hides the connection dropdown');
+  check(await page.evaluate(()=>window.__nativeCalls.some(call=>call.method==='requestTracking.statistics'&&
+    call.payload.targetId==='project-app'&&!call.payload.legacy)),'Statistics keeps the connection selected on the request screen');
+  const numbers=async (row)=>(await row.getByRole('cell').allTextContents())
+    .flatMap(value=>/^\s*\d+(?:[.,]\d+)?\s*$/.test(value)?[Number(value.trim().replace(',','.'))]:[]);
+  const ltho=await numbers(lthoTotal);
+  check(ltho[0]===6&&ltho[1]===3.625&&ltho[2]===1&&ltho[3]===0.5&&ltho[24]===7&&ltho[25]===4.125,
+    'Department totals sum request counts and decimal quantities for each month and the year');
+  await requests.getByRole('button',{name:'Mã bộ phận',exact:true}).click();
+  await page.getByRole('option',{name:'Tất cả bộ phận',exact:true}).click();
+  const fsdTotal=totalRows.filter({hasText:'Tổng FSD'});
+  await fsdTotal.waitFor();
+  check(await totalRows.count()===2&&(await numbers(fsdTotal))[1]===7.5,
+    'All departments display exactly one independent subtotal per group');
+  await requests.getByRole('checkbox',{name:'Số lượng',exact:true}).uncheck();
+  check((await numbers(lthoTotal)).length===14&&(await numbers(lthoTotal))[12]===7,
+    'Department totals follow the quantity visibility setting');
+  await requests.getByRole('checkbox',{name:'Số yêu cầu',exact:true}).uncheck();
+  check((await numbers(lthoTotal)).length===0&&await lthoTotal.isVisible(),
+    'A department subtotal remains aligned with the identity columns when both metrics are hidden');
+  await requests.getByRole('checkbox',{name:'Số yêu cầu',exact:true}).check();
+  await requests.getByRole('checkbox',{name:'Số lượng',exact:true}).check();
+  const yearlyQuantity=lthoTotal.getByRole('cell',{name:'4.1250',exact:true});
+  await yearlyQuantity.click();
+  await page.keyboard.press('Control+c');
+  await page.waitForFunction(()=>window.__nativeCalls.some(call=>call.method==='clipboard.write'&&call.payload.text==='4.1250'));
+  check(true,'A department subtotal can be selected and copied through the statistics grid');
+  await requests.screenshot({path:out+'/qlyc-statistics.png',animations:'disabled'});
+  await page.setViewportSize({width:375,height:700});
+  check(await requests.evaluate(dialog=>dialog.getBoundingClientRect().right<=innerWidth&&
+    document.documentElement.scrollWidth<=innerWidth),'QLYC statistics table scrolls without widening the 375px viewport');
+  await requests.screenshot({path:out+'/qlyc-statistics-narrow.png',animations:'disabled'});
+  await page.setViewportSize({width:1440,height:1000});
+  await requests.getByLabel('Năm',{exact:true}).fill('2025');
+  await requests.getByRole('button',{name:'Xem thống kê',exact:true}).click();
+  await page.waitForFunction(()=>window.__nativeCalls.some(call=>call.method==='requestTracking.statistics'&&
+    call.payload.year===2025&&call.payload.targetId==='project-app'&&!call.payload.legacy));
+  await requests.getByRole('button',{name:'Quay lại QLYC',exact:true}).click();
+  check(await source.isVisible()&&await assignee.inputValue()==='DEV03',
+    'Returning from statistics restores request controls and retains the manual assignee');
+}
 async function testProfiler(){
   await page.getByRole('button',{name:'SQL Profiler',exact:true}).click();
   const profiler=page.getByRole('tabpanel',{name:'SQL Profiler'});
@@ -631,8 +781,12 @@ async function testTableRefreshAndNotice(){
 try{
   const testUrl=new URL(process.env.LSCODE_UI_URL??'http://127.0.0.1:4173');
   if(process.argv.includes('--entity-peek-regression'))testUrl.searchParams.set('entityFixture','1');
+  if(process.argv.includes('--request-tracking-regression'))testUrl.searchParams.set('requestFixture','1');
   await page.goto(testUrl.toString());await page.getByRole('dialog',{name:'Dự án của bạn'}).waitFor();check(true,'Project picker opens before workbench');
-  if(process.argv.includes('--catalog-source-regression')){
+  if(process.argv.includes('--request-tracking-regression')){
+    await testRequestTracking();
+    check(errors.length===0,'No uncaught browser errors');
+  } else if(process.argv.includes('--catalog-source-regression')){
     await page.locator('.project-row').filter({hasText:'Dự án thử UI'}).click();
     await page.locator('dialog').waitFor({state:'detached'});
     await page.getByRole('button',{name:'Chức năng',exact:true}).click();

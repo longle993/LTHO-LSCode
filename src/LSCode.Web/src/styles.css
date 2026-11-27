@@ -1636,7 +1636,33 @@ body.entity-peek-scroll-locked {
   overflow: hidden;
 }
 .request-tracking-body { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
-.request-tracking-body > :not(.data-grid, .request-statistics) { flex-shrink: 0; }
+.request-tracking-body > :not(.request-tracking-content, .request-statistics) { flex-shrink: 0; }
+.request-tracking-content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 40%);
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+.request-tracking-content > .data-grid { min-width: 0; }
+.request-tracking-content .request-selected > :is(th, td):not(.grid-selected) { background: var(--item-hover); }
+.request-category {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  border-inline-start: 1px solid var(--border);
+  border-top: 1px solid var(--border);
+}
+.request-category .request-tracking-heading span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.request-category-scroll { overflow: auto; min-height: 0; }
+.request-category table { width: 100%; border-spacing: 0; font-variant-numeric: tabular-nums; }
+.request-category :is(th, td) { padding: 4px 7px; border-bottom: 1px solid var(--border); text-align: left; }
+.request-category thead { position: sticky; top: 0; background: var(--surface); }
+.request-category thead th { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.request-category tbody th { font-weight: 500; overflow-wrap: anywhere; }
+.request-category :is(th, td):first-child { text-align: center; }
+.request-category :is(th, td):nth-child(3) { text-align: right; }
 .request-statistics { display: flex; flex: 1; flex-direction: column; min-height: 0; min-width: 0; }
 .request-statistics-controls {
   display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 8px 16px;
@@ -1673,7 +1699,7 @@ body.entity-peek-scroll-locked {
 .request-statistics-scroll .request-identity { white-space: normal; overflow-wrap: anywhere; }
 .request-statistics-scroll:is([data-frozen="1"], [data-frozen="2"]) .request-code,
 .request-statistics-scroll[data-frozen="2"] .request-name {
-  position: sticky; left: 0; z-index: 1; background-color: var(--surface);
+  position: sticky; left: 0; z-index: 1; background-color: var(--request-row-surface, var(--surface));
 }
 .request-statistics-scroll[data-frozen="2"] .request-name { left: 96px; }
 .request-statistics-scroll thead .request-identity { z-index: 2; }
@@ -1698,16 +1724,22 @@ body.entity-peek-scroll-locked {
 .request-statistics-scroll tbody td { text-align: right; }
 .request-statistics-scroll tbody td:first-child { text-align: left; }
 .request-statistics-scroll .request-quantity { color: var(--foreground); background: color-mix(in srgb, var(--primary) 9%, var(--surface)); }
+.request-statistics-scroll .request-department-total { --request-row-surface: var(--secondary); }
+.request-statistics-scroll .request-department-total > :is(th, td) {
+  background: var(--request-row-surface);
+  border-top: 1px solid var(--border-strong);
+  font-weight: 600;
+}
 .request-statistics-scroll tbody [data-selected="true"] {
   background: color-mix(in srgb, var(--primary) 23%, var(--surface));
 }
 .request-tracking-toolbar {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: end;
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
-  overflow-x: auto;
 }
 .request-tracking-toolbar > label { display: grid; gap: 4px; flex: 0 0 150px; }
 .request-tracking-toolbar > .select { flex: 1 1 250px; min-width: 210px; }
@@ -1718,8 +1750,14 @@ body.entity-peek-scroll-locked {
 .request-tracking-error { margin: 0 16px 8px; padding: 8px 10px; color: var(--error-text); background: var(--error-bg); border-radius: 6px; }
 .request-tracking-modal .data-grid { border-top: 1px solid var(--border); }
 @media (max-width: 760px) {
-  .request-tracking-toolbar { flex-wrap: wrap; }
   .request-tracking-toolbar > label { flex: 1 1 145px; }
+  .request-tracking-content { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 3fr) minmax(0, 2fr); }
+  .request-category { border-inline-start: 0; }
+}
+@media (max-width: 760px) and (max-height: 520px) {
+  .request-tracking-body { overflow-y: auto; }
+  .request-tracking-content { flex: 1 0 320px; }
+  .request-statistics { flex: 1 0 240px; }
 }
 .program-button {
   white-space: nowrap;

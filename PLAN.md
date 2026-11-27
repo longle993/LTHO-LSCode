@@ -5,6 +5,19 @@
 - [x] Studio chỉ vị trí lỗi lưu và cho nhảy đến chỗ sửa. Thuộc tính template ở dưới danh sách bảng. Chọn cả dòng field để mở thuộc tính phía trên lưới.
 - [x] Studio tự lưu sau khi ngừng nhập và vẫn cho sửa trong lúc ghi. Đổi tên cạnh tên bảng hoặc field và có ví dụ JSONPath trong ô From.
 
+## Nâng cấp QLYC — 27/11/2026
+
+Tiêu chí nghiệm thu nằm trong [SPEC.md](SPEC.md#nâng-cấp-qlyc--27112026). Khảo sát tĩnh `FcodeViewer/FCodeViewer/clsAction.cs` xác nhận điểm mở `frmQLCV`. Lớp triển khai nằm tại `fcontrol/fcontrol/frmQLCV.cs` trong cùng cây mã nguồn Fcode. Khi đổi dòng, form tải chi tiết từ `dbo.nbctdaumuc` theo `stt_rec` và ghép với `dbo.nbdsdaumuclt` theo `ma_daumuc`. LSCode triển khai phần xem đầu mục. Form Fcode còn có luồng chỉnh sửa và ghi theo quyền riêng.
+
+- [x] Đối chiếu luồng mở QLYC, đồng bộ tên người dùng và cấu trúc bảng thống kê trong LSCode với yêu cầu và ảnh tham chiếu.
+- [x] Dùng `StandardCatalogUser` để điền ô **Người xử lý** trong `src/LSCode.Web/src/features/RequestTracking.tsx`. Giữ nguồn của danh sách khi chuyển sang thống kê và ẩn bộ chọn kết nối ở chế độ thống kê.
+- [x] Tính dòng tổng từ các giá trị nhân viên trong từng nhóm của lưới thống kê. Giữ dòng tổng ở cuối nhóm khi sắp xếp và đưa các ô của dòng tổng vào vùng sao chép.
+- [x] Nối dòng yêu cầu được chọn với truy vấn Category qua bridge và `src/LSCode.Infrastructure/RequestTracking.cs`. Đối chiếu tên cột và khóa với Fcode. Tải lại Category khi làm mới danh sách và bỏ kết quả từ yêu cầu đã bỏ chọn.
+- [x] TypeScript/Vite production build và build .NET Desktop Release đạt. Bộ kiểm tra .NET WebView đạt 195 kiểm tra, gồm dữ liệu SQL Server cục bộ cho đầu mục đã gán và chưa gán, cùng phép thử giữ tên đồng bộ khi lưu lại thiết lập cũ. Smoke WebView2 đạt 12 kiểm tra khởi động và các luồng cơ bản.
+- [x] Chromium đạt 19 kiểm tra với `--request-tracking-regression` trong `scripts/test-webview-ui.mjs`. Kiểm tra tên đồng bộ, giữ nguồn kết nối, số liệu tổng, sao chép, lỗi và tải lại Category, phản hồi đến muộn, cùng cuộn ở cửa sổ 375×320. Đã xem ảnh hai chế độ ở màn rộng và 375 px.
+- [x] Rà diff giao diện, bridge và truy vấn. Đã sửa tải lại Category khi trùng mã yêu cầu, đọc cờ chọn theo kiểu dữ liệu cũ và giữ độ chính xác khi cộng số thập phân. Bốn kiểm tra trực tiếp hàm cộng gồm số nguyên vượt giới hạn an toàn JavaScript, số lượng bốn chữ số thập phân, số âm và dữ liệu trống.
+- [ ] Nghiệm thu thêm trên kết nối QLYC triển khai thực tế. Các kiểm tra đã dùng dữ liệu mẫu trên trình duyệt hoặc cơ sở dữ liệu SQL cục bộ dành cho kiểm thử.
+
 ## Thông báo F5 cho lệnh SQL không có tập kết quả — 26/11/2026
 
 - [x] Khi F5 chạy thành công `CREATE/ALTER PROCEDURE` hoặc lệnh SQL khác không trả bảng, tự chuyển sang tab **Thông báo**.

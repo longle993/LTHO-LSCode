@@ -88,6 +88,13 @@ F12 tại tham chiếu entity XML mở một callout neo gần vị trí con tr�
 
 Ctrl+Alt+C mở ô lệnh độc lập. Nhập `@@` rồi Enter mở QLYC. Người dùng chọn kết nối, người xử lý và khoảng ngày; nút **View All** mở bảng **Request Processing Statistics** chỉ đọc theo năm, gồm số yêu cầu và số lượng theo tháng/tổng/trung bình. Ưu tiên cấu hình `Qlcv` tương thích FCode nếu có, đồng thời cho phép dùng kết nối LSCode để tính năng không phụ thuộc ứng dụng FCode. Không nhúng tài khoản, mật khẩu hay danh sách nhân viên/phòng ban cá nhân vào mã nguồn.
 
+### Nâng cấp QLYC — 27/11/2026
+
+- Lần đầu mở QLYC, ô **Người xử lý** dùng tên người sử dụng lưu từ luồng **Dự án của bạn** và **Đồng bộ**. Người dùng vẫn có thể sửa hoặc xóa bộ lọc này. Khi chưa lưu tên, ô để trống.
+- **View All** sử dụng kết nối đang chọn trên màn danh sách. Thanh điều kiện của thống kê chỉ hiện năm và các nút xem thống kê, quay lại QLYC. Bộ lọc bộ phận, ghim cột và hai ô chọn chỉ số vẫn dùng được trong bảng.
+- Mỗi bộ phận có một dòng **Tổng bộ phận** sau các dòng nhân viên. Dòng tổng cộng số của từng cột đang hiển thị trong phạm vi bộ phận, gồm tháng, Tổng và TB. Việc lọc, sắp xếp và ẩn chỉ số phải giữ số liệu đúng với nhóm.
+- Khối **Category** nằm cạnh danh sách yêu cầu ở màn rộng và xếp dưới danh sách ở màn hẹp. Sau khi tải danh sách, khối mở dữ liệu của yêu cầu đầu tiên. Khi chọn yêu cầu khác, khối hiển thị năm cột chỉ đọc **Chọn**, **Đầu mục**, **Số lượng**, **Lập trình** và **Tester** của yêu cầu đó, kể cả khi truy vấn trước hoàn tất muộn. Tải lại danh sách cũng tải lại đầu mục. Hiện trạng thái đang tải, rỗng hoặc lỗi ngay trong khối Category.
+
 Gợi ý biến `@@` trong SQL nhúng tiếp tục là thao tác trong editor, tách biệt với ô lệnh Ctrl+Alt+C. Gợi ý field trong chuỗi hàm `f.`/`g.` lấy từ `<views>` của file XML hiện hành.
 
 ## Hoàn thiện workspace, snippet và Table Tool — 18/11/2026
