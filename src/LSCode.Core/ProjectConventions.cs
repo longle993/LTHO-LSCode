@@ -83,5 +83,20 @@ public static class ProjectConventions
             .Select(m => Regex.Match(m.Value, @"\bcontroller\s*=\s*['""](?<name>[\w.-]+)['""]", RegexOptions.IgnoreCase, timeout))
             .Where(m => m.Success).Select(m => m.Groups["name"].Value).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
     }
+
+    private static readonly Regex FormReferences = new(
+        """
+        <!--[\s\S]*?-->|<%--[\s\S]*?--%>|/\*[\s\S]*?\*/|//[^\r\n]*
+        |(?<![\w$])(?:showForm|openForm|loadForm)\s*\(\s*(?<quote>['"])(?<name>[\w.-]+)\k<quote>\s*(?=[,)])
+        |"(?:\\[^\r\n]|[^"\\\r\n])*"|'(?:\\[^\r\n]|[^'\\\r\n])*'
+        """,
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.IgnorePatternWhitespace,
+        TimeSpan.FromMilliseconds(300));
+
+    public static IEnumerable<string> FormControllers(string text) =>
+        FormReferences.Matches(text).Cast<Match>()
+            .Where(match => match.Groups["name"].Success)
+            .Select(match => match.Groups["name"].Value)
+            .Distinct(StringComparer.OrdinalIgnoreCase);
 }
 

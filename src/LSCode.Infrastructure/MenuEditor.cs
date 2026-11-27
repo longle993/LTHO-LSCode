@@ -192,14 +192,15 @@ internal static class MenuEditor
         return saved;
     }
 
-    public static async Task<ResourceResult> ResourcesAsync(string root, string link, string sysId, CancellationToken token)
+    public static async Task<ResourceResult> ResourcesAsync(string root, string link, string sysId, CancellationToken token,
+        bool includeFormReferences = true)
     {
         return await Task.Run(async () =>
         {
             var main = ProjectConventions.ResolveMenuFile(root, link);
-            var names = main != null && Path.GetExtension(main).Equals(".aspx", StringComparison.OrdinalIgnoreCase)
-                ? ProjectConventions.Controllers(await File.ReadAllTextAsync(main, token).ConfigureAwait(false))
-                : Array.Empty<string>();
+            var mainSource = main != null && Path.GetExtension(main).Equals(".aspx", StringComparison.OrdinalIgnoreCase)
+                ? await File.ReadAllTextAsync(main, token).ConfigureAwait(false) : "";
+            var names = ProjectConventions.Controllers(mainSource);
             if (!Directory.Exists(Path.Combine(root, "Main")))
             {
                 var metadataController = ProjectConventions.ControllerFromPageMetadata(root, sysId, link);
@@ -219,19 +220,26 @@ internal static class MenuEditor
             if (files.Length > 100000) throw new IOException("Project vượt 100000 file controller.");
             var byName = files.ToLookup(Path.GetFileNameWithoutExtension, StringComparer.OrdinalIgnoreCase);
             var visited = new HashSet<string>(controllers, StringComparer.OrdinalIgnoreCase);
-            var pending = new Queue<string>(controllers);
+            if (includeFormReferences) visited.UnionWith(ProjectConventions.FormControllers(mainSource));
+            var pending = new Queue<string>(visited);
             var related = new List<string>();
             var tables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var tablesByPath = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
             var timeout = TimeSpan.FromMilliseconds(300);
             while (pending.TryDequeue(out var controller))
             {
+                token.ThrowIfCancellationRequested();
                 foreach (var path in byName[controller])
                 {
                     related.Add(path);
                     var isDir = HasFolder(path, "Dir");
-                    if (!isDir && !HasFolder(path, "Grid")) continue;
+                    var inspectGrid = isDir || HasFolder(path, "Grid");
+                    if (!includeFormReferences && !inspectGrid) continue;
                     var content = await File.ReadAllTextAsync(Path.Combine(root, path), token).ConfigureAwait(false);
+                    if (includeFormReferences)
+                        foreach (var child in ProjectConventions.FormControllers(content))
+                            if (visited.Add(child)) pending.Enqueue(child);
+                    if (!inspectGrid) continue;
                     content = Regex.Replace(content, """<!--[\s\S]*?-->""", "", RegexOptions.None, timeout);
                     foreach (var child in ProjectConventions.GridControllers(content))
                         if (visited.Add(child)) pending.Enqueue(child);
