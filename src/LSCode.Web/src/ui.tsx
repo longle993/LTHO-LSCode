@@ -1,5 +1,5 @@
 import { writeClipboard } from "./bridge";
-import { useEffect, useLayoutEffect, useRef, useState, useId } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, useId } from "react";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { X, ChevronDown, Check, CircleAlert, CheckCircle2, Info } from "lucide-react";
 import { createPortal } from "react-dom";
@@ -88,20 +88,31 @@ export function Select({
   disabled = false,
   searchOptions,
   floating = false,
+  treeGroups = false,
+  popupMinWidth = 248,
   onContextMenu,
 }: {
   value: string;
-  options: { value: string; label: string }[];
+  options: { value: string; label: string; group?: string }[];
   onChange: (v: string) => void;
   label: string;
   disabled?: boolean;
   searchOptions?: string;
   floating?: boolean;
+  treeGroups?: boolean;
+  popupMinWidth?: number;
   onContextMenu?: React.MouseEventHandler<HTMLButtonElement>;
 }) {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
-  const visible = options.filter(option => !searchOptions || option.label.toLowerCase().includes(filter.trim().toLowerCase()));
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const visible = options.filter(option => !searchOptions ||
+    `${option.group ?? ""} ${option.label}`.toLowerCase().includes(filter.trim().toLowerCase()));
+  const grouped = new Map<string, typeof options>();
+  for (const option of visible) {
+    const group = option.group ?? "";
+    grouped.set(group, [...(grouped.get(group) ?? []), option]);
+  }
   const listId = useId();
   const root = useRef<HTMLDivElement>(null);
   const popup = useRef<HTMLDivElement>(null);
@@ -119,11 +130,11 @@ export function Select({
       const below = window.innerHeight - rect.bottom - 12;
       const above = rect.top - 12;
       const upward = below < 240 && above > below;
-      const width = Math.min(Math.max(rect.width, 248), window.innerWidth - 24);
+      const width = Math.min(Math.max(rect.width, popupMinWidth), window.innerWidth - 24);
       Object.assign(menu.style, {
         width: width + "px",
         left: Math.max(12, Math.min(rect.left, window.innerWidth - width - 12)) + "px",
-        maxHeight: Math.min(280, Math.max(0, upward ? above : below)) + "px",
+        maxHeight: Math.min(treeGroups ? 420 : 280, Math.max(0, upward ? above : below)) + "px",
         top: upward ? "auto" : rect.bottom + 4 + "px",
         bottom: upward ? window.innerHeight - rect.top + 4 + "px" : "auto",
       });
@@ -137,7 +148,7 @@ export function Select({
       document.removeEventListener("scroll", place, true);
       if (menu.hasAttribute("popover") && menu.matches(":popover-open")) menu.hidePopover();
     };
-  }, [open, floating]);
+  }, [open, floating, popupMinWidth, treeGroups]);
   useEffect(() => {
     const outside = (e: PointerEvent) => {
       if (!root.current?.contains(e.target as Node)) setOpen(false);
@@ -166,6 +177,10 @@ export function Select({
           e.preventDefault();
           if (!open) {
             setFilter("");
+            if (treeGroups) {
+              const selectedGroup = options.find(option => option.value === value)?.group;
+              setExpandedGroups(new Set(selectedGroup ? [selectedGroup] : []));
+            }
             setOpen(true);
             requestAnimationFrame(() =>
               root.current
@@ -176,7 +191,7 @@ export function Select({
           }
           const items = Array.from(
             root.current?.querySelectorAll<HTMLButtonElement>(
-              "[role=option]",
+              treeGroups ? "[role=treeitem]" : "[role=option]",
             ) ?? [],
           );
           const index = items.indexOf(
@@ -200,10 +215,17 @@ export function Select({
         disabled={disabled}
         aria-label={label}
         aria-expanded={open}
-        aria-haspopup="listbox"
+        aria-haspopup={treeGroups ? "tree" : "listbox"}
         aria-controls={open ? listId : undefined}
         onContextMenu={onContextMenu}
-        onClick={() => { setFilter(""); setOpen(!open); }}
+        onClick={() => {
+          setFilter("");
+          if (!open && treeGroups) {
+            const selectedGroup = options.find(option => option.value === value)?.group;
+            setExpandedGroups(new Set(selectedGroup ? [selectedGroup] : []));
+          }
+          setOpen(!open);
+        }}
       >
         <span
           className="select-value"
@@ -222,13 +244,45 @@ export function Select({
           {searchOptions && <input type="search" aria-label={searchOptions} placeholder={searchOptions}
             onKeyDown={event => { if (event.key === "Enter") event.preventDefault(); }}
             autoFocus={!floating} value={filter} onChange={event => setFilter(event.target.value)} />}
-          <div role="listbox" aria-label={label}>
-          {visible.map((o) => (
+          <div role={treeGroups ? "tree" : "listbox"} aria-label={label}>
+          {treeGroups ? [...grouped].map(([group, groupOptions]) => {
+            const expanded = !!filter.trim() || expandedGroups.has(group);
+            return <div className="select-option-branch" role="none" key={group}>
+              <button type="button" role="treeitem" className="select-option-group-toggle"
+                aria-expanded={expanded}
+                onClick={() => setExpandedGroups(current => {
+                  const next = new Set(current);
+                  if (next.has(group)) next.delete(group); else next.add(group);
+                  return next;
+                })}>
+                <span className="select-option-group-label"><ChevronDown size={14} aria-hidden /><strong>{group}</strong></span>
+              </button>
+              {expanded && <div className="select-option-children" role="group">
+                {groupOptions.map(o => <button
+                  type="button"
+                  role="treeitem"
+                  data-select-option
+                  aria-selected={o.value === value}
+                  key={o.value}
+                  onClick={() => {
+                    onChange(o.value);
+                    setOpen(false);
+                    root.current?.querySelector("button")?.focus();
+                  }}
+                >
+                  {o.label}
+                  {o.value === value && <Check size={14} />}
+                </button>)}
+              </div>}
+            </div>;
+          }) : visible.map((o, index) => (
+            <Fragment key={`${o.group ?? ""}:${o.value}`}>
+            {o.group && (index === 0 || visible[index - 1]?.group !== o.group) &&
+              <div className="select-option-group" role="presentation">{o.group}</div>}
             <button
               type="button"
               role="option"
               aria-selected={o.value === value}
-              key={o.value}
               onClick={() => {
                 onChange(o.value);
                 setOpen(false);
@@ -238,6 +292,7 @@ export function Select({
               {o.label}
               {o.value === value && <Check size={14} />}
             </button>
+            </Fragment>
           ))}
           </div>
           {!visible.length && <p role="status">Không có kết quả.</p>}
@@ -250,10 +305,12 @@ export function Modal({
   title,
   children,
   onClose,
+  headerActions,
   wide = false,
   className = "",
 }: {
   title: string;
+  headerActions?: ReactNode;
   children: ReactNode;
   onClose: () => void;
   wide?: boolean;
@@ -278,9 +335,12 @@ export function Modal({
     >
       <div className="modal-heading">
         <h2 id={titleId}>{title}</h2>
-        <IconButton label="Đóng" onClick={onClose}>
-          <X size={18} />
-        </IconButton>
+        <div className="modal-heading-actions">
+          {headerActions}
+          <IconButton label="Đóng" onClick={onClose}>
+            <X size={18} />
+          </IconButton>
+        </div>
       </div>
       {children}
     </dialog>

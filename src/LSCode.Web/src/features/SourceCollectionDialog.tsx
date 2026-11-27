@@ -5,9 +5,18 @@ import { useTask } from "./useTask";
 import { SourceCollectionTree } from "./SourceCollectionTree";
 import type { SourceMatch } from "./SourceCollectionTree";
 
-type Version = { version: string; roots: string[] };
+type Version = { group: string; version: string; roots: string[] };
 type CatalogEntry = { group: string; version: string; root: string };
-const sourceGroups = ["FAW", "FBO-FBI", "HRM"];
+const sourceGroups = ["FAP", "FastFE", "FAW", "FBFE", "FBO-FBI", "FE_TT78", "HDDV", "QLTB", "HRM"];
+const versionCollator = new Intl.Collator("vi", { numeric: true, sensitivity: "base" });
+function orderedVersions(versions: Version[]) {
+  return versions.filter(item => !item.version.trimStart().toLowerCase().startsWith("zzz")).sort((left, right) => {
+    const leftOther = left.group.toLowerCase() === "khác";
+    const rightOther = right.group.toLowerCase() === "khác";
+    if (leftOther !== rightOther) return leftOther ? 1 : -1;
+    return versionCollator.compare(left.group, right.group) || versionCollator.compare(right.version, left.version);
+  });
+}
 type SearchResult = { files: SourceMatch[]; truncated: boolean; errors: string[] };
 type ContentResult = { indices: number[]; skipped: number };
 type CopyResult = { copied: number; skipped: number; errors: string[] };
@@ -52,10 +61,11 @@ export function SourceCollectionDialog({ samples, destination, onClose }: {
         request<string>("sourceCollection.default.read"),
       ]);
       if (!active) return;
-      const preferred = choices.find(item => item.version.toLowerCase() === saved.toLowerCase());
-      setVersions(choices);
+      const ordered = orderedVersions(choices);
+      const preferred = ordered.find(item => item.version.toLowerCase() === saved.toLowerCase());
+      setVersions(ordered);
       setDefaultVersion(preferred?.version ?? "");
-      setVersion(preferred?.version ?? choices[0]?.version ?? "");
+      setVersion(preferred?.version ?? ordered[0]?.version ?? "");
       if (preferred && samples.length) await runSearch(preferred.roots);
     });
     return () => { active = false; };
@@ -77,7 +87,7 @@ export function SourceCollectionDialog({ samples, destination, onClose }: {
   }
 
   async function loadVersions() {
-    const choices = await request<Version[]>("sourceCollection.versions");
+    const choices = orderedVersions(await request<Version[]>("sourceCollection.versions"));
     setVersions(choices);
     setVersion(previous => choices.some(item => item.version === previous) ? previous : choices[0]?.version ?? "");
   }
@@ -145,9 +155,10 @@ export function SourceCollectionDialog({ samples, destination, onClose }: {
   return <Modal title="Source Collection" className="source-collection-modal" onClose={() => { if (!task.busy) onClose(); }} wide>
     <div className="source-collection" aria-busy={task.busy}>
       <div className="source-collection-controls">
-        {versions.length > 0 ? <Select floating label="Phiên bản" searchOptions="Tìm phiên bản" value={version} disabled={task.busy}
+        {versions.length > 0 ? <Select floating treeGroups popupMinWidth={420}
+          label="Phiên bản" searchOptions="Tìm phiên bản" value={version} disabled={task.busy}
           onChange={value => { setVersion(value); resetResults(); }}
-          options={versions.map(item => ({ value: item.version, label: item.version }))} />
+          options={versions.map(item => ({ value: item.version, label: item.version, group: item.group }))} />
           : !task.busy && !task.error && <p>Chưa có phiên bản nguồn. Bạn có thể đồng bộ danh mục bên dưới.</p>}
         <Button type="button" disabled={task.busy || !roots.length} onClick={search}>Tìm</Button>
         {version && <Button disabled={task.busy} onClick={saveDefaultVersion}>
