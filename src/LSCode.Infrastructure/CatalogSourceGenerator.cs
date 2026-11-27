@@ -22,7 +22,8 @@ internal static class CatalogSourceGenerator
             throw new ArgumentException("Thư mục source dự án không tồn tại.");
         if (string.IsNullOrWhiteSpace(template))
             throw new ArgumentException("Nhập đường dẫn Main, page ID hoặc SysId của mẫu.");
-        var source = await MenuEditor.ResourcesAsync(root, template.Trim(), template.Trim(), token).ConfigureAwait(false);
+        var source = await MenuEditor.ResourcesAsync(root, template.Trim(), template.Trim(), token,
+            includeFormReferences: false).ConfigureAwait(false);
         if (source.Controllers.Length != 1 || !source.Resources.Any(resource => resource.Kind == "Grid" && resource.Paths.Length > 0))
             throw new InvalidOperationException("Mẫu phải có một controller chính và ít nhất một file Grid.");
         if (source.Resources.Where(resource => resource.Kind == "Main").SelectMany(resource => resource.Paths)

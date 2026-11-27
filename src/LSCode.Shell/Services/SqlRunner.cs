@@ -13,6 +13,8 @@ public sealed class SqlExecutionException(IReadOnlyList<SqlExecutionError> error
 }
 public static class SqlRunner
 {
+    public static string AffectedRowsMessage(int count) => $"Thực hiện lệnh thành công, đã thay đổi {count} dòng.";
+
     public static string ConnectionString(StudioSettings s, string password) => new SqlConnectionStringBuilder
     {
         DataSource = s.Server, InitialCatalog = s.Database, IntegratedSecurity = s.IntegratedSecurity,
@@ -59,7 +61,9 @@ public static class SqlRunner
                     }
                     tables.Add(table);
                 } while (await reader.NextResultAsync(ct));
-                messages.Add($"Batch dòng {batch.StartLine}: affected rows = {reader.RecordsAffected}");
+                await reader.CloseAsync();
+                if (reader.RecordsAffected >= 0)
+                    messages.Add(AffectedRowsMessage(reader.RecordsAffected));
             }
             catch (SqlException ex)
             {

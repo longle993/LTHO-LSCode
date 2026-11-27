@@ -29,17 +29,19 @@ export function SettingsDialog({
   commands,
   onSave,
   onClose,
+  initialSection = "general",
 }: {
   settings: Settings;
   commands: string[][];
   onSave: (s: Settings) => Promise<void>;
   onClose: () => void;
+  initialSection?: "general" | "shortcuts";
 }) {
   const [draft, setDraft] = useState({
       ...settings,
       shortcuts: { ...settings.shortcuts },
     }),
-    [section, setSection] = useState("general"),
+    [section, setSection] = useState<string>(initialSection),
     [shortcutQuery, setShortcutQuery] = useState("");
   const task = useTask();
   const palette = draft.buttonColors?.[draft.theme] ?? {};

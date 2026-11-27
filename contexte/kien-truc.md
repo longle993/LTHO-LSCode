@@ -1,5 +1,9 @@
 # Kiến trúc LSCode
 
+Xuất kết quả SQL thêm ký tự BOM ở đầu nội dung CSV trước khi gửi qua `text.export`. Workspace ghi UTF-8; dấu BOM giúp Excel nhận diện mã hóa khi mở file.
+
+Phím tắt dùng mã lệnh làm khóa trong `shortcuts.dat` dưới thư mục dữ liệu LSCode. Windows DPAPI bảo vệ file theo tài khoản hiện tại. Khi chưa có file riêng, ứng dụng đọc phím tắt cũ từ `settings.json` rồi chuyển sang file mới khi lưu. Cập nhật ứng dụng giữ được cấu hình nếu giữ thư mục này và tài khoản Windows.
+
 Provider Monaco kích hoạt gợi ý SQL khi gõ `@` hoặc `#` và lấy ký hiệu từ buffer hiện tại. Với tiền tố này, request bỏ qua tra metadata database. Core nhận diện tham số procedure và loại bỏ chuỗi SQL, chú thích trước khi tìm khai báo cục bộ. Fixture Core kiểm tra tham số và bảng tạm trong `ALTER PROC`.
 
 | Điểm vào | Trách nhiệm |
@@ -12,6 +16,8 @@ Provider Monaco kích hoạt gợi ý SQL khi gõ `@` hoặc `#` và lấy ký h
 | [Infrastructure](../src/LSCode.Infrastructure/) | File, SQL, catalog, Source Collection, Advance Note và adapter Template Studio. Tái sử dụng Core và một số source qua Compile Link. |
 | [Core](../src/LSCode.Core/), [Shell](../src/LSCode.Shell/), [TraceHost](../src/LSCode.TraceHost/) | Logic dùng chung, ứng dụng WPF trước WebView và tiến trình Trace. |
 | [DynamicTemplateStudio.Core](../src/DynamicTemplateStudio.Core/), [DynamicTemplateStudio.Infrastructure](../src/DynamicTemplateStudio.Infrastructure/) | Model, validation, mapping và persistence của Studio, được build trong repo. |
+
+Từ 27/11/2026, `sourceCollection.versions` giữ thêm mã phân hệ/sản phẩm của phiên bản. Catalog dùng trực tiếp `Entry.Group`; đường dẫn dự án nằm dưới `SourceCollection` lấy folder mẹ kế tiếp làm phân hệ, còn nguồn ngoài cấu trúc này vào nhóm **Khác**. Dropdown Source Collection sắp phân hệ theo tên, để **Khác** ở cuối, rồi sắp phiên bản giảm dần bằng so sánh số tự nhiên. `Select` dùng ARIA tree khi bật `treeGroups`: phân hệ là nút cha in đậm/có nền và mũi tên đóng/mở, phiên bản là treeitem con thụt vào; nhánh chứa lựa chọn hiện tại tự mở. Ô tìm khớp cả tên phân hệ và tự mở nhánh khớp. Popover phiên bản yêu cầu rộng 420 px nhưng vẫn co theo viewport. `SourceVersionCatalog` và giao diện đều loại phòng vệ folder con bắt đầu bằng `ZZZ`, nên dữ liệu hướng dẫn cũ trong JSON cũng không xuất hiện. Các phân hệ đồng bộ gồm FAP, FastFE, FAW, FBFE, FBO-FBI, FE_TT78, HDDV, QLTB và HRM. Phạm vi kiểm chứng ngày 27/11/2026 gồm 120 WebView checks, TypeScript/Vite production build và 9 kiểm tra Chrome chuyên biệt bằng fixture phân hệ/phiên bản giả; chưa đồng bộ lại toàn bộ thư mục mạng thực tế.
 
 Chi tiết luồng request ở [Clean Architecture và MediatR](../docs/architecture/CLEAN-ARCHITECTURE-MEDIATR.vi.md).
 
@@ -29,6 +35,8 @@ Toolbar editor chỉ dành chỗ cho thao tác theo tài liệu đang mở. Adva
 
 Từ 26/11/2026, `App.run` chuẩn hóa kết quả `sql.execute` ở lớp trình bày: nếu không có bảng và không có thông báo server, bổ sung **Các lệnh đã được thực hiện thành công.**; mọi thông báo thật vẫn được giữ. Lần chạy không có bảng tự chọn tab Thông báo, còn SELECT có bảng tiếp tục ở tab Kết quả. Fixture dùng `ALTER PROCEDURE dbo.StoreFixture` và không chứa dữ liệu khách hàng. Phạm vi kiểm chứng: TypeScript/Vite production build đạt và Chrome fixture riêng đạt 5 kiểm tra.
 
+Cùng ngày, diagnostic Monaco giữ thêm `owner` của marker. Banner trong `editor-group` chỉ đọc lỗi có owner `xml`; marker `sql` vẫn tạo gạch lỗi và danh sách **Vấn đề** nhưng không đi lên banner. Khi `sql.execute` thất bại, `App.run` tạo một `QueryResult` lỗi theo document, lưu vào `resultsByTab`, tự chọn **Thông báo** và không ghi vào lỗi toàn cục `WorkbenchNotice`. Vì vậy đổi tab rồi quay lại vẫn thấy đúng lỗi SQL, còn banner trên chỉ phục vụ lỗi XML/DTD như entity chưa khai báo. Phạm vi kiểm chứng: TypeScript/Vite production build đạt; Chrome `--sql-error-routing-regression` đạt 6 kiểm tra, `--sql-success-message-regression` đạt 5, `--controller-diagnostics-regression` đạt 7 và `--menu-regression` đạt 13; fixture không chứa dữ liệu khách hàng.
+
 Thời gian query được theo dõi ở React theo từng tab: đồng hồ `performance.now()` cập nhật UI mỗi 100 ms trong lúc request chạy; kết quả thành công thay bằng `QueryResult.durationMs` từ Infrastructure, còn lỗi/hủy lưu thời gian đã trôi qua. Bản đồ thời gian tách theo document ID để đổi tab không hiển thị nhầm. Khung `.studio` dùng token `--window-border` riêng cho từng theme để tạo viền 1 px bên trong cửa sổ WPF không chrome.
 
 Table Tool chỉ còn một bề mặt dữ liệu. `TableDataGrid` dùng chung token và ngôn ngữ tương tác với lưới kết quả SQL: kéo chọn vùng, chọn dòng/cột/toàn bảng, sao chép TSV và sửa ô trực tiếp; thao tác ghi vẫn đi qua `table.write`, metadata khóa chính quyết định khả năng cập nhật. Menu Tập lệnh dùng HTML Popover top-layer và tính vị trí theo viewport để không bị `table-toolbar-slot` cắt. Từ 23/11/2026, state của menu lưu nguồn neo là nút toolbar hoặc tọa độ chuột; `contextmenu` trên bề mặt dữ liệu mở lại đúng popover và tự chặn ở input/textarea/button/contenteditable để không chiếm menu soạn thảo hay menu cột. Cùng menu có thao tác đóng băng theo cột active hoặc cột mang `data-table-column` tại vị trí chuột phải. `TableDataGrid` dùng `ResizeObserver` đo header, tính offset tích lũy và sinh quy tắc sticky cho cột số dòng cùng các cột từ đầu đến cột đích; chọn lại thao tác xóa state và toàn bộ quy tắc sticky. `Ctrl+Alt+D` được App định tuyến theo tab đang chọn, nên tab Table đổi target riêng và giữ tên bảng. `MenuEditor.InsertScriptAsync` đọc schema thực tế của `dbo.wcommand` và `dbo.command`, bỏ cột identity/computed/rowversion rồi sinh literal SQL đúng Unicode, binary, số và ngày. Bridge `project.menu.insertScript` được gọi từ F12 hoặc menu chuột phải của cây chức năng.
@@ -37,7 +45,17 @@ Cập nhật 18/11/2026: Table Tool gửi thêm `orderBy` vào câu đọc đã 
 
 Cập nhật tiếp 18/11/2026: Table Tool hiển thị trạng thái/lỗi bằng toast React đưa lên `document.body` và xác nhận F8 bằng `Modal`, vì vậy không phụ thuộc hộp thoại trình duyệt và không làm đổi chiều cao vùng dữ liệu. WHERE/ORDER BY dùng grid 7/3 và stack ở màn hẹp. `App` chuyển danh sách snippet đã lưu vào provider Monaco bằng `setEditorSnippets`; provider nhận trigger `/`, lọc khóa bắt đầu bằng `/` và chèn body dưới dạng Monaco snippet với caret offset cũ. Lịch sử dùng cập nhật optimistic và hàng đợi 140 ms theo project; bridge `project.history.removeMany` gọi một lần `ProjectFileActions.RemoveHistory` với `HashSet`, chỉ ghi JSON khi thực sự có mục bị xóa. Phạm vi kiểm chứng cùng ngày: TypeScript typecheck và production build đạt; 95 WebView checks đạt, gồm fixture xóa lịch sử theo lô; publish Windows x64 self-contained và 12 smoke WebView2 đạt. Chưa đo độ trễ trên file lịch sử LAN thực tế có số lượng rất lớn.
 
+Từ 27/11/2026, SqlRunner chỉ thêm số dòng bị ảnh hưởng khi RecordsAffected không âm và diễn đạt thành **Thực hiện lệnh thành công, đã thay đổi N dòng.** App chọn Kết quả khi có tập kết quả và Thông báo khi lệnh thành công không trả bảng. Phạm vi kiểm chứng: formatter tiếng Việt với 4 dòng, 119 WebView checks, TypeScript/Vite production build và publish Windows x64 self-contained.
+
+Cũng từ 27/11/2026, `SqlTraceStream` xóa các ký tự UTF-16 NUL mà rowset trace để lại bên trong `TextData` dài. Đây là ký tự phân khối, nhưng clipboard Windows xem NUL đầu tiên là kết thúc `CF_UNICODETEXT`. Ngoài ra, `textarea` chuẩn hóa CRLF thành LF nên chỉ số vùng chọn không thể dùng để cắt trực tiếp chuỗi SQL gốc; sau 105 lần xuống dòng, cách cũ lệch khoảng 105 ký tự và dừng giữa dòng 106. `ProfilerTool` dùng nguyên chuỗi gốc khi chọn toàn bộ, chỉ dùng giá trị DOM khi sao chép một phần, đồng thời chuẩn hóa NUL trước khi ghi clipboard. Fixture giao diện dùng SQL 112 dòng có NUL giữa dòng 106 để ngăn cả hai lỗi quay lại. Phạm vi kiểm chứng: 120 WebView checks, 21 kiểm tra giao diện Profiler, TypeScript/Vite production build và publish Windows x64 self-contained.
+
 ## Tải menu ERP và Mobile
+
+Bộ dò source WebView lần theo tên cố định ở đối số đầu của `showForm`, `openForm` và `loadForm` trong Main ASPX hoặc controller .f/.xml. Cây File và tài nguyên F3 tra tên file không phân biệt hoa thường, duyệt tiếp form lồng và bỏ qua tên đã duyệt. Tên ghép hoặc truyền qua biến cần được xác định lúc chạy nên không suy ra từ source tĩnh. Luồng tạo danh mục từ mẫu giữ phạm vi file cũ.
+
+Nút mã Web trong cây và kết quả tìm kiếm gọi `openMenuEditor` như F3, dùng chung kiểm tra bản nháp chưa lưu. Có thể mở Main từ cây File.
+
+Ô tìm chức năng dùng `entry.link` (trường Main trong form ERP) cùng tên, SysId và mã để lọc cục bộ.
 
 Khi mở dự án có kết nối theo web.config, ProjectDatabase đọc file từ SourcePath hiện tại của profile. WebConfigPath cũ chỉ dùng với profile chưa có SourcePath. Nút tải lại web.config cũng thao tác trong thư mục source.
 
@@ -54,6 +72,8 @@ Cập nhật 25/11/2026: chọn node trong `FunctionTree` gọi `openController`
 Cập nhật tiếp 25/11/2026: `MenuEditor.NewAsync` tra menu đang chọn trong `dbo.wcommand` trước khi tạo bản nháp. Nếu `wmenu_id` có hậu tố số, mã mới giữ nguyên `wmenu_id0`, tăng hậu tố theo đúng độ rộng và tiếp tục tăng khi mã kế tiếp đã tồn tại; mã cũ không có hậu tố số vẫn dùng quy tắc tạo nhánh trước đây. Fixture dùng mã mẫu `03.69.43`, không chứa dữ liệu khách hàng. Phạm vi kiểm chứng: TypeScript/Vite production build, 114 WebView checks và Chrome `--menu-regression` 11 kiểm tra đạt; kiểm tra tích hợp SQL đã được thêm nhưng không chạy được do máy hiện tại không có SQL instance cục bộ. Chưa nghiệm thu trên SYS ERP thật.
 
 Hiệu chỉnh cùng ngày theo nghiệm thu giao diện: click menu thông thường gọi `openController` với điều hướng mặc định để chuyển sang tab File. Khối `FunctionTree` được giữ mounted bằng `display: none/contents` khi đổi tab, nên state mở nhánh bên trong không mất; `selectedCommands` tiếp tục giữ dòng được chọn để tô đậm khi người dùng quay lại tab Chức năng. Riêng luồng chọn menu cho Advance Note vẫn dùng `preserveNavigation` vì đó là hộp chọn phụ trợ. TypeScript/Vite production build và .NET build sạch; Chrome fixture xác nhận đủ chuỗi Chức năng → File → Chức năng.
+
+Hiệu chỉnh 26/11/2026: trạng thái `suppressControllerFileSelection` tách lựa chọn trong cây controller khỏi `active.path` của editor. Nhấp tên menu bật trạng thái này trước khi tải controller, nên chỉ chuyển sang File và mở rộng cây mà không tô Main hoặc file đang active từ trước; mở file trực tiếp hoặc bấm mã menu đi qua `setActiveId` để khôi phục lựa chọn bình thường. Tab editor hiện có không bị đóng và dữ liệu chưa lưu không bị thay đổi. Phạm vi kiểm chứng: TypeScript/Vite production build đạt, Chrome `--menu-regression` đạt 13 kiểm tra và `--controller-diagnostics-regression` đạt 7 kiểm tra bằng fixture không chứa dữ liệu khách hàng. Bộ UI tổng quát dừng trước kịch bản menu tại locator cũ **Chạy F5**; chưa smoke trên project ERP thật.
 
 ## Sinh source danh mục ERP
 
@@ -74,6 +94,8 @@ Ngày 27/11/2026, đối chiếu luồng Category trong `fcontrol/frmQLCV.cs`, l
 QLYC lấy tên mặc định từ `StandardCatalogUser` của lần đồng bộ danh mục chuẩn đã lưu. Luồng lưu thiết lập thông thường giữ lại trường này vì giao diện có thể đang giữ bản thiết lập cũ. **View All** dùng kết nối danh sách đang chọn. Dòng tổng bộ phận cộng theo từng cột, gồm cả các giá trị TB đã tính cho từng nhân viên. Các luồng được kiểm chứng bằng bài kiểm thử WebView với SQL Server cục bộ và trình duyệt Chromium dùng dữ liệu fixture. Chưa kiểm chứng trên cơ sở dữ liệu QLYC đang sử dụng.
 
 ### Callout entity F12
+
+Lớp chắn giới hạn trong editor. Bấm lớp chắn hoặc nhấn Esc đóng pop-up cuối và giữ các pop-up cha. Bộ chặn cuộn chỉ áp dụng cho nền editor, nên các vùng còn lại vẫn nhận thao tác.
 
 Từ 20/11/2026, `XmlIncludes.Find` trả thêm tên và phạm vi `Start/Length`. Với entity nội tuyến, phạm vi là riêng nội dung trong dấu nháy; với entity `SYSTEM` hoặc DOCTYPE, phạm vi là file đích. Chỉ số được tính trên bản đã che comment nhưng giữ nguyên độ dài và xuống dòng, nên vẫn ánh xạ đúng về buffer gốc, kể cả buffer chưa lưu.
 
@@ -110,6 +132,8 @@ Bổ sung ngày 20/11/2026 sau khi tái hiện lỗi quyền Extended Events. B�
 Bổ sung ngày 23/11/2026 sau lỗi `Incorrect syntax near 'THROW'` và lỗi quyền `SP_TRACE_CREATE` trên SQL Server 2008. Batch cấu hình và dọn SQL Trace dùng `RAISERROR(..., 16, 1)` kèm `RETURN`; batch khởi động Extended Events không còn wrapper `TRY/CATCH/THROW`. Regression dùng `TSql100Parser` để kiểm tra ngữ pháp SQL Server 2008, kiểm tra version 10.x được định tuyến sang SQL Trace và kiểm tra hai instance chuẩn dùng tài khoản Profiler riêng. Phạm vi tự động đạt 109 WebView checks; chưa smoke phiên thu trên instance SQL Server 2008 thật của người dùng.
 
 Bổ sung ngày 26/11/2026 cho chẩn đoán câu SQL lỗi. Cả TraceHost dùng template SSMS, SQL Trace tích hợp và Extended Events đều thu sự kiện bắt đầu câu lệnh, severity cùng thông báo lỗi. Giao diện ghép theo session (hoặc database/login khi trace không có session), tô nền câu SQL gây lỗi severity từ 11 rồi đặt dòng thông báo chữ đỏ ngay sau; `User Error Message` severity dưới 11 hoặc có tiền tố `Warning:` chỉ là cảnh báo và không tô đỏ. Nhấp một lần ô SQL chỉ chọn nội dung; nhấp đúp mới gọi clipboard bằng giá trị đầy đủ trong model, không đọc chuỗi đã bị CSS rút gọn, rồi hiện toast xác nhận. Fixture hồi quy dùng câu SQL/danh mục giả; chưa kiểm chứng với dữ liệu ERP thật.
+
+Bổ sung ngày 27/11/2026 cho cột ID. Giao diện lấy `ProfilerEvent.Application`: SQL Trace tích hợp đọc cột `ApplicationName`, Extended Events đọc action `client_app_name`, còn TraceHost chuyển tiếp `ApplicationName` của sự kiện SSMS. Cột này giúp phân biệt nguồn gọi như `1` hoặc `.Net SqlClient Data Provider` mà không thay đổi số thứ tự dòng `#`. Phạm vi kiểm chứng gồm 120 WebView checks, TypeScript/Vite production build và 23 kiểm tra Chrome chuyên biệt cho Profiler; dữ liệu kiểm thử là fixture, chưa thu lại trên SQL Server ERP thật.
 
 ## Chẩn đoán khai báo theo controller
 

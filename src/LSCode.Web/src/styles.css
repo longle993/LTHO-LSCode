@@ -1143,7 +1143,7 @@ body.entity-peek-scroll-locked {
   overscroll-behavior: none;
 }
 .entity-peek-scroll-lock {
-  position: fixed;
+  position: absolute;
   inset: 0;
   z-index: 23;
   background: transparent;
@@ -1492,6 +1492,41 @@ body.entity-peek-scroll-locked {
 }
 .select-options button[aria-selected="true"] {
   @apply [background:var(--secondary)];
+}
+.select-option-group {
+  @apply [margin:4px_0_2px];
+  @apply [padding:7px_10px];
+  @apply [border-radius:7px];
+  @apply [background:var(--secondary)];
+  @apply [color:var(--foreground)];
+  @apply font-bold;
+  @apply [font-size:12px];
+}
+.select-option-group-toggle {
+  @apply [margin:4px_0_2px];
+  @apply [background:var(--secondary)!important];
+  @apply [color:var(--foreground)];
+  @apply font-bold;
+}
+.select-option-group-label {
+  @apply flex;
+  @apply items-center;
+  @apply [gap:6px];
+}
+.select-option-group-toggle .select-option-group-label > svg {
+  @apply [transform:rotate(-90deg)];
+  @apply [transition:transform_0.12s_ease];
+}
+.select-option-group-toggle[aria-expanded="true"] .select-option-group-label > svg {
+  @apply [transform:rotate(0deg)];
+}
+.select-option-children {
+  @apply [margin-left:14px];
+  @apply [padding-left:8px];
+  @apply [border-left:1px_solid_var(--border)];
+}
+.select-option-children > button {
+  @apply [padding-left:12px];
 }
 .data-grid {
   @apply overflow-auto;
@@ -2003,6 +2038,7 @@ body.entity-peek-scroll-locked {
 .modal-copy {
   @apply [padding:20px_24px];
 }
+.modal-heading-actions { display: flex; align-items: center; gap: 6px; }
 .modal-footer {
   @apply flex;
   @apply justify-end;

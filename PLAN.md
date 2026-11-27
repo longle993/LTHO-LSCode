@@ -18,6 +18,37 @@ Tiêu chí nghiệm thu nằm trong [SPEC.md](SPEC.md#nâng-cấp-qlyc--27112026
 - [x] Rà diff giao diện, bridge và truy vấn. Đã sửa tải lại Category khi trùng mã yêu cầu, đọc cờ chọn theo kiểu dữ liệu cũ và giữ độ chính xác khi cộng số thập phân. Bốn kiểm tra trực tiếp hàm cộng gồm số nguyên vượt giới hạn an toàn JavaScript, số lượng bốn chữ số thập phân, số âm và dữ liệu trống.
 - [ ] Nghiệm thu thêm trên kết nối QLYC triển khai thực tế. Các kiểm tra đã dùng dữ liệu mẫu trên trình duyệt hoặc cơ sở dữ liệu SQL cục bộ dành cho kiểm thử.
 
+## Cập nhật từ nhánh Old-Man
+
+- [x] Hiển thị phiên bản Source Collection thành cây phân hệ/phiên bản theo folder mẹ/con, mở/đóng từng nhánh, tăng chiều rộng vùng chọn, sắp phiên bản mới trước và loại folder `ZZZ`.
+
+- [x] Dò source form được gọi từ Main và controller. Kiểm tra bằng fixture có hai form con, lời gọi lồng và vòng tham chiếu.
+
+- [x] Giới hạn vùng bấm đóng entity vào editor. Esc đóng từng pop-up và thanh công cụ vẫn hoạt động.
+
+- [x] Bấm nền để đóng từng pop-up entity theo thứ tự mở gần nhất.
+
+- [x] Thêm dấu nhận diện UTF-8 vào CSV xuất từ kết quả SQL.
+
+- [x] Đặt biểu tượng bánh răng mở trang Phím tắt trên tiêu đề Bảng lệnh.
+
+- [x] Thêm lối mở trang Phím tắt từ Bảng lệnh và lưu cấu hình cá nhân vào file DPAPI riêng.
+
+- [x] Dùng thao tác F3 khi nhấp mã menu Web trong cây hoặc kết quả tìm kiếm.
+
+- [x] Bổ sung tìm chức năng theo Main từ dữ liệu menu đã tải.
+
+- [x] Bỏ số dòng ảnh hưởng âm và chọn tab dưới theo tập kết quả sau F5.
+- [x] Đổi thông báo số dòng ảnh hưởng thành câu thành công tiếng Việt: **Thực hiện lệnh thành công, đã thay đổi N dòng.**
+- [x] Giữ đủ SQL Profiler dài khi sao chép; loại bỏ NUL phân khối và kiểm tra Ctrl+A/C với fixture 112 dòng.
+- [x] Thêm cột **ID** vào SQL Profiler từ tên ứng dụng kết nối và giữ thao tác chọn/sao chép đúng cột SQL.
+
+## Phân luồng lỗi SQL và entity — 26/11/2026
+
+- [x] Gắn nguồn marker `sql`/`xml` vào diagnostic; banner phía trên editor chỉ nhận lỗi XML/DTD.
+- [x] Khi F5 lỗi, lưu thông báo vào kết quả của tab SQL, tự mở **Thông báo** bên dưới và vẫn giữ vị trí trong **Vấn đề**.
+- [x] TypeScript/Vite production build đạt; Chrome `--sql-error-routing-regression` đạt 6 kiểm tra, đồng thời các regression SQL thành công, controller entity và menu đều đạt.
+
 ## Thông báo F5 cho lệnh SQL không có tập kết quả — 26/11/2026
 
 - [x] Khi F5 chạy thành công `CREATE/ALTER PROCEDURE` hoặc lệnh SQL khác không trả bảng, tự chuyển sang tab **Thông báo**.
@@ -51,6 +82,11 @@ Tiêu chí nghiệm thu nằm trong [SPEC.md](SPEC.md#nâng-cấp-qlyc--27112026
 - [x] Build frontend và Desktop Release. Chạy 154 kiểm tra Core và 11 kiểm tra Chrome trên bản production, gồm phân trang và tìm kiếm ở chiều rộng 375 px. Probe màn chung ghi ba điểm ngoài hai khu vực thay đổi: nút **Mở thư mục** xuống dòng và nút tìm lệnh có vùng bấm dưới 24 px ở 375 px, nút **Chức năng** xuống dòng ở 1.440 px.
 - [ ] Đo thời gian và bộ nhớ trên dữ liệu ERP thực tế. Nhánh đọc SQL Server 2008 chưa được chạy trên máy chủ phiên bản đó.
 
+## Không chọn file khi duyệt menu ERP — 26/11/2026
+
+- [x] Nhấp tên menu chỉ chuyển sang File và mở cây controller, không tô/chọn Main hoặc file editor đang active từ trước; tab editor và dữ liệu chưa lưu được giữ nguyên.
+- [x] Bấm mã menu vẫn mở và chọn Main; khi người dùng mở một file trong cây, lựa chọn file hoạt động lại bình thường.
+- [x] TypeScript/Vite production build đạt; Chrome `--menu-regression` đạt 13 kiểm tra và `--controller-diagnostics-regression` đạt 7 kiểm tra. Bộ UI tổng quát hiện dừng trước phạm vi này tại locator cũ **Chạy F5**.
 
 ## Tạo menu cùng cấp từ menu đang chọn — 25/11/2026
 

@@ -131,6 +131,16 @@ await page.addInitScript(()=>{
         else template.tables[table].columns[field].name=name;
         result=template;break;
       }
+      case 'sourceCollection.versions':result=[
+        {group:'FBO-FBI',version:'ZZZCHÉP SOURCE VÀO FOLDER App_Data',roots:['C:\\SourceCollection\\FBO-FBI\\ZZZCHÉP SOURCE']},
+        {group:'FBO-FBI',version:'FBOR2SP22.9',roots:['C:\\SourceCollection\\FBO-FBI\\FBOR2SP22.9']},
+        {group:'FAW',version:'FAW22',roots:['C:\\SourceCollection\\FAW\\FAW22']},
+        {group:'FBO-FBI',version:'FBOR2SP24.2.2',roots:['C:\\SourceCollection\\FBO-FBI\\FBOR2SP24.2.2']},
+        {group:'FAW',version:'FAW30',roots:['C:\\SourceCollection\\FAW\\FAW30']},
+        {group:'FBO-FBI',version:'FBOR2SP23',roots:['C:\\SourceCollection\\FBO-FBI\\FBOR2SP23']},
+      ];break;
+      case 'sourceCollection.default.read':result='';break;
+      case 'sourceCollection.default.save':result=request.payload.version;break;
       case 'catalogSource.export':result={folder:'C:\\Fixture\\Output\\CatalogDemo',files:['CatalogDemo.xml']};break;
       case 'project.menu.insertScript':result="-- dbo.wcommand\r\nINSERT INTO dbo.wcommand ([wmenu_id]) VALUES ('menu1')\r\nGO\r\n\r\n-- dbo.command\r\nINSERT INTO dbo.command ([menu_id]) VALUES ('Dir')\r\nGO\r\n";break;
       case 'project.employeeTabs':result=[{sysId:'hrPIGeneralInformation',caption:'Thông tin chung'},{sysId:'hrPIPassportVisa',caption:'Hộ chiếu, thị thực'}];break;
@@ -200,6 +210,10 @@ await page.addInitScript(()=>{
       case 'sql.connect':result={id:'target-'+(++serial),server:request.payload.server,database:request.payload.database};break;
       case 'sql.execute':
         if(window.__failSql){error={code:'sql_error',message:'Lỗi SQL fixture'};break;}
+        if(request.payload.sql.includes('INVALID_SEQUENCE_FIXTURE')){
+          const message="Unknown object type 'SEQUENCE' used in a CREATE, DROP, or ALTER statement.";
+          error={code:'failed',message,details:[{line:1,message,procedure:''}]};break;
+        }
         if(request.payload.sql.includes('CREATE TABLE dbo.BangMoiFixture')) window.__createdTableTarget=request.payload.targetId;
         if(/\b(?:CREATE|ALTER)\s+(?:PROC|PROCEDURE)\b/i.test(request.payload.sql)){
           result={tables:[],messages:[],durationMs:8,truncated:false};break;
@@ -309,6 +323,7 @@ await page.addInitScript(()=>{
       case 'catalog.references':result={columns:['Schema','Table','Column','Type'],rows:[]};break;
       case 'catalog.load':result={signature:'fixture-schema',columns:[{name:'code',type:'nvarchar',nullable:false,identity:false,computed:false,generated:0,managed:false,hasDefault:false},{name:'label',type:'nvarchar',nullable:true,identity:false,computed:false,generated:0,managed:false,hasDefault:false},...['user_id0','user_id2','datetime0','datetime2'].map(name=>({name,type:name.startsWith('user')?'int':'datetime',nullable:true,identity:false,computed:false,generated:0,managed:true,hasDefault:false}))],data:{columns:['code','label','user_id0','user_id2','datetime0','datetime2'],rows:[['one',null,null,null,null,null],[':null','literal',null,null,null,null]]}};break;
       case 'catalog.clipboard.write':result=request.payload.rows.map(r=>r.map(v=>'"'+(v??'').replaceAll('"','""')+'"').join('\t')).join('\r\n');break;
+      case 'text.export':result=request.payload.name;break;
       default:error={code:'fixture',message:'Fixture không hỗ trợ '+request.method};
     }
     const reply=()=>listeners.forEach(fn=>fn({data:{protocolVersion:1,requestId:request.requestId,result,error}}));
@@ -457,7 +472,11 @@ async function testProfiler(){
   const executions=await page.evaluate(()=>window.__nativeCalls.filter(c=>c.method==='sql.execute').length);
   await page.keyboard.press('F5');
   check(await page.evaluate(before=>window.__nativeCalls.filter(c=>c.method==='sql.execute').length===before,executions),'Profiler tab shortcuts do not run the hidden editor query');
-  await page.evaluate(()=>window.__traceBatch.push(...Array.from({length:60},(_,i)=>({time:String(i),event:'Event '+i,database:'Fixture_App',login:'profile',durationMs:1,reads:0,text:'SELECT '+i}))));
+  const longProfilerSql=Array.from({length:112},(_,i)=>i===105
+    ? "SET @warning = N'phần đầu'\0 + N' phần cuối dòng 106'"
+    : `-- dòng ${i+1}`).join('\r\n');
+  const normalizedLongProfilerSql=longProfilerSql.replaceAll('\0','');
+  await page.evaluate(longSql=>window.__traceBatch.push(...Array.from({length:60},(_,i)=>({time:String(i),event:'Event '+i,database:'Fixture_App',login:'profile',application:i===0?'.Net SqlClient Data Provider':'Fixture.Client',durationMs:1,reads:0,text:i===0?longSql:'SELECT '+i}))),longProfilerSql);
   check(await page.evaluate(()=>window.__nativeCalls.filter(c=>c.method==='profiler.start').length===1 &&
     window.__nativeCalls.some(c=>c.method==='profiler.start' && c.payload.engine==='auto' &&
       c.payload.useTargetCredentials===false && c.payload.targetId && !Object.hasOwn(c.payload,'password'))),
@@ -465,11 +484,14 @@ async function testProfiler(){
   await page.waitForFunction(()=>document.querySelector('.trace-sql')?.value==='SELECT 59');
   check(await profiler.locator('.trace-sql').evaluate(element=>element.clientHeight>=110),'Profiler SQL area has room for more lines');
   const traceGrid=profiler.locator('.data-grid');
+  check(await traceGrid.getByRole('columnheader',{name:'ID',exact:true}).isVisible(),'Profiler displays the ID column');
   check(await traceGrid.evaluate(el=>el.scrollTop>0),'Profiler follows the newest live event');
   await traceGrid.evaluate(el=>el.scrollTop=0);
   const firstTraceCell=traceGrid.locator('[data-grid-row="0"][data-grid-column="1"]');
   const lastTraceCell=traceGrid.locator('[data-grid-row="1"][data-grid-column="2"]');
   await firstTraceCell.waitFor();
+  check(await traceGrid.locator('[data-grid-row="0"][data-grid-column="4"]').textContent()==='.Net SqlClient Data Provider',
+    'Profiler maps ID to the captured application name');
   const from=await firstTraceCell.boundingBox(),to=await lastTraceCell.boundingBox();
   await page.mouse.move(from.x+from.width/2,from.y+from.height/2);
   await page.mouse.down();await page.mouse.move(to.x+to.width/2,to.y+to.height/2,{steps:8});await page.mouse.up();
@@ -478,13 +500,22 @@ async function testProfiler(){
   check(await traceGrid.locator('td.grid-selected').count()===4&&!(await traceGrid.getByRole('button',{name:/Sao chép/}).count()),'Profiler drag copies a rectangular TSV range without copy buttons');
   await page.evaluate(()=>window.__traceBatch.push({time:'60',event:'Event 60',database:'Fixture_App',login:'profile',durationMs:1,reads:0,text:'SELECT 60'}));
   await profiler.getByText(/61 sự kiện/).waitFor();
-  check(await profiler.locator('.trace-sql').inputValue()==='SELECT 0'&&await traceGrid.locator('td.grid-selected').count()===4,'Profiler preserves the selected row and range while live events arrive');
+  const selectedLongSql=await profiler.locator('.trace-sql').inputValue();
+  check(selectedLongSql.replaceAll('\0','').replaceAll('\r\n','\n')===normalizedLongProfilerSql.replaceAll('\r\n','\n')&&
+    await traceGrid.locator('td.grid-selected').count()===4,'Profiler preserves the selected row and range while live events arrive');
   await profiler.getByRole('button',{name:'Sao chép SQL',exact:true}).click();
-  await page.waitForFunction(()=>window.__nativeCalls.some(c=>c.method==='clipboard.write'&&c.payload.text==='SELECT 0'));
+  await page.waitForFunction(sql=>window.__nativeCalls.some(c=>c.method==='clipboard.write'&&c.payload.text===sql),normalizedLongProfilerSql);
   await profiler.locator('.trace-sql').focus();
+  const fullCopiesBefore=await page.evaluate(sql=>window.__nativeCalls.filter(c=>c.method==='clipboard.write'&&c.payload.text===sql).length,normalizedLongProfilerSql);
+  await page.keyboard.press('Control+a');
+  await page.keyboard.press('Control+c');
+  await page.waitForFunction(({sql,before})=>window.__nativeCalls.filter(c=>c.method==='clipboard.write'&&c.payload.text===sql).length>before,
+    {sql:normalizedLongProfilerSql,before:fullCopiesBefore});
+  check((await page.evaluate(()=>window.__nativeCalls.filter(c=>c.method==='clipboard.write').at(-1)?.payload.text.split(/\r?\n/).length))===112,
+    'Profiler Ctrl+A and Ctrl+C copy all 112 SQL lines across an embedded NUL separator');
   await profiler.locator('.trace-sql').evaluate(el=>el.setSelectionRange(0,6));
   await page.keyboard.press('Control+c');
-  await page.waitForFunction(()=>window.__nativeCalls.some(c=>c.method==='clipboard.write'&&c.payload.text==='SELECT'));
+  await page.waitForFunction(text=>window.__nativeCalls.some(c=>c.method==='clipboard.write'&&c.payload.text===text),normalizedLongProfilerSql.slice(0,6));
   check(true,'Profiler copies full SQL by button and selected text with Ctrl+C');
   await profiler.getByRole('button',{name:'Theo dõi cuối lưới'}).click();
   await page.waitForFunction(()=>document.querySelector('.trace-sql')?.value==='SELECT 60');
@@ -851,6 +882,46 @@ Trạng thái: 1-Còn sử dụng, 0-Không còn sử dụng`);
     check(await catalog.getByRole('button',{name:'Thiết kế bảng SQL'}).getAttribute('aria-pressed')==='true',
       'Create catalog keeps the SQL designer available');
     check(errors.length===0,'No uncaught browser errors');
+  } else if(process.argv.includes('--source-collection-regression')){
+    await page.locator('.project-row').filter({hasText:'Dự án thử UI'}).click();
+    await page.locator('dialog').waitFor({state:'detached'});
+    await page.getByRole('button',{name:'Chức năng',exact:true}).click();
+    await page.getByRole('button',{name:'Nhân viên',exact:true}).dblclick();
+    const sourceFile=page.locator('.project-file-tree').getByTitle('C:\\Fixture\\App_Data\\Controllers\\Grid\\nhanvien.f',{exact:true});
+    await sourceFile.waitFor();
+    await sourceFile.click({button:'right'});
+    await page.getByRole('menuitem',{name:'Source Collection',exact:true}).click();
+    const collection=page.getByRole('dialog',{name:'Source Collection',exact:true});
+    const versionSelect=collection.getByRole('button',{name:'Phiên bản',exact:true});
+    await versionSelect.click();
+    const versionList=collection.getByRole('tree',{name:'Phiên bản',exact:true});
+    const groups=versionList.locator('.select-option-group-toggle');
+    check((await groups.allTextContents()).join('|')==='FAW|FBO-FBI',
+      'Source Collection renders one parent node for each major version group');
+    check(await versionList.getByText(/ZZZCHÉP/).count()===0,
+      'Source Collection excludes ZZZ instruction folders from the version tree');
+    check(await groups.filter({hasText:'FAW'}).getAttribute('aria-expanded')==='true' &&
+      await groups.filter({hasText:'FBO-FBI'}).getAttribute('aria-expanded')==='false' &&
+      (await versionList.locator('[data-select-option]').allTextContents()).map(text=>text.trim()).join('|')==='FAW30|FAW22',
+      'The selected major group starts expanded while other branches stay collapsed');
+    await groups.filter({hasText:'FBO-FBI'}).click();
+    check((await versionList.locator('.select-option-branch').filter({hasText:'FBO-FBI'}).locator('[data-select-option]').allTextContents())
+      .map(text=>text.trim()).join('|')==='FBOR2SP24.2.2|FBOR2SP23|FBOR2SP22.9',
+      'Expanded branches sort versions from newest to oldest');
+    const groupStyle=await groups.first().evaluate(element=>({
+      weight:Number.parseInt(getComputedStyle(element).fontWeight,10),
+      background:getComputedStyle(element).backgroundColor,
+    }));
+    check(groupStyle.weight>=700 && !['transparent','rgba(0, 0, 0, 0)'].includes(groupStyle.background),
+      'Major version parent nodes use bold text and a background');
+    check((await collection.locator('.select-options-floating').boundingBox()).width>=400,
+      'The version tree opens in a wider selection area');
+    await collection.getByRole('searchbox',{name:'Tìm phiên bản'}).fill('FBO-FBI');
+    check((await versionList.locator('[data-select-option]').allTextContents()).map(text=>text.trim()).join('|')===
+      'FBOR2SP24.2.2|FBOR2SP23|FBOR2SP22.9' && (await groups.allTextContents()).join('|')==='FBO-FBI',
+      'Version search can filter by the major version heading');
+    await page.screenshot({path:out+'/source-collection-version-groups.png',animations:'disabled'});
+    check(errors.length===0,'No uncaught browser errors');
   } else if(process.argv.includes('--entity-peek-regression')){
     await page.evaluate(()=>{window.__entityFixture=true;});
     await page.locator('.project-row').filter({hasText:'Dự án thử UI'}).click();
@@ -914,19 +985,24 @@ Trạng thái: 1-Còn sử dụng, 0-Không còn sử dụng`);
     await page.waitForFunction(()=>[...document.querySelectorAll('.entity-peek')].at(-1)?.querySelector('.view-lines')?.textContent.replace(/\s/g,' ').includes('<!ENTITY UnitBeforeInsert'));
     check(true,'The explicit option switches the callout to the entire source file');
     await childPeek.screenshot({path:out+'/entity-peek.png',animations:'disabled'});
-    await childPeek.getByRole('button',{name:'Đóng xem nhanh entity Job.Nested.Key.a',exact:true}).click();
+    await page.locator('.entity-peek-scroll-lock').click({position:{x:5,y:100}});
     await page.waitForFunction(()=>document.querySelectorAll('.entity-peek').length===1);
     check(await rootPeek.getByText('UnitBeforeInsert',{exact:true}).isVisible(),
-      'Closing a child callout keeps its parent open');
+      'One outside click closes only the newest callout');
     await rootPeekEditor.click({position:{x:220,y:35}});
     await page.keyboard.press('Control+Home');
     for(let index=0;index<'if exists(select 1 where &J'.length;index++)await page.keyboard.press('ArrowRight');
     await page.keyboard.press('F12');
     await page.waitForFunction(()=>document.querySelectorAll('.entity-peek').length===2);
-    await rootPeek.getByRole('button',{name:'Đóng xem nhanh entity UnitBeforeInsert',exact:true}).click();
+    await page.getByRole('button',{name:'Lệnh',exact:true}).click();
+    await page.getByRole('dialog',{name:'Bảng lệnh'}).getByRole('button',{name:'Đóng',exact:true}).click();
+    check(await page.locator('.entity-peek').count()===2,'Toolbar works while entity callouts are open');
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(()=>document.querySelectorAll('.entity-peek').length===1);
+    await page.keyboard.press('Escape');
     await page.waitForFunction(()=>document.querySelectorAll('.entity-peek').length===0);
     check(await page.evaluate(()=>!document.body.classList.contains('entity-peek-scroll-locked')),
-      'Closing a parent callout closes its descendant branch and releases the scroll lock');
+      'Escape closes one callout at a time and releases the scroll lock after the last');
     check(errors.length===0,'No uncaught browser errors');
   } else if(process.argv.includes('--xml-panel-regression')){
     await page.locator('.project-row').filter({hasText:'Dự án thử UI'}).click();
@@ -1020,11 +1096,77 @@ Trạng thái: 1-Còn sử dụng, 0-Không còn sử dụng`);
     await page.locator('#results-panel .data-grid').waitFor();
     check(await page.locator('#results-panel .panel-tabs button').filter({hasText:'Kết quả'}).first().getAttribute('aria-selected')==='true',
       'A query with a result set still stays on the Results tab');
+    await page.getByRole('button',{name:'Xuất CSV',exact:true}).click();
+    await page.waitForFunction(()=>window.__nativeCalls.some(call=>call.method==='text.export' &&
+      call.payload.name==='results.csv' && call.payload.text.charCodeAt(0)===0xfeff &&
+      call.payload.text.includes('Tiếng Việt')));
+    check(true,'CSV export sends a UTF-8 BOM and preserves Vietnamese text');
     check(errors.length===0,'No uncaught browser errors');
+  } else if(process.argv.includes('--sql-error-routing-regression')){
+    await page.locator('.project-row').filter({hasText:'Dự án thử UI'}).click();
+    await page.locator('dialog').waitFor({state:'detached'});
+    await page.getByRole('button',{name:'SQL mới',exact:true}).click();
+    await page.locator('.monaco-editor').first().click({position:{x:160,y:35}});
+    await page.keyboard.insertText('CREATE SEQUENCE INVALID_SEQUENCE_FIXTURE AS INT;');
+    await page.keyboard.press('F5');
+    const sqlError="Unknown object type 'SEQUENCE' used in a CREATE, DROP, or ALTER statement.";
+    const resultsPanel=page.locator('#results-panel');
+    await resultsPanel.locator('.messages').getByText(sqlError,{exact:true}).waitFor();
+    check(await resultsPanel.getByRole('button',{name:'Thông báo',exact:true}).getAttribute('aria-selected')==='true' &&
+      await page.locator('.editor-diagnostic-banner').count()===0 &&
+      await page.locator('.table-notice[role="alert"]').count()===0,
+      'SQL execution errors open Messages below without using an editor banner or global notice');
+    await resultsPanel.getByRole('button',{name:/^Vấn đề/}).click();
+    await resultsPanel.locator('.tool-list button').filter({hasText:sqlError}).waitFor();
+    check(await resultsPanel.getByRole('button',{name:/^Vấn đề/}).textContent().then(text=>text.includes('1')),
+      'SQL line diagnostics remain available in the Problems panel');
+    await page.getByRole('button',{name:'Chức năng',exact:true}).click();
+    await page.getByRole('button',{name:'Nhân viên',exact:true}).dblclick();
+    const diagnosticPath='C:\\Fixture\\App_Data\\Controllers\\Filter\\nhanvien.xml';
+    const diagnosticFile=page.locator('.project-file-tree').getByTitle(diagnosticPath,{exact:true});
+    await diagnosticFile.waitFor();
+    await diagnosticFile.click();
+    const entityBanner=page.locator('.editor-diagnostic-banner').filter({hasText:'MissingEntity'});
+    await entityBanner.waitFor();
+    check((await entityBanner.textContent()).includes(diagnosticPath),
+      'Undeclared XML entities still use the persistent editor banner');
+    await page.getByRole('tab',{name:/^Untitled-.*\.sql/}).click();
+    await resultsPanel.getByRole('button',{name:'Thông báo',exact:true}).click();
+    await resultsPanel.locator('.messages').getByText(sqlError,{exact:true}).waitFor();
+    check(await page.locator('.editor-diagnostic-banner').count()===0,
+      'Returning to the SQL tab restores its error below without showing an editor banner');
+    check(errors.length===0,'No uncaught browser errors');
+  } else if(process.argv.includes('--shortcut-regression')){
+    await page.locator('.project-row').filter({hasText:'Dự án thử UI'}).click();
+    await page.locator('dialog').waitFor({state:'detached'});
+    await page.getByRole('button',{name:'Lệnh',exact:true}).click();
+    await page.getByRole('button',{name:'Chỉnh sửa phím tắt',exact:true}).click();
+    await page.getByRole('searchbox',{name:'Tìm phím tắt'}).fill('Tạo file SQL');
+    const shortcutInput=page.getByRole('textbox',{name:'Tạo file SQL phím 1',exact:true});
+    await shortcutInput.click();
+    await page.keyboard.press('Control+Alt+q');
+    const capturedShortcut=await shortcutInput.inputValue();
+    check(capturedShortcut==='Ctrl+Alt+Q','Shortcut editor captures the gesture: '+capturedShortcut);
+    const shortcutSave=page.getByRole('button',{name:'Lưu cài đặt',exact:true});
+    await shortcutSave.click();
+    const shortcutError=page.locator('dialog .form-error');
+    await page.waitForFunction(()=>window.__nativeCalls.some(call=>call.method==='settings.save' &&
+      call.payload.saveShortcuts && call.payload.settings.shortcuts['file.new']?.[0]==='Ctrl+Alt+Q'),null,{timeout:4000})
+      .catch(async err=>{throw new Error((await shortcutError.allTextContents()).join(' ') || err.message);});
+    await page.locator('dialog').waitFor({state:'detached'});
+    await page.getByRole('button',{name:'Lệnh',exact:true}).click();
+    await page.getByRole('dialog',{name:'Bảng lệnh'}).getByText(/Ctrl\+Alt\+Q/).waitFor();
+    check(errors.length===0,'Palette opens shortcut editing and shows the saved gesture');
   } else if(process.argv.includes('--menu-regression')){
     await page.locator('.project-row').filter({hasText:'Dự án thử UI'}).click();
     await page.locator('dialog').waitFor({state:'detached'});
     await page.getByRole('button',{name:'Chức năng',exact:true}).click();
+    const menuSearch=page.getByRole('textbox',{name:'Tìm chức năng',exact:true});
+    await menuSearch.fill('SYSTEMCONFIG.ASPX');
+    await page.locator('.function-row .search-hit').getByText('Cấu hình hệ thống',{exact:true}).waitFor();
+    check(await page.locator('.function-row .search-hit').count()===1,
+      'Menu search matches the Main filename regardless of letter case');
+    await menuSearch.clear();
     const menuParent=page.getByRole('button',{name:'Hệ thống',exact:true});
     await menuParent.click();
     const menuChild=page.getByRole('button',{name:'Cấu hình hệ thống',exact:true});
@@ -1039,6 +1181,22 @@ Trạng thái: 1-Còn sử dụng, 0-Không còn sử dụng`);
       await selectedMenuRow.getAttribute('data-selected')==='true' &&
       await menuChild.evaluate(element=>Number.parseInt(getComputedStyle(element).fontWeight,10)>=700),
       'Returning to Functions keeps its parent expanded and emphasizes the selected menu row');
+    await page.getByRole('button',{name:'menu-child',exact:true}).click();
+    await page.getByRole('tab',{name:/Menu ERP.*menu-child/}).waitFor();
+    check(await page.getByRole('tab',{name:'systemconfig.aspx',exact:true}).count()===0,
+      'Clicking the Web menu ID opens the F3 editor');
+    await menuChild.dblclick();
+    const childMain=page.locator('.project-file-tree').getByTitle('C:\\Fixture\\Main\\systemconfig.aspx',{exact:true});
+    await childMain.click();
+    await page.getByRole('tab',{name:'systemconfig.aspx',exact:true}).waitFor();
+    await page.getByRole('button',{name:'Chức năng',exact:true}).click();
+    const opensBeforeMenuBrowse=await page.evaluate(()=>window.__nativeCalls.filter(call=>call.method==='document.open').length);
+    await menuChild.dblclick();
+    check(await fileNav.getAttribute('aria-selected')==='true' &&
+      await childMain.getAttribute('aria-current')===null &&
+      await page.evaluate(before=>window.__nativeCalls.filter(call=>call.method==='document.open').length===before,opensBeforeMenuBrowse),
+      'Clicking the function name switches to File without selecting Main');
+    await page.getByRole('button',{name:'Chức năng',exact:true}).click();
     await menuChild.click({button:'right'});
     const refreshMenu=page.getByRole('button',{name:'Làm mới menu',exact:true});
     await refreshMenu.waitFor();
@@ -1323,22 +1481,34 @@ Trạng thái: 1-Còn sử dụng, 0-Không còn sử dụng`);
   await page.locator('.menu-kind-tabs').getByRole('tab',{name:'Web',exact:true}).click();
   check(await page.locator('.function-separator').count()===1,'Dash function renders as horizontal separator');
   const functionRow=page.getByRole('button',{name:'Nhân viên',exact:true});
-  check(await page.getByRole('button',{name:'menu-parent',exact:true}).count()===0,
-    'Parent functions keep menu ID text without a source action');
+  check(await page.getByRole('button',{name:'menu-parent',exact:true}).count()===1,
+    'Parent Web menu IDs also offer editing');
   await functionRow.click();
   check(await functionRow.getAttribute('aria-current')==='page' &&
     await page.evaluate(before=>window.__nativeCalls.filter(c=>c.method==='document.open').length===before,openedBefore),
     'Single click selects the ERP function');
-  await page.getByRole('button',{name:'menu1',exact:true}).click();
+  await functionRow.dblclick();
   const fileTree=page.locator('.project-file-tree');
   const dirPath='C:\\Fixture\\App_Data\\Controllers\\Dir';
   const gridPath='C:\\Fixture\\App_Data\\Controllers\\Grid';
   const dirFile=fileTree.getByTitle(dirPath+'\\nhanvien.xml',{exact:true});
   const gridFile=fileTree.getByTitle(gridPath+'\\nhanvien.xml',{exact:true});
   await dirFile.waitFor();await gridFile.waitFor();
+  check(await page.getByRole('button',{name:'File',exact:true}).getAttribute('aria-selected')==='true' &&
+    await page.evaluate(before=>window.__nativeCalls.filter(c=>c.method==='document.open').length===before,openedBefore),
+    'Double click opens the ERP controller tree without opening Main');
+  const mainFile=fileTree.getByTitle('C:\\Fixture\\Main\\nhanvien.aspx',{exact:true});
+  await mainFile.click();
   await page.getByRole('tab',{name:'nhanvien.aspx',exact:true}).waitFor();
-  check(await fileTree.getByTitle('C:\\Fixture\\Main\\nhanvien.aspx',{exact:true}).getAttribute('aria-current')==='page',
-    'Menu ID opens Main and reveals its controller tree immediately');
+  check(await mainFile.getAttribute('aria-current')==='page',
+    'Opening Main from File selects the source');
+  await page.getByRole('button',{name:'Chức năng',exact:true}).click();
+  const opensBeforeBrowse=await page.evaluate(()=>window.__nativeCalls.filter(c=>c.method==='document.open').length);
+  await page.getByRole('button',{name:'Nhân viên',exact:true}).dblclick();
+  check(await page.getByRole('button',{name:'File',exact:true}).getAttribute('aria-selected')==='true' &&
+    await mainFile.getAttribute('aria-current')===null &&
+    await page.evaluate(before=>window.__nativeCalls.filter(c=>c.method==='document.open').length===before,opensBeforeBrowse),
+    'Function name switches to File without pointing at Main or opening another document');
   await page.getByRole('button',{name:'Chức năng',exact:true}).click();
   const functionRowAgain=page.getByRole('button',{name:'Nhân viên',exact:true});
   await functionRowAgain.focus();await functionRowAgain.press('F12');
@@ -1373,8 +1543,8 @@ Trạng thái: 1-Còn sử dụng, 0-Không còn sử dụng`);
   check(await fileTree.getByRole('button',{name:'App_Data',exact:true}).getAttribute('aria-expanded')==='true' &&
     await fileTree.getByRole('button',{name:'Controllers',exact:true}).getAttribute('aria-expanded')==='true',
     'ERP function reveals actual App_Data and Controllers ancestors');
-  check(await page.evaluate(before=>window.__nativeCalls.filter(c=>c.method==='document.open').length===before,openedBefore),
-    'Opening a function expands folders without opening a document');
+  check(await page.evaluate(before=>window.__nativeCalls.filter(c=>c.method==='document.open').length===before+1,openedBefore),
+    'Browsing controllers opens only the Main file explicitly selected in File');
   const diagnosticPath=dirPath.replace(/\\Dir$/,'\\Filter')+'\\nhanvien.xml';
   const diagnosticFile=fileTree.getByTitle(diagnosticPath,{exact:true});
   await diagnosticFile.waitFor();

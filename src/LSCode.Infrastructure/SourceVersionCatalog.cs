@@ -6,10 +6,13 @@ namespace LSCode.Infrastructure;
 internal static class SourceVersionCatalog
 {
     internal sealed record Entry(string Group, string Version, string Root);
-    private static readonly string[] Groups = ["FAW", "FBO-FBI", "HRM"];
+    private static readonly string[] Groups = ["FAP", "FastFE", "FAW", "FBFE", "FBO-FBI", "FE_TT78", "HDDV", "QLTB", "HRM"];
     private static string GroupPath(string group) => Path.Combine(SettingsStore.Root, $"source-versions-{group}.json");
+    private static bool IsSelectableVersion(string version) =>
+        !version.TrimStart().StartsWith("ZZZ", StringComparison.OrdinalIgnoreCase);
 
     internal static Entry[] Load() => Groups.SelectMany(group => ReadGroup(GroupPath(group)))
+        .Where(entry => IsSelectableVersion(entry.Version))
         .OrderBy(entry => entry.Version, StringComparer.OrdinalIgnoreCase)
         .ThenBy(entry => entry.Root, StringComparer.OrdinalIgnoreCase).ToArray();
 
@@ -20,16 +23,16 @@ internal static class SourceVersionCatalog
     internal static Entry[] Discover(string group, CancellationToken ct)
     {
         const string collection = @"\\172.168.5.14\SourceCollection";
-        string[] paths = group switch
-        {
-            "FAW" or "FBO-FBI" => Directory.EnumerateDirectories(Path.Combine(collection, group), "*",
+        if (!Groups.Contains(group, StringComparer.OrdinalIgnoreCase))
+            throw new ArgumentException("Nhóm phiên bản không hợp lệ.");
+        string[] paths = group.Equals("HRM", StringComparison.OrdinalIgnoreCase)
+            ? [@"\\172.168.5.14\CustomerPro\HRM\DEMO24\SP24", @"\\172.168.5.14\CustomerPro\HRM\HRM227\SP227"]
+            : Directory.EnumerateDirectories(Path.Combine(collection, group), "*",
                 new EnumerationOptions { AttributesToSkip = FileAttributes.ReparsePoint, IgnoreInaccessible = false })
-                .Select(path => { ct.ThrowIfCancellationRequested(); return path; }).ToArray(),
-            "HRM" => [@"\\172.168.5.14\CustomerPro\HRM\DEMO24\SP24", @"\\172.168.5.14\CustomerPro\HRM\HRM227\SP227"],
-            _ => throw new ArgumentException("Nhóm phiên bản không hợp lệ.")
-        };
+                .Select(path => { ct.ThrowIfCancellationRequested(); return path; }).ToArray();
         ct.ThrowIfCancellationRequested();
-        return paths.Select(path => new Entry(group, Path.GetFileName(Path.TrimEndingDirectorySeparator(path)), path)).ToArray();
+        return paths.Select(path => new Entry(group, Path.GetFileName(Path.TrimEndingDirectorySeparator(path)), path))
+            .Where(entry => IsSelectableVersion(entry.Version)).ToArray();
     }
 
     internal static Entry[] SaveGroup(string group, Entry[] entries, CancellationToken ct)

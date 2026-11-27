@@ -1,10 +1,24 @@
 # Mục tiêu LSCode
 
+Khi mở source của một menu ERP, cây File và danh sách tài nguyên F3 lần theo Grid con và các lời gọi form có tên cố định trong Main hoặc controller. Mỗi form liên quan hiện các file .f/.xml tìm được, kể cả form gọi tiếp form khác.
+
+Danh sách phiên bản trong **Source Collection** xổ ra theo dạng cây. Phân hệ/sản phẩm lấy từ folder mẹ là nút cha in đậm, có nền và có mũi tên đóng/mở; các folder con là phiên bản được thụt vào. Nhóm chứa phiên bản đang chọn tự mở, các nhóm khác mặc định thu gọn. Trong từng nhóm, phiên bản mới được xếp trước phiên bản cũ; ô tìm phiên bản tìm được cả mã nhóm. Vùng xổ xuống rộng tối thiểu 420 px khi màn hình cho phép. Folder hướng dẫn có tên bắt đầu bằng `ZZZ` không được nạp vào catalog hoặc cây phiên bản.
+
+Mỗi lần bấm nền editor ngoài các pop-up entity F12 hoặc nhấn Esc chỉ đóng pop-up mở gần nhất. Khóa cuộn giới hạn ở nền editor cho đến khi đóng pop-up cuối. Các chức năng ngoài editor vẫn hoạt động.
+
+Xuất CSV từ kết quả SQL dùng UTF-8 có BOM để Excel nhận đúng dấu tiếng Việt khi mở trực tiếp.
+
+Bảng lệnh có biểu tượng bánh răng **Chỉnh sửa phím tắt** cạnh nút đóng, mở trực tiếp trang Phím tắt. Phím tắt cá nhân được lưu theo tài khoản Windows trong file mã hóa riêng ngoài thư mục cài đặt. Bản cập nhật dùng lại các thiết lập đã lưu khi giữ cùng thư mục dữ liệu người dùng.
+
+Sau khi F5, truy vấn trả bảng tự mở **Kết quả**, kể cả bảng rỗng. SQL Server trả số dòng ảnh hưởng âm thì bỏ qua số đếm. Lệnh thay đổi dữ liệu thành công hiển thị **Thực hiện lệnh thành công, đã thay đổi N dòng.**; lệnh thành công không trả bảng, số dòng hay thông báo hiển thị **Các lệnh đã được thực hiện thành công.**
+
 Mở **SQL Profiler** sẽ tự lấy server và database từ tab hiện tại hoặc dự án, điền bộ lọc và bắt đầu thu sự kiện. Dùng đường dẫn `PROFILER.EXE` đã chọn hoặc bản SSMS mặc định khi có. Khi thiếu SSMS, dùng SQL Trace tích hợp cho SQL Server 2008, máy chủ SQL2014 có tài khoản Profiler riêng hoặc khi người dùng nhập tài khoản thu riêng; SQL Server 2012 trở lên có thể dùng Extended Events. WebView mặc định dùng tài khoản thu riêng cho Profiler và cho phép nhập tài khoản khác để chạy thủ công. Batch tạo/dọn trace không chứa cú pháp `THROW` để tương thích SQL Server 2008. Người dùng vẫn có thể chọn `PROFILER.EXE` trong Cài đặt hoặc ngay trong tab Profiler.
 
 Sau khi Dừng rồi Chạy lại, SQL Profiler tiếp tục nối sự kiện mới vào lưới hiện có. Dữ liệu đã thu chỉ được xóa khi người dùng bấm **Xóa**.
 
-Trong lưới SQL Profiler, nhấp một lần vào ô cột **SQL** chỉ chọn/xem; nhấp đúp mới sao chép toàn bộ nội dung gốc và hiện thông báo **Đã sao chép SQL.**, kể cả khi ô chỉ hiển thị một phần. Sự kiện lỗi SQL có severity từ 11 phải được ghép với câu lệnh đang chạy: câu SQL gây lỗi được tô nền đỏ, còn dòng thông báo ngay sau nó hiển thị chữ đỏ. Cảnh báo severity dưới 11, gồm `Warning: Null value is eliminated...`, vẫn hiển thị nhưng không tô đỏ cảnh báo hoặc câu SQL. Bộ thu phải lấy cả sự kiện bắt đầu câu lệnh, severity và thông báo lỗi để vẫn hiển thị được câu SQL không phát sinh sự kiện hoàn tất.
+Trong lưới SQL Profiler, cột **ID** hiển thị tên ứng dụng đã tạo kết nối (`ApplicationName`/`client_app_name`), ví dụ `1` hoặc `.Net SqlClient Data Provider`. Nhấp một lần vào ô cột **SQL** chỉ chọn/xem; nhấp đúp mới sao chép toàn bộ nội dung gốc và hiện thông báo **Đã sao chép SQL.**, kể cả khi ô chỉ hiển thị một phần. Sự kiện lỗi SQL có severity từ 11 phải được ghép với câu lệnh đang chạy: câu SQL gây lỗi được tô nền đỏ, còn dòng thông báo ngay sau nó hiển thị chữ đỏ. Cảnh báo severity dưới 11, gồm `Warning: Null value is eliminated...`, vẫn hiển thị nhưng không tô đỏ cảnh báo hoặc câu SQL. Bộ thu phải lấy cả sự kiện bắt đầu câu lệnh, severity và thông báo lỗi để vẫn hiển thị được câu SQL không phát sinh sự kiện hoàn tất.
+
+Ô **SQL đang chọn** của Profiler hỗ trợ Ctrl+A, Ctrl+C và nút **Sao chép SQL** với toàn bộ nội dung gốc. SQL dài qua nhiều khối dữ liệu trace không được dừng ở ký tự NUL nội bộ hoặc mất các dòng phía sau.
 
 Khi mở hoặc chuyển sang file `.xml`, panel Kết quả/Thông báo/Vấn đề tự thu gọn để dành chiều cao cho editor. Dữ liệu trong panel được giữ nguyên và người dùng có thể mở lại ngay từ thanh panel.
 
@@ -21,7 +35,7 @@ Cung cấp một IDE Windows cho người phát triển và bảo trì FAST ERP.
 | Phạm vi | Tiêu chí nghiệm thu |
 | --- | --- |
 | Editor và workspace | Mở, tìm kiếm, định dạng, chia pane và lưu file. Kiểm tra thay đổi ngoài ứng dụng. Tệp XML luôn được lưu bằng UTF-8 có BOM. Khai báo encoding, nếu có, khớp với định dạng khi lưu. Các định dạng khác giữ encoding khi lưu. Kéo file từ Explorer vào cửa sổ sẽ mở file; Ctrl+Shift+P mở bảng lệnh và focus ô tìm. Snippet người dùng có khóa bắt đầu bằng `/` xuất hiện ngay trong gợi ý SQL; Enter/Tab thay khóa bằng nội dung và đặt caret theo vị trí đã lưu. Cửa sổ không chrome có viền bao theo theme để phân biệt khi chồng nhiều cửa sổ. Toolbar editor không hiện lối tắt Generate Update/SQL Watch; ô tìm và target được co giãn nhưng nút Chạy luôn đọc trên một dòng khi đổi kích thước cửa sổ. |
-| Dự án, menu và source ERP | Chọn hoặc đồng bộ profile, import/export qua tệp, giữ đúng ngữ cảnh dự án khi mở menu, controller và Source Collection. Panel Chức năng có Web/Mobile; Web giữ `wcommand`, Mobile lazy-load `dvcommand`, cache theo project/SYS/App/identity/loại menu và refresh chủ động. Nhấp tên một lần để chọn mục ERP. Nhấp đúp tên để mở cây controller theo link hoặc `sysid`. Nhấp Menu ID để mở tệp chính. Cây giữ nhánh đang mở và dòng đang chọn khi đổi tab hoặc dùng **Làm mới menu**. F12 và menu chuột phải chỉ áp dụng Web để sinh script INSERT `wcommand` và `command`. |
+| Dự án, menu và source ERP | Chọn hoặc đồng bộ profile, import/export qua tệp, giữ đúng ngữ cảnh dự án khi mở menu, controller và Source Collection. Panel Chức năng có Web/Mobile; Web giữ `wcommand`, Mobile lazy-load `dvcommand`, cache theo project/SYS/App/identity/loại menu và refresh chủ động. Nhấp đúp tên menu tải cây controller theo link hoặc `sysid` rồi chuyển sang tab File nhưng không mở hoặc trỏ vào file nào; bấm mã menu Web mở form sửa như F3. Khi quay lại tab Chức năng, trạng thái mở của cây và toàn dòng menu vừa chọn vẫn được giữ và tô đậm. Menu chuột phải có **Làm mới menu** để bỏ qua cache và tải các mục vừa thêm mà không mất nhánh đang mở hoặc lựa chọn còn hợp lệ. F12 và các thao tác sửa/sinh script trong menu chuột phải chỉ áp dụng Web để sinh script INSERT `wcommand` và `command`. |
 | SQL và danh mục | Target App/SYS gắn với từng tab. Truy vấn có thể hủy. Cấu trúc và dữ liệu có SELECT, WHERE chiếm 70% và ORDER BY chiếm 30% trên cùng hàng; màn hẹp tự xếp dọc. Trạng thái/lỗi dùng toast nội bộ và xác nhận xóa dùng modal LSCode, không gọi hộp thoại hệ thống. Lưới dùng cùng ngôn ngữ với kết quả SQL: kéo chọn vùng, chọn dòng/cột/toàn bảng, Ctrl+C, sửa trực tiếp ô và F8 xóa các dòng được chọn theo khóa chính sau bước xác nhận; dropdown hiển thị App/Sys, Ctrl+Alt+D đổi target của tab bảng. Ctrl+D tại bảng lưu khóa dữ liệu vào Generate Update; menu Tập lệnh mở trên top-layer để không bị toolbar cắt. Nhấp chuột phải trên bề mặt dữ liệu mở cùng menu với nút Tập lệnh, gồm đóng băng đến cột đang trỏ, thêm key vào SQL Data, tạo bảng, INSERT kết quả hiện tại và xóa bảng; chuột phải trong ô đang nhập vẫn giữ menu soạn thảo của hệ thống. Đóng băng giữ cột số dòng và tất cả cột từ đầu đến cột đích khi cuộn ngang; chọn lại chức năng từ toolbar hoặc menu chuột phải sẽ bỏ đóng băng. Gợi ý SQL gồm schema, cột, biến, bảng tạm và snippet nhanh khai báo trong ứng dụng. Thanh Kết quả đếm thời gian mỗi 100 ms khi đang chạy và giữ tổng thời gian sau khi hoàn tất, lỗi hoặc dừng. |
 | Công cụ tích hợp | Dùng Generate Update, Template Studio, Profiler và SQL Watch trên WebView. Ctrl+Shift+4 mở Generate Update. Cài đặt phím tắt là một tab riêng, có tìm kiếm và nhóm theo chức năng. Thao tác breakpoint/step được chuyển sang SSDT. |
 | Phân phối | Build WebView và các project Template Studio từ checkout LSCode. Xác minh gói cài và smoke trên Windows x64. |
@@ -36,11 +50,17 @@ Sau khi tạo bảng trong LSCode, ô FROM tìm được bảng mới ngay khi q
 
 Khi F5 thực thi thành công một đoạn SQL không trả tập kết quả, LSCode tự mở tab **Thông báo**. Nội dung do SQL Server trả về được giữ nguyên; nếu không có nội dung, hiển thị câu tiếng Việt **Các lệnh đã được thực hiện thành công.**
 
+Khi F5 gặp lỗi SQL, LSCode tự mở **Thông báo** trong panel dưới và giữ lỗi theo đúng tab SQL; vị trí lỗi vẫn được liệt kê trong **Vấn đề** để nhảy đến dòng tương ứng. Lỗi SQL không được hiện ở banner phía trên editor hoặc thông báo nổi toàn cục. Banner đỏ phía trên editor chỉ dành cho lỗi phân tích XML/DTD của file `.xml`/`.f`, đặc biệt entity chưa khai báo.
+
 Trong **Cấu trúc và dữ liệu** của WebView, truy vấn có thể duyệt qua dòng thứ 1.000 bằng các nút chuyển trang. SQL chỉ đọc dữ liệu của từng trang có giới hạn dung lượng, còn lưới chỉ dựng các hàng gần vùng đang xem. Chuyển trang dùng SELECT, WHERE và ORDER BY của lần chạy hiện tại. Các thao tác chọn, sửa, xóa, sao chép và xuất INSERT áp dụng cho dữ liệu trên trang đang xem. Ô **Tìm kiếm** ở thanh bên trái tự tìm theo nội dung khi gõ, hiện mỗi tệp khớp một lần và mở đến vị trí khớp đầu tiên.
 
 Khi lưu **Dynamic Template Studio**, lỗi kiểm tra dữ liệu chỉ rõ template, bảng, field và ô nhập nếu xác định được. Chọn lỗi sẽ mở đúng vị trí sửa. Thuộc tính template nằm dưới danh sách bảng ở cột trái. Chọn một dòng field sẽ mở thuộc tính field phía trên lưới.
 
 ## Tải menu nhanh và menu Mobile
+
+Nhấp mã `wcommand` trong cây Web hoặc kết quả tìm kiếm mở form sửa menu giống F3.
+
+Ô tìm chức năng lọc thêm theo trường Main, gồm cả tên file đầy đủ hoặc một phần, không phân biệt hoa thường.
 
 ### Tiêu chí nghiệm thu form F3 Web
 
