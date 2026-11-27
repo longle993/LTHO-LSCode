@@ -17,6 +17,8 @@ Environment.SetEnvironmentVariable("LSCODE_DATA_HOME", root);
 var checks = 0;
 void Check(bool value, string name) { if (!value) throw new Exception("FAIL " + name); checks++; Console.WriteLine("PASS " + name); }
 async Task Reject<T>(Func<Task> work, string name) where T : Exception { try { await work(); throw new Exception("FAIL " + name); } catch (T) { checks++; Console.WriteLine("PASS " + name); } }
+Check(SqlRunner.AffectedRowsMessage(4) == "Thực hiện lệnh thành công, đã thay đổi 4 dòng.",
+    "SQL affected-row message is a clear Vietnamese success sentence");
 var nextCommandMethod = typeof(DeveloperTools).Assembly.GetType("LSCode.Infrastructure.MenuEditor")!
     .GetMethod("NextCommandId", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
 string NextCommand(HashSet<string> used) => (string)nextCommandMethod.Invoke(null, [used])!;
@@ -61,6 +63,10 @@ Check(UsesDedicatedProfilerLogin(@"172.168.5.14\SQL2008") &&
     !UsesDedicatedProfilerLogin(@"172.168.5.14\SQL2022"),
     "SQL2008 and SQL2014 known instances use the dedicated Profiler login");
 var traceStreamType = typeof(DeveloperTools).Assembly.GetType("LSCode.Infrastructure.SqlTraceStream")!;
+var decodeTraceText = traceStreamType.GetMethod("DecodeText",
+    System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
+Check((string)decodeTraceText.Invoke(null, [Encoding.Unicode.GetBytes("dòng 106\0dòng 107\0")])! == "dòng 106dòng 107",
+    "SQL Trace removes embedded UTF-16 NUL separators before clipboard use");
 string TraceBatch(string name) => (string)traceStreamType.GetField(name,
     System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!.GetRawConstantValue()!;
 var configureTraceSql = TraceBatch("ConfigureSql");
@@ -442,6 +448,40 @@ await using (var projectTools = new DeveloperTools())
     Directory.CreateDirectory(Path.Combine(resourceControllers, "Filter"));
     await File.WriteAllTextAsync(Path.Combine(resourceControllers, "Filter", "Fixture.xml"),
         "<filter><title v='Mẫu' e='Sample'/><fields><field name='old_code'/></fields></filter>", new UTF8Encoding(true));
+    await File.AppendAllTextAsync(Path.Combine(resourceMain, "fixture.aspx"),
+        """<script>window.loadForm('FixtureMainForm');</script>""");
+    await File.WriteAllTextAsync(Path.Combine(resourceControllers, "Grid", "Fixture.f"),
+        """
+        <grid><script><text><![CDATA[
+          g.showForm('FixtureRun');
+          g.showForm("fixturedel", args);
+          g.showForm(formVariable);
+          g.showForm('Ignored' + suffix);
+          // g.showForm('Ignored');
+          /* g.openForm('Ignored'); */
+          const label = "g.showForm('Ignored')";
+        ]]></text></script><!-- g.showForm('Ignored'); --></grid>
+        """);
+    var forms = new[] { "FixtureRun.f", "FixtureRun.xml", "FixtureDel.f", "FixtureDel.xml", "FixtureNested.f", "FixtureMainForm.xml" };
+    foreach (var name in forms.Append("Ignored.xml"))
+    {
+        var content = name == "FixtureRun.xml"
+            ? "<filter><script><![CDATA[f.openForm('FixtureNested'); f.showForm('Fixture');]]></script></filter>"
+            : "<filter/>";
+        await File.WriteAllTextAsync(Path.Combine(resourceControllers, "Filter", name), content);
+    }
+    var formPayload = new { root = resourceRoot, link = "fixture.aspx" };
+    var formTree = JsonSerializer.SerializeToElement(await CallProject("project.controller", formPayload), Protocol.Json);
+    var treePaths = formTree.GetProperty("files").EnumerateArray().Select(value => value.GetString()).ToArray();
+    var treeNames = treePaths.Select(Path.GetFileName).ToArray();
+    Check(forms.All(name => treeNames.Contains(name)) && treeNames.Contains("FixtureDetail.f") &&
+        !treeNames.Contains("Ignored.xml") && treePaths.Length == treePaths.Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+        "Controller tree follows literal form calls from Main and nested .f/.xml sources, preserving grids and excluding comments");
+    var formResources = JsonSerializer.SerializeToElement(await CallProject("project.menu.resources", formPayload), Protocol.Json);
+    var filterPaths = formResources.GetProperty("resources").EnumerateArray()
+        .Single(item => item.GetProperty("kind").GetString() == "Filter").GetProperty("paths").EnumerateArray()
+        .Select(value => Path.GetFileName(value.GetString())).ToHashSet();
+    Check(filterPaths.SetEquals(forms.Append("Fixture.xml")), "Menu editor lists nested form resources in their controller folders");
     var createList = new
     {
         root = resourceRoot, template = "fixture.aspx", controller = "CatalogDemo", titleVi = "Danh mục A & B", titleEn = "Catalog demo",
@@ -654,7 +694,14 @@ await using (var projectTools = new DeveloperTools())
         "Full project profile persists and export removes its password");
     var collectionVersions = JsonSerializer.SerializeToElement(await CallProject("sourceCollection.versions", new { }), Protocol.Json);
     await CallProject("sourceCollection.default.save", new { version = "sp30" });
+    await CallProject("settings.save", new { saveShortcuts = true,
+        settings = new { shortcuts = new Dictionary<string, string[]> { ["file.new"] = ["Ctrl+Alt+Q"] } } });
     await CallProject("settings.save", new { settings = new { theme = "Dark" } });
+    var shortcutSettings = JsonSerializer.SerializeToElement(await CallProject("settings.read", new { }), Protocol.Json);
+    Check(shortcutSettings.GetProperty("shortcuts").GetProperty("file.new")[0].GetString() == "Ctrl+Alt+Q" &&
+        File.Exists(Path.Combine(root, "shortcuts.dat")) &&
+        !File.ReadAllText(Path.Combine(root, "settings.json")).Contains("Ctrl+Alt+Q", StringComparison.Ordinal),
+        "Personal shortcuts persist separately through ordinary settings saves");
     Check((string?)await CallProject("sourceCollection.default.read", new { }) == "SP30",
         "Source Collection default version persists through ordinary settings saves");
     await CallProject("sourceCollection.default.save", new { version = "" });
@@ -724,9 +771,10 @@ await using (var projectTools = new DeveloperTools())
     var savedVersions = JsonSerializer.SerializeToElement(await Call("sourceCollection.catalog", new { }), Protocol.Json);
     Check(savedVersions.GetArrayLength() == 2, "Repeated HRM synchronization persists without duplicate entries");
     var searchVersions = JsonSerializer.SerializeToElement(await Call("sourceCollection.versions", new { }), Protocol.Json);
-    Check(searchVersions.EnumerateArray().Any(item => item.GetProperty("version").GetString() == "SP227" &&
+    Check(searchVersions.EnumerateArray().Any(item => item.GetProperty("group").GetString() == "HRM" &&
+        item.GetProperty("version").GetString() == "SP227" &&
         item.GetProperty("roots").EnumerateArray().Any(source => source.GetString() == hrmRoots["SP227"])),
-        "Synchronized paths are available to version search");
+        "Synchronized paths retain their major version group for search");
     var collectionSource = Directory.CreateDirectory(Path.Combine(root, "collection-source")).FullName;
     var collectionTarget = Directory.CreateDirectory(Path.Combine(root, "collection-target")).FullName;
     foreach (var relative in new[] { Path.Combine("Grid", "Item.f"), Path.Combine("Dir", "Item.xml"), Path.Combine("Grid", "Other.xml") })
