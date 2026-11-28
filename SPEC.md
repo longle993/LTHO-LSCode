@@ -1,5 +1,7 @@
 # Mục tiêu LSCode
 
+Menu chuột phải trong cây nguồn ERP có mục **Xóa file**. Hộp xác nhận hiện đường dẫn và cảnh báo xóa vĩnh viễn. File đang mở cần được đóng trước khi xóa. Cây nguồn bỏ file sau khi thao tác thành công.
+
 Khi mở source của một menu ERP, cây File và danh sách tài nguyên F3 lần theo Grid con và các lời gọi form có tên cố định trong Main hoặc controller. Mỗi form liên quan hiện các file .f/.xml tìm được, kể cả form gọi tiếp form khác.
 
 Danh sách phiên bản trong **Source Collection** xổ ra theo dạng cây. Phân hệ/sản phẩm lấy từ folder mẹ là nút cha in đậm, có nền và có mũi tên đóng/mở; các folder con là phiên bản được thụt vào. Nhóm chứa phiên bản đang chọn tự mở, các nhóm khác mặc định thu gọn. Trong từng nhóm, phiên bản mới được xếp trước phiên bản cũ; ô tìm phiên bản tìm được cả mã nhóm. Vùng xổ xuống rộng tối thiểu 420 px khi màn hình cho phép. Folder hướng dẫn có tên bắt đầu bằng `ZZZ` không được nạp vào catalog hoặc cây phiên bản.

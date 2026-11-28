@@ -1,5 +1,7 @@
 # Kế hoạch và nghiệm thu
 
+- [x] Thêm Xóa file vào menu cây nguồn ERP, xác nhận đường dẫn và cập nhật cây sau khi xóa.
+
 - [x] Dynamic Template Studio tải các template trong manifest và tệp template hợp lệ chưa đăng ký trong thư mục `templates`. Kiểm tra mở, lưu và mở lại sau khi đổi mã template.
 - [x] Studio dùng thẻ thông báo, hộp xác nhận và hộp nhập mã template nội bộ của LSCode.
 - [x] Studio chỉ vị trí lỗi lưu và cho nhảy đến chỗ sửa. Thuộc tính template ở dưới danh sách bảng. Chọn cả dòng field để mở thuộc tính phía trên lưới.

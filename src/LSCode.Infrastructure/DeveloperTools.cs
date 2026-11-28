@@ -351,6 +351,15 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                 return true;
             case "workspace.duplicate":
                 return await WorkspaceFiles.DuplicateAsync(S("path"), ct);
+            case "workspace.deleteFile":
+                var deletePath = S("path");
+                if (!Path.IsPathFullyQualified(deletePath))
+                    throw new ArgumentException("Đường dẫn file phải là tuyệt đối.");
+                ct.ThrowIfCancellationRequested();
+                if (!File.Exists(deletePath))
+                    throw new FileNotFoundException("Không tìm thấy file cần xóa.", deletePath);
+                File.Delete(deletePath);
+                return true;
             case "sourceCollection.versions":
                 return SourceVersions();
             case "sourceCollection.catalog":

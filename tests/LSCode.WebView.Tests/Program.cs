@@ -425,6 +425,12 @@ await using (var projectTools = new DeveloperTools())
         "Concurrent file duplication creates separate copies preserving every byte and BOM");
     Check(duplicatePaths.Cast<string>().All(file => Path.GetDirectoryName(file) == Path.GetDirectoryName(path) &&
         Path.GetExtension(file) == Path.GetExtension(path)), "File copies stay beside the source with the same extension");
+    var deleteFixture = (string)duplicatePaths[0]!;
+    Check(await CallProject("workspace.deleteFile", new { path = deleteFixture }) is true &&
+        !File.Exists(deleteFixture) && File.Exists(path) && File.Exists((string)duplicatePaths[1]!),
+        "Deleting a file removes only the requested file");
+    await Reject<FileNotFoundException>(() => CallProject("workspace.deleteFile", new { path = root }),
+        "File deletion rejects directories");
     var resourceRoot = Directory.CreateDirectory(Path.Combine(root, "menu-resources")).FullName;
     var resourceMain = Directory.CreateDirectory(Path.Combine(resourceRoot, "Main")).FullName;
     var resourceControllers = Path.Combine(resourceRoot, "App_Data", "Controllers");

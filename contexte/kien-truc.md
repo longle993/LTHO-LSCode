@@ -1,5 +1,7 @@
 # Kiến trúc LSCode
 
+Cây nguồn ERP gọi `workspace.deleteFile` sau xác nhận đường dẫn. Bridge chỉ xóa một file và giao diện bỏ file, kết quả tìm kiếm và chẩn đoán tương ứng sau khi xóa thành công. File đang mở cần được đóng trước để bảo vệ nội dung chỉnh sửa.
+
 Xuất kết quả SQL thêm ký tự BOM ở đầu nội dung CSV trước khi gửi qua `text.export`. Workspace ghi UTF-8; dấu BOM giúp Excel nhận diện mã hóa khi mở file.
 
 Phím tắt dùng mã lệnh làm khóa trong `shortcuts.dat` dưới thư mục dữ liệu LSCode. Windows DPAPI bảo vệ file theo tài khoản hiện tại. Khi chưa có file riêng, ứng dụng đọc phím tắt cũ từ `settings.json` rồi chuyển sang file mới khi lưu. Cập nhật ứng dụng giữ được cấu hình nếu giữ thư mục này và tài khoản Windows.

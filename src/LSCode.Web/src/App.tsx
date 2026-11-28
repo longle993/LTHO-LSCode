@@ -2304,8 +2304,34 @@ export default function App({
     await open(copied);
     setStatus("Đã nhân bản " + copied);
   }
+  const [fileToDelete, setFileToDelete] = useState<string>();
+
+  async function deleteWorkspaceFile(path: string) {
+    const matches = (candidate: string) => diagnosticPathKey(candidate) === diagnosticPathKey(path);
+    await Promise.all([...pendingOpens.current.values()]);
+    if (latest.current.tabs.some(tab => tab.path && matches(tab.path)))
+      throw new Error("Đóng tab của file này trước khi xóa để tránh mất nội dung đang chỉnh sửa.");
+
+    await request("workspace.deleteFile", { path });
+    controllerCache.current.clear();
+    setControllers(current => current.map(entry => ({
+      ...entry,
+      file: matches(entry.file) ? "" : entry.file,
+      files: entry.files.filter(file => !matches(file)),
+      problems: entry.problems.filter(problem => !matches(problem.path)),
+    })));
+    setHits(current => current.filter(hit => !matches(hit.path)));
+    setStatus("Đã xóa " + path);
+  }
   return (
     <div className="studio" data-ready={ready}>
+      {fileToDelete && <ConfirmDialog title="Xóa file?" danger confirmLabel="Xóa file"
+        message={`File sẽ bị xóa vĩnh viễn: ${fileToDelete}`}
+        onClose={() => setFileToDelete(undefined)}
+        onConfirm={() => {
+          setFileToDelete(undefined);
+          void guard(() => deleteWorkspaceFile(fileToDelete));
+        }} />}
       <header className="topbar">
         <div className="brand">
           <img className="brand-mark app-logo" src={logo} alt="" />
@@ -2603,6 +2629,7 @@ export default function App({
                             onCopy={copyWorkspaceText}
                             onReveal={revealWorkspacePath}
                             onDuplicate={(path) => void guard(() => duplicateWorkspaceItem(path))}
+                            onDelete={setFileToDelete}
                             onRename={renameWorkspaceItem}
                             onSourceCollection={samples => setSourceCollection({ samples, destination: workspace })}
                           />

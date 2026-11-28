@@ -36,7 +36,7 @@ export const folderKind = (name: string) =>
   categories.find((category) => category.toLowerCase() === name.toLowerCase())?.toLowerCase() ?? "folder";
 
 export default function ControllerExplorer({
-  root, files, activePath, onOpen, onCopy, onReveal, onDuplicate, onRename, onSourceCollection,
+  root, files, activePath, onOpen, onCopy, onReveal, onDuplicate, onRename, onSourceCollection, onDelete,
   selectedFiles, onToggleFile, problemsByPath,
   emptyMessage = "Mở một chức năng ERP để xem file của controller.",
 }: {
@@ -50,6 +50,7 @@ export default function ControllerExplorer({
   onCopy: (text: string) => void;
   onReveal: (path: string) => void;
   onDuplicate?: (path: string) => void;
+  onDelete?: (path: string) => void;
   onSourceCollection?: (samples: string[]) => void;
   onRename?: (path: string, name: string) => Promise<string>;
   emptyMessage?: string;
@@ -215,6 +216,7 @@ export default function ControllerExplorer({
           onReveal(menu.item.path);
         }}>{menu.item.directory ? "Mở thư mục" : "Mở thư mục chứa file"}</Button>
         {!menu.item.directory && onDuplicate && <Button role="menuitem" variant="ghost" onClick={() => { closeMenu(); onDuplicate(menu.item.path); }}>Nhân bản file</Button>}
+        {!menu.item.directory && onDelete && <Button role="menuitem" variant="ghost" onClick={() => { closeMenu(); onDelete(menu.item.path); }}>Xóa file</Button>}
         {onSourceCollection && <Button role="menuitem" variant="ghost" onClick={() => {
           const samples = menu.item.directory
             ? (files ?? []).filter(path => pathIsWithin(path, menu.item.path))
