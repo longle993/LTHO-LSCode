@@ -219,8 +219,35 @@ await page.addInitScript(()=>{
           result={tables:[],messages:[],durationMs:8,truncated:false};break;
         }
         result={tables:[{columns:['Mã','Tên','Giá trị'],rows:Array.from({length:5000},(_,i)=>[String(i),'Tiếng Việt '+i,i===0?null:'1000000000.123456789'])},{columns:['Bảng phụ'],rows:[['Dòng bảng hai']]}],messages:['Query fixture'],durationMs:12,truncated:true};break;
-      case 'sql.complete':result=request.payload.text===''?['COUNT','AS','IS NOT NULL','AND','BETWEEN','DESC','ASC'].map(text=>({text,isSnippet:false})):[];break;
+      case 'sql.complete':
+        result=request.payload.beforeCaret?.endsWith('sel')&&location.search.includes('ghostFixture')
+          ?[{text:'SELECT',insertText:'SELECT',description:'Fixture SQL',isSnippet:false}]
+          :request.payload.text===''?['COUNT','AS','IS NOT NULL','AND','BETWEEN','DESC','ASC'].map(text=>({text,isSnippet:false})):[];
+        break;
       case 'javascript.complete':result=[];break;
+      case 'xml.complete':{
+        const {text,offset}=request.payload;
+        const prefix=text.slice(0,offset);
+        const fixtures=[
+          ['<loo','<lookup',location.search.includes('ghostFixture')
+            ?'<items style="AutoComplete" controller="{{0-controller}}" />'
+            :'<lookup field="{{0-ma_demo}}"/>','xml',true],
+          ['Dec','Decimal','Decimal','xml',false],
+          ['getI','getItem',"getItem('{{0-ma_demo}}')",'javascript',true],
+          ['@@us','@@userID','@@userID','sql',false],
+          ['backg','background-color','background-color','css',false],
+        ];
+        const partitionPrefix=prefix.match(/@@[\w$]*$/)?.[0];
+        const partition='@@prime$partition$current';
+        const fixture=fixtures.find(([suffix])=>prefix.endsWith(suffix))??
+          (partitionPrefix&&partition.startsWith(partitionPrefix)?[partitionPrefix,partition,partition,'sql',false]:null);
+        if(!fixture){result=null;break;}
+        const [suffix,label,insertText,language,isSnippet]=fixture;
+        const tail=text.slice(offset).match(/^[\w$-]*/)?.[0]??'';
+        result={start:offset-suffix.length,end:offset+tail.length,language,
+          suggestions:[{text:label,insertText,description:'Fixture IntelliSense',isSnippet}]};
+        break;
+      }
       case 'xml.validate':case 'xml.viewWidth':result=null;break;
       case 'xml.include':{
         if(request.payload.text.includes('&Job.Nested.Key.a;')){
@@ -813,8 +840,154 @@ try{
   const testUrl=new URL(process.env.LSCODE_UI_URL??'http://127.0.0.1:4173');
   if(process.argv.includes('--entity-peek-regression'))testUrl.searchParams.set('entityFixture','1');
   if(process.argv.includes('--request-tracking-regression'))testUrl.searchParams.set('requestFixture','1');
+  if(process.argv.includes('--ghost-text-regression'))testUrl.searchParams.set('ghostFixture','1');
   await page.goto(testUrl.toString());await page.getByRole('dialog',{name:'Dự án của bạn'}).waitFor();check(true,'Project picker opens before workbench');
-  if(process.argv.includes('--request-tracking-regression')){
+  if(process.argv.includes('--ghost-text-regression')){
+    await page.locator('.project-row').filter({hasText:'Dự án thử UI'}).click();
+    await page.locator('dialog').waitFor({state:'detached'});
+    await page.getByRole('button',{name:'Mở file',exact:true}).first().click();
+    const xmlTab=page.getByRole('tab',{name:'fixture.xml',exact:true});
+    await xmlTab.waitFor();
+    const editor=page.locator('.editor-group.focused .monaco-editor').first();
+    const ghost=editor.locator('.ghost-text-decoration');
+    const view=editor.locator('.view-lines');
+    await editor.click({position:{x:110,y:24}});
+    await page.keyboard.press('Control+a');
+    await page.keyboard.insertText('<field name="{{demo}}" type=""/>');
+    for(let index=0;index<3;index++)await page.keyboard.press('ArrowLeft');
+    await page.keyboard.type('Dec');
+    await ghost.filter({hasText:'imal'}).first().waitFor({timeout:5000});
+    await editor.screenshot({path:out+'/xml-ghost-text.png',animations:'disabled'});
+    await page.keyboard.press('Escape');
+    await ghost.waitFor({state:'detached'});
+    check((await view.textContent()).includes('type="Dec"'),'Escape dismisses XML ghost text without editing the model');
+    await page.keyboard.press('Backspace');
+    await page.keyboard.type('c');
+    await ghost.first().waitFor();
+    await page.keyboard.press('Tab');
+    await ghost.waitFor({state:'detached'});
+    check((await view.textContent()).includes('type="Decimal"'),'Tab accepts XML ghost text before navigating template tokens');
+    await page.keyboard.press('Tab');
+    await editor.locator('.selected-text').first().waitFor();
+    check(true,'Tab still navigates to a template token after ghost text closes');
+
+    await page.keyboard.press('Control+a');
+    await page.keyboard.insertText('<field name="{{demo}}" type=""/>');
+    for(let index=0;index<3;index++)await page.keyboard.press('ArrowLeft');
+    await page.keyboard.type('Dec');
+    await ghost.filter({hasText:'imal'}).first().waitFor();
+    await page.keyboard.press('Control+Space');
+    await editor.locator('.suggest-widget .monaco-list-row.focused').filter({hasText:'Decimal'}).first().waitFor();
+    await page.keyboard.press('Tab');
+    await editor.locator('.suggest-widget .monaco-list-row').filter({hasText:'Decimal'}).first().waitFor({state:'detached'});
+    await ghost.waitFor({state:'detached'});
+    check((await view.textContent()).includes('type="Decimal"'),'Ctrl+Space opens the popup over ghost text and Tab accepts its selection');
+
+    await page.keyboard.press('Control+a');
+    await page.keyboard.insertText('<query>SELECT @@u</query>');
+    await page.keyboard.press('Control+Home');
+    for(let index=0;index<'<query>SELECT @@u'.length;index++)await page.keyboard.press('ArrowRight');
+    await page.keyboard.type('s');
+    await ghost.filter({hasText:'erID'}).first().waitFor({timeout:5000}).catch(async error=>{
+      throw Error(`Embedded SQL ghost text missing: ${await view.textContent()}`,{cause:error});
+    });
+    await page.keyboard.press('Tab');
+    await ghost.waitFor({state:'detached'});
+    check((await view.textContent()).replace(/\u00a0/g,' ').includes('SELECT @@userID</query>'),'Embedded SQL accepts a FAST session-variable ghost suggestion');
+
+    await page.keyboard.press('Control+a');
+    await page.keyboard.insertText('<lo');
+    await page.keyboard.type('o');
+    await editor.locator('.suggest-widget .monaco-list-row').filter({hasText:'<lookup'}).first().waitFor();
+    check(await ghost.count()===0,'An XML snippet alias keeps its popup expansion instead of inserting an invalid literal tag');
+    await page.keyboard.press('Escape');
+    await page.getByRole('button',{name:'File mới',exact:true}).click();
+    await editor.click({position:{x:110,y:24}});
+    await page.keyboard.type('sel');
+    await ghost.filter({hasText:'ECT'}).first().waitFor();
+    await editor.screenshot({path:out+'/sql-ghost-text.png',animations:'disabled'});
+    await page.keyboard.press('Tab');
+    await ghost.waitFor({state:'detached'});
+    check((await view.textContent()).includes('selECT'),'SQL ghost text preserves typed case when accepted');
+    check(await page.evaluate(()=>window.__nativeCalls.some(call=>call.method==='sql.complete'&&call.payload.beforeCaret==='sel'&&!call.payload.targetId)),
+      'Automatic SQL ghost text uses local completion without a database target');
+    await page.keyboard.press('Control+a');
+    await page.keyboard.insertText('se');
+    await page.keyboard.type('l');
+    await ghost.filter({hasText:'ECT'}).first().waitFor();
+    await page.keyboard.press('Home');
+    await ghost.waitFor({state:'detached'});
+    check((await view.textContent()).includes('sel'),'Moving the caret dismisses visible SQL ghost text');
+    await page.keyboard.press('Control+a');
+    await page.keyboard.insertText('seNOT');
+    await page.keyboard.press('ArrowLeft');
+    await page.keyboard.press('ArrowLeft');
+    await page.keyboard.press('ArrowLeft');
+    await page.keyboard.type('l');
+    await page.waitForFunction(()=>document.querySelector('.editor-group.focused .view-lines')?.textContent.includes('selNOT'));
+    check(await ghost.count()===0,
+      'Typing within an existing SQL identifier leaves the suffix untouched by ghost completion');
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Control+a');
+    await page.keyboard.insertText('se');
+    await page.keyboard.type('l');
+    await ghost.filter({hasText:'ECT'}).first().waitFor();
+    await xmlTab.click();
+    await page.waitForFunction(()=>document.querySelector('.editor-group.focused .view-lines')?.textContent.includes('<loo'));
+    await ghost.waitFor({state:'detached'});
+    check(true,'Changing tabs dismisses SQL ghost text and restores the XML model');
+    if(errors.length)console.log(JSON.stringify(errors,null,2));
+    check(errors.length===0,'No uncaught browser errors');
+    writeFileSync(out+'/ghost-text-report.json',JSON.stringify({passed:true,checks,transport:'browser fixture',errors},null,2));
+  } else if(process.argv.includes('--xml-intellisense-regression')){
+    await page.locator('.project-row').filter({hasText:'Dự án thử UI'}).click();
+    await page.locator('dialog').waitFor({state:'detached'});
+    await page.getByRole('button',{name:'Mở file',exact:true}).first().click();
+    const tab=page.getByRole('tab',{name:'fixture.xml',exact:true});
+    await tab.waitFor();
+    const editor=page.locator('.editor-group.focused .monaco-editor').first();
+    async function complete(fragment, label, expected, accept='Enter'){
+      await page.keyboard.press('Escape');
+      await editor.click({position:{x:110,y:24}});
+      await page.keyboard.press('Control+a');
+      const [before,after='']=fragment.split('|');
+      await page.keyboard.insertText(before+after);
+      for(let index=0;index<after.length;index++)await page.keyboard.press('ArrowLeft');
+      await page.keyboard.press('Control+Space');
+      const item=editor.locator('.suggest-widget .monaco-list-row').filter({hasText:label}).first();
+      await item.waitFor();
+      await page.keyboard.press(accept);
+      await page.waitForFunction(value=>document.querySelector('.editor-group.focused .view-lines')?.textContent.replace(/\u00a0/g,' ').includes(value),expected,{timeout:5000})
+        .catch(async error=>{throw Error(`Expected ${expected} after ${label}; got ${await editor.locator('.view-lines').textContent()}`,{cause:error});});
+    }
+    await complete('<loo|kux','<lookup','<lookup field="ma_demo"/>');
+    check(!(await editor.locator('.view-lines').textContent()).includes('kux'),
+      'XML IntelliSense replaces the whole tag prefix and keeps snippet placeholders editable');
+    await page.keyboard.insertText('ma_changed');
+    await page.waitForFunction(()=>document.querySelector('.editor-group.focused .view-lines')?.textContent.includes('field="ma_changed"'));
+    check(true,'XML snippet selects its first placeholder');
+    await complete('<field type="Dec|imxl"/>','Decimal','<field type="Decimal"/>','Tab');
+    check(true,'Tab accepts XML attribute value and preserves the surrounding quotes');
+    await complete('<script>f.getI|temOld</script>','getItem',"f.getItem('ma_demo')");
+    check(true,'Embedded JavaScript uses the incoming completion range and snippet expansion');
+    await complete('<query>SELECT @@us|erOld</query>','@@userID','SELECT @@userID</query>');
+    check(await page.evaluate(()=>window.__nativeCalls.some(call=>call.method==='xml.complete'&&
+      call.payload.text.includes('SELECT @@userOld')&&call.payload.targetId==='project-app'&&
+      call.payload.path==='C:\\Fixture\\fixture.xml')),
+      'Embedded SQL replaces a FAST session variable and sends the active document and SQL target');
+    await complete('<css>.field { backg|round-old: red; }</css>','background-color','background-color: red');
+    check(true,'Embedded CSS completion replaces the existing property token');
+    await editor.click({position:{x:110,y:24}});
+    await page.keyboard.press('Control+a');
+    await page.keyboard.insertText('<field type=""/>');
+    for(let index=0;index<3;index++)await page.keyboard.press('ArrowLeft');
+    await page.keyboard.type('Dec');
+    await editor.locator('.ghost-text-decoration').filter({hasText:'imal'}).or(
+      editor.locator('.suggest-widget .monaco-list-row').filter({hasText:'Decimal'})).first().waitFor();
+    check(true,'Typing inside an XML attribute triggers a completion without Ctrl+Space');
+    await editor.screenshot({path:out+'/xml-intellisense.png',animations:'disabled'});
+    check(errors.length===0,'No uncaught browser errors');
+  } else if(process.argv.includes('--request-tracking-regression')){
     await testRequestTracking();
     check(errors.length===0,'No uncaught browser errors');
   } else if(process.argv.includes('--catalog-source-regression')){

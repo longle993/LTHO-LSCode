@@ -3319,7 +3319,9 @@ export default function App({
                         document={doc}
                         theme={settings.theme}
                         fontSize={settings.editorFontSize}
-                        target={doc.target}
+                        target={doc.target ?? (language(doc.name) === "xml" && project &&
+                          (doc.project === project.id || !doc.project && doc.path && pathIsWithin(doc.path, workspace))
+                          ? defaultTarget.current : undefined)}
                         onMount={(e) => {
                           if (pane === 0) primaryEditor.current = e;
                           if (scriptToFocus.current === doc.id && paneRef.current === pane) {

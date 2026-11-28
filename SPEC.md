@@ -58,6 +58,14 @@ Trong **Cấu trúc và dữ liệu** của WebView, truy vấn có thể duyệ
 
 Khi lưu **Dynamic Template Studio**, lỗi kiểm tra dữ liệu chỉ rõ template, bảng, field và ô nhập nếu xác định được. Chọn lỗi sẽ mở đúng vị trí sửa. Thuộc tính template nằm dưới danh sách bảng ở cột trái. Chọn một dòng field sẽ mở thuộc tính field phía trên lưới.
 
+## Ghost text trong editor XML và SQL
+
+Khi đang gõ một tiền tố có gợi ý phù hợp, Monaco hiển thị phần còn thiếu ngay sau con trỏ bằng màu gợi ý của theme hiện hành. Ghost text dùng nguồn IntelliSense sẵn có trong LSCode. Nội dung chỉ được chèn khi nhấn Tab để nhận. Esc ẩn gợi ý.
+
+Gợi ý tự động dùng dữ liệu cục bộ cho markup XML và cho SQL trong tab truy vấn, file SQL hoặc vùng SQL nhúng trong XML. Dùng Ctrl+Space để mở danh sách IntelliSense với snippet và metadata kết nối theo ngữ cảnh.
+
+Nghiệm thu trên XML và SQL bằng dữ liệu mẫu. Kiểm tra Tab, Esc, đổi vị trí con trỏ hoặc tài liệu, văn bản có sẵn phía sau con trỏ, cùng khả năng tiếp tục dùng danh sách IntelliSense và snippet.
+
 ## Tải menu nhanh và menu Mobile
 
 Nhấp mã `wcommand` trong cây Web hoặc kết quả tìm kiếm mở form sửa menu giống F3.
@@ -117,7 +125,16 @@ Ctrl+Alt+C mở ô lệnh độc lập. Nhập `@@` rồi Enter mở QLYC. Ngư�
 - Mỗi bộ phận có một dòng **Tổng bộ phận** sau các dòng nhân viên. Dòng tổng cộng số của từng cột đang hiển thị trong phạm vi bộ phận, gồm tháng, Tổng và TB. Việc lọc, sắp xếp và ẩn chỉ số phải giữ số liệu đúng với nhóm.
 - Khối **Category** nằm cạnh danh sách yêu cầu ở màn rộng và xếp dưới danh sách ở màn hẹp. Sau khi tải danh sách, khối mở dữ liệu của yêu cầu đầu tiên. Khi chọn yêu cầu khác, khối hiển thị năm cột chỉ đọc **Chọn**, **Đầu mục**, **Số lượng**, **Lập trình** và **Tester** của yêu cầu đó, kể cả khi truy vấn trước hoàn tất muộn. Tải lại danh sách cũng tải lại đầu mục. Hiện trạng thái đang tải, rỗng hoặc lỗi ngay trong khối Category.
 
-Gợi ý biến `@@` trong SQL nhúng tiếp tục là thao tác trong editor, tách biệt với ô lệnh Ctrl+Alt+C. Gợi ý field trong chuỗi hàm `f.`/`g.` lấy từ `<views>` của file XML hiện hành.
+Gợi ý biến `@@` trong SQL nhúng tiếp tục là thao tác trong editor, tách biệt với ô lệnh Ctrl+Alt+C.
+
+### IntelliSense trong editor XML theo FcodeViewer
+
+- Dùng nội dung đang sửa và vị trí con trỏ trong `.xml` hoặc `.f` để chọn nhóm gợi ý XML, SQL, JavaScript hoặc CSS. Hỗ trợ gọi bằng **Ctrl+Space**, lọc theo phần đang nhập và chèn bằng **Enter** hoặc **Tab**.
+- Trong markup XML, gợi ý cấu trúc, thuộc tính, giá trị và field theo vị trí đang soạn. Nhận ra tài liệu đang gõ dở, tránh gợi ý trong comment và chỉ thay thế phần từ hoặc snippet mà người dùng đang nhập.
+- Trong khối nhúng, gợi ý đúng ngôn ngữ. SQL dùng quy tắc biến cục bộ, bảng tạm, biến FAST và metadata của kết nối nếu có. JavaScript gợi ý thành viên FAST và gợi ý field từ tài liệu trong chuỗi đối số của `f.`, `g.` và các tên đối tượng cùng nhóm. CSS gợi ý tên thuộc tính và mẫu khai báo có chỗ nhập giá trị.
+- Giữ vùng chèn, cặp dấu bao quanh và các vị trí dừng của snippet khi chấp nhận gợi ý. Việc đổi nội dung, chuyển tài liệu hoặc hủy gợi ý phải loại kết quả thuộc ngữ cảnh cũ.
+
+Phạm vi phiên bản này là gợi ý và chèn từ editor XML theo ngữ cảnh tự động. FcodeViewer còn có nút đổi ngôn ngữ gợi ý trên thanh công cụ, cửa sổ sửa danh mục snippet và các lệnh sinh cấu trúc `<f.…`, `<fx.…`, `<l.…` từ `header.xml`.
 
 ## Hoàn thiện workspace, snippet và Table Tool — 18/11/2026
 

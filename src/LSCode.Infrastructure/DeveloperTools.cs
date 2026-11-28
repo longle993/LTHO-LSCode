@@ -747,6 +747,9 @@ public sealed class DeveloperTools : IDeveloperTools, IAsyncDisposable
                 return new { diagnostic, outline = XmlTools.Parse(S("text")).Descendants().Take(3000).Select(e => new { name = e.Name.ToString(), line = ((IXmlLineInfo)e).LineNumber }).ToArray() };
             case "xml.viewWidth": return XmlViewWidths.Find(S("text"), I("offset"));
             case "xml.validate": return S("text").Length > 1000000 ? null : XmlTools.Validate(S("text"));
+            case "xml.complete":
+                return await Task.Run(() => FastEditorCompletion.CompleteAsync(S("text"), I("offset", -1), S("path"), OpenBuffers(),
+                    S("targetId").Length == 0 ? null : () => Target(p), ct), ct);
             case "xml.diagnostics": return await Task.Run(() => XmlTools.InspectEditor(S("text"), S("path"), OpenBuffers()), ct);
             case "xml.controllerPreview": return await Task.Run(() => XmlControllerPreview.Read(S("text"), S("path"), OpenBuffers()), ct);
             case "xml.xpath":

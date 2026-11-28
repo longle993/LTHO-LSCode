@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<config>
+  <Snippet>
+    <Item keyword="background-color">background-color: #{{0}};</Item>
+    <Item keyword="background-position">background-position: {{0}}px {{1}}px;</Item>
+    <Item keyword="border">border: {{0}}px solid {{1-color}};</Item>
+    <Item keyword="border-radius">border-radius: {{0}}px;</Item>
+    <Item keyword="color">color: {{0}};</Item>
+    <Item keyword="display">display: {{0}};</Item>
+    <Item keyword="font-size">font-size: {{0}}px;</Item>
+    <Item keyword="font-weight">font-weight: {{0}};</Item>
+    <Item keyword="height">height: {{0}}px;</Item>
+    <Item keyword="margin">margin: {{0}};</Item>
+    <Item keyword="padding">padding: {{0}};</Item>
+    <Item keyword="text-align">text-align: {{0}};</Item>
+    <Item keyword="width">width: {{0}}px;</Item>
+  </Snippet>
+</config>

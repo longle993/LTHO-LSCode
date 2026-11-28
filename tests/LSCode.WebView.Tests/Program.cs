@@ -417,6 +417,23 @@ await using (var projectTools = new DeveloperTools())
 {
     Task<object?> CallProject(string method, object payload) =>
         projectTools.ExecuteAsync(method, JsonSerializer.SerializeToElement(payload, Protocol.Json), default);
+    foreach (var (markup, language, hint) in new[]
+    {
+        ("<dir><field type='Dec¦oy' /></dir>", "xml", "Decimal"),
+        ("<dir><loo¦></dir>", "xml", "<lookup"),
+        ("<dir><script><![CDATA[f.getI¦]]></script></dir>", "javascript", "getItem"),
+        ("<dir><response><![CDATA[select @@prime$partition$c¦]]></response></dir>", "sql", "@@prime$partition$current"),
+        ("<dir><css>aside { background-c¦olor: #333; }</css></dir>", "css", "background-color"),
+    })
+    {
+        var offset = markup.IndexOf('¦');
+        var result = JsonSerializer.SerializeToElement(await CallProject("xml.complete", new { text = markup.Remove(offset, 1), offset }), Protocol.Json);
+        var item = result.GetProperty("suggestions").EnumerateArray().FirstOrDefault(entry => entry.GetProperty("text").GetString() == hint);
+        Check(result.GetProperty("language").GetString() == language && item.ValueKind == JsonValueKind.Object &&
+            result.GetProperty("start").GetInt32() < offset && result.GetProperty("end").GetInt32() >= offset,
+            $"FAST XML bridge returns {language} hint {hint} and its source range");
+        if (language == "css") Check(item.GetProperty("insertText").GetString() == hint, "Existing CSS value survives bridge completion");
+    }
     var duplicatePaths = await Task.WhenAll(
         CallProject("workspace.duplicate", new { path }),
         CallProject("workspace.duplicate", new { path }));
@@ -1166,6 +1183,11 @@ if (args.Contains("--sql"))
         Check(loaded.GetProperty("columns").GetArrayLength() == 6, "Catalog creates fields and four audit columns");
         var suggestions=(LSCode.Core.SqlSuggestion[])(await Call("sql.complete",new{targetId=target.Id,text="SELECT c. FROM dbo.catalog c",beforeCaret="SELECT c."}))!;
         Check(suggestions.Any(s=>s.Text=="code"),"SQL completion adapter resolves alias against actual schema");
+        const string embeddedSql = "<dir><query><![CDATA[SELECT c.co FROM dbo.catalog c]]></query></dir>";
+        var embeddedHints = JsonSerializer.SerializeToElement(await Call("xml.complete", new { targetId = target.Id,
+            text = embeddedSql, offset = embeddedSql.IndexOf(" FROM", StringComparison.Ordinal) }), Protocol.Json);
+        Check(embeddedHints.GetProperty("suggestions").EnumerateArray().Any(item => item.GetProperty("text").GetString() == "code"),
+            "SQL inside XML resolves aliases against the document database target");
         var adminIdentity=(ExecutionResult)(await Call("sql.execute",new{targetId=admin.Id,sql="SELECT DB_NAME()"}))!;
         var tabIdentity=(ExecutionResult)(await Call("sql.execute",new{targetId=target.Id,sql="SELECT DB_NAME()"}))!;
         Check(adminIdentity.Tables[0].Rows[0][0]=="master"&&tabIdentity.Tables[0].Rows[0][0]==database,"Target handles remain isolated across database switches");

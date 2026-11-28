@@ -1,5 +1,25 @@
 # Kế hoạch và nghiệm thu
 
+## Ghost text trong editor XML và SQL — 28/11/2026
+
+- [x] Kiểm tra nguồn gợi ý XML và SQL cùng theme Monaco. Chốt tiêu chí trong [SPEC.md](SPEC.md#ghost-text-trong-editor-xml-và-sql).
+- [x] Thêm tình huống ghost text vào `scripts/test-webview-ui.mjs`. Chạy trên bản hiện tại để xác định lỗi thiếu gợi ý.
+- [x] Trong `src/LSCode.Web/src/editor.tsx`, đăng ký provider inline cho XML và SQL. Lọc theo tiền tố và ngữ cảnh, kiểm tra hủy yêu cầu và ưu tiên phím Tab khi có gợi ý.
+- [x] Chromium đạt 13 kiểm tra ghost text và 9 kiểm tra hồi quy IntelliSense XML bằng bridge mẫu, không phát sinh lỗi JavaScript chưa được xử lý.
+- [x] Agent review kiểm tra tiêu chí nghiệm thu rồi rà chất lượng mã. Đã kiểm tra lại cách xử lý alias XML, phím Tab khi popup vừa mở và lỗi hủy thông báo trợ năng trong Monaco 0.52.2.
+- [x] Build giao diện, 166 kiểm tra Core và 12 kiểm tra smoke trên bản Windows đã publish vào `artifacts/publish-webview`. Đã đối chiếu bundle publish với bản build và kiểm tra `LSCode.WebView.exe`.
+- Runner tích hợp WebView build đạt nhưng dừng tại fixture SMTP loopback do hết thời gian chờ. Smoke trên bản publish và hai lượt Chromium đã chạy riêng.
+
+## IntelliSense trong editor XML theo FcodeViewer — 28/11/2026
+
+Tiêu chí nghiệm thu nằm trong [SPEC.md](SPEC.md#intellisense-trong-editor-xml-theo-fcodeviewer). Luồng FcodeViewer dùng `EditorViewer` và `AutoCompleteSrc` của `fcontrol`. Khảo sát tĩnh đã xác nhận lựa chọn nhóm XML, SQL, JavaScript, CSS theo vị trí và gợi ý theo tiền tố trong `setStyleAutoComplete` và `iWY9HHEk9I`. `InitField` lấy field trực tiếp từ XML; `InitAutocomplete` nhận dữ liệu từ các danh mục gợi ý.
+
+- [x] So sánh điểm mở editor và luồng autocomplete của FcodeViewer với `xmlLanguage.ts`, `editor.tsx`, `XmlTools` và nguồn snippet trong LSCode.
+- [x] Nối Monaco với `xml.complete`, tách markup và các vùng nhúng trong `FastXmlCompletion`, kết hợp danh mục Fcode và mục dự phòng. SQL nhận metadata kết nối tương ứng với tài liệu.
+- [x] Rà luồng chèn khi có sẵn dấu `>` hoặc dấu `:` của CSS, giữ dấu nháy quanh giá trị, chọn tên field trong layout và bỏ phản hồi đã hủy. Ghi phạm vi điều khiển ngôn ngữ thủ công, cửa sổ sửa snippet và bộ sinh cấu trúc đặc thù Fcode trong đặc tả.
+- [x] Build frontend đạt. Chromium đạt 9 kiểm tra IntelliSense. Kiểm tra hồi quy đạt 4 kiểm tra panel XML, 15 kiểm tra F12 entity và 19 kiểm tra QLYC. Runner .NET đạt 166 kiểm tra Core và 209 kiểm tra WebView, gồm bridge IntelliSense với danh mục Fcode cài cục bộ và metadata cột trên SQL Server fixture.
+- [x] Publish Windows vào `artifacts/publish-webview/xml-intellisense`. Đã kiểm tra `LSCode.WebView.exe`, tài nguyên dự phòng và 12 kiểm tra smoke trên bản publish. Thư mục con cho phép bàn giao khi phiên LSCode đang mở giữ file ở thư mục cha.
+
 - [x] Thêm Xóa file vào menu cây nguồn ERP, xác nhận đường dẫn và cập nhật cây sau khi xóa.
 
 - [x] Dynamic Template Studio tải các template trong manifest và tệp template hợp lệ chưa đăng ký trong thư mục `templates`. Kiểm tra mở, lưu và mở lại sau khi đổi mã template.

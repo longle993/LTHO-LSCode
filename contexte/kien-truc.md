@@ -105,11 +105,25 @@ WebView mở file nguồn để giữ encoding/nội dung đầy đủ nhưng d�
 
 Callout trong `.editors` được quản lý thành một chuỗi có `id`, `parentId` và `level`; mỗi node giữ model/editor Monaco riêng. F12 từ một node giữ chuỗi tổ tiên, giải phóng nhánh hậu duệ cũ của node đó nếu có, rồi nối thêm callout con lệch theo tầng. Đóng một node giải phóng document/model của node đó và mọi hậu duệ; đóng lá không ảnh hưởng cha. Từng callout hiện đường dẫn, có checkbox toàn file và giữ Ctrl+F12/mở tab. Khi chuỗi chưa rỗng, một lớp chắn fixed chặn con trỏ trên toàn nền và listener `wheel`/`touchmove` ở capture phase hủy cuộn ngoài `.entity-peek`; cuộn bên trong Monaco của các callout vẫn được giữ. Phạm vi kiểm chứng: fixture Core cho entity nội tuyến, file ngoài và đồ thị cha; 105 WebView checks; production build; regression Playwright 14 bước cho callout, khóa cuộn, F12 lồng thành nhánh cha–con, vòng đời đóng nhánh và toàn file. Chưa kiểm chứng trực quan trên source FAST ERP thực tế có nhiều mức lồng.
 
+## IntelliSense XML theo FcodeViewer
+
+Khảo sát ngày 28/11/2026 đối với `FCodeViewer.urView`, `fcontrol.EditorViewer` và `AutoCompleteSrc`. `EditorViewer.setStyleAutoComplete` chuyển ngữ cảnh theo vị trí trong XML. Các vùng `script` và command `Checking` dùng JavaScript. Các vùng `commands`, `response`, `queries`, `query` và `processing` dùng SQL. Vùng `css` dùng CSS và `toolbar` dùng XML. `AutoCompleteSrc` đọc danh mục XML từ `htmlsnippet.xml`, JavaScript từ `viewsrcsnippet.xml`, SQL từ `viewsrcsqlsnippet.xml` và CSS từ `csssnippet.xml` theo cấu hình Fcode. Danh mục chứa mẫu chèn, gợi ý giá trị theo thuộc tính và gợi ý thành viên theo đối tượng.
+
+`AutoCompleteSrc.InitField` đọc tên, kiểu, cờ ẩn và tiêu đề của field trong `grid` và `dir`. Nhánh XML dùng field hiện hành làm nguồn dự phòng khi gõ giá trị trong `view`. Ctrl+Space gọi danh sách, Enter hoặc Tab chấp nhận, Esc đóng. Thanh công cụ FcodeViewer có điều khiển ngôn ngữ thủ công. Ctrl+\` mở luồng chọn và sửa tệp danh mục snippet riêng. Các lệnh `<f.…`, `<fx.…`, `<l.…` sinh cấu trúc từ `header.xml`. Phạm vi xác nhận là khảo sát tĩnh mã tham chiếu và cấu trúc danh mục cài cục bộ.
+
+Trong LSCode, provider Monaco gửi nội dung đang sửa và vị trí con trỏ tới `xml.complete`. `FastXmlCompletion` tách vùng XML, SQL, JavaScript và CSS, xác định phạm vi chèn và tìm gợi ý theo tiền tố. `FastEditorCompletion` tìm theo thứ tự đường dẫn tuyệt đối `LSCODE_FCODE_SNIPPETS`, thư mục `FAST\FCode\Config\snippet` ở cùng ổ với LSCode và thư mục FCode trong Program Files (x86). Danh mục cài sẵn trong `Assets` của bản publish bổ sung mục còn thiếu hoặc cung cấp dữ liệu khi không tìm được tệp hợp lệ từ Fcode. Các danh mục được giữ trong bộ nhớ của phiên ứng dụng.
+
+Kiểm chứng ngày 28/11/2026 gồm 166 kiểm tra Core, 209 kiểm tra WebView với SQL Server fixture và danh mục Fcode cài cục bộ, 9 kiểm tra Chromium cho thao tác gợi ý và 12 kiểm tra smoke trên bản Windows đã publish.
+
+### Ghost text trong editor
+
+Monaco nhận gợi ý inline từ `xml.complete` hoặc `sql.complete` mà không gửi ID kết nối. Provider dùng vùng chèn do bộ phân tích XML trả về hoặc tiền tố SQL cục bộ. Phần hiển thị chỉ nối tiếp tiền tố đang gõ. Khi danh sách IntelliSense hoặc ghost text đang hiện, Monaco xử lý Tab trước luồng nhảy giữa placeholder của LSCode.
+
 ## Workspace Main, nguồn snippet và điều hướng bảng
 
 `ProjectConventions.ResolveMenuFile` ưu tiên đường dẫn chính xác dưới root/Main. Với link có thư mục ảo không tồn tại, nó fallback theo đúng tên file trong `Main`, giới hạn 1.000 kết quả và vẫn từ chối đoạn `..`; `project.controller` đưa file ASPX đã tìm thấy vào đầu danh sách để `ControllerExplorer` dựng node Main cùng source controller.
 
-`sqlsnippet.xml` là nguồn duy nhất cho biến session FAST `@@...`. Provider SQL nhúng XML tải nguồn này qua `snippet.completions`; completion SQL thông thường tiếp tục nhận cùng danh sách từ Infrastructure. Các mẫu legacy có khóa `ss...` bị loại khỏi `CompletionSnippets.Get` và được `DeveloperTools.ReadSnippets` ánh xạ sang nhóm **SQL dựng sẵn** trong tab Snippet, tránh làm nhiễu danh sách gợi ý bảng/cột.
+Theo triển khai ngày 18/11/2026, provider SQL nhúng XML lấy riêng biến session FAST `@@...` từ `sqlsnippet.xml` qua `snippet.completions`. Từ 28/11/2026, editor XML dùng `xml.complete` với danh mục theo ngữ cảnh ở mục trên. Editor SQL thông thường tiếp tục gọi nguồn gợi ý Infrastructure. Các mẫu legacy có khóa `ss...` bị loại khỏi `CompletionSnippets.Get` và được `DeveloperTools.ReadSnippets` ánh xạ sang nhóm **SQL dựng sẵn** trong tab Snippet, tránh làm nhiễu danh sách gợi ý bảng/cột.
 
 Table Tool giữ điều hướng ô trong `TableDataGrid`: Home/End đổi cột trong dòng hiện hành, còn Ctrl+G do `TableTool` sở hữu để mở modal gợi ý metadata và gửi yêu cầu focus cột xuống lưới. F5 vẫn đi qua command `sql.run`; `App` định tuyến sang nút Chạy của tab bảng đang chọn thay vì chạy nhầm editor SQL.
 

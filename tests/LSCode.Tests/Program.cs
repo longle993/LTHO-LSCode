@@ -48,6 +48,52 @@ try
         Assert(CompletionSnippets.IsInScript(markup, markup.Length), "Script body completion: " + markup);
     foreach (var markup in new[] { "<root>f.ge", "<!-- <script> -->f.ge", "<scripture>f.ge", "<script>f.ge</script>", "<script attr='f.ge", "<![CDATA[<script>f.ge", "<script/>f.ge", "<root attr='<script>'>f.ge" })
         Assert(!CompletionSnippets.IsInScript(markup, markup.Length), "No JS hint outside script: " + markup);
+    var fastCatalog = FastXmlCompletion.ReadCatalog("""
+        <config><Snippet><Item keyword="&lt;lookup"><![CDATA[<items style="Lookup" controller="{{0}}"/>]]></Item></Snippet>
+        <Hint><HintItem object="type=" exact="1"><Item keyword="Decimal" default="1">Decimal</Item></HintItem>
+        <HintItem object="f;w" exact="1"><Item keyword="getItem">getItem('{{-}}')</Item></HintItem></Hint></config>
+        """);
+    FastXmlContext FastContext(string marked)
+    {
+        var offset = marked.IndexOf('¦');
+        return FastXmlCompletion.Context(marked.Remove(offset, 1), offset)!;
+    }
+    var xmlAttribute = FastContext("<dir><field type='Dec¦oy' /></dir>");
+    Assert(xmlAttribute is { Language: "xml", Attribute: "type", Prefix: "Dec" } && xmlAttribute.End - xmlAttribute.Start == 5 &&
+        FastXmlCompletion.Suggest(xmlAttribute, fastCatalog).Single().Text == "Decimal", "FAST XML scoped attribute hint replaces entire value fragment and preserves quotes");
+    var xmlTag = FastContext("<dir><loo¦></dir>");
+    Assert(xmlTag.Prefix == "<loo" && xmlTag.End - xmlTag.Start == 5 && FastXmlCompletion.Suggest(xmlTag, fastCatalog).Single().InsertText.StartsWith("<items"),
+        "FAST XML tag abbreviation chooses the ERP snippet and consumes autoclosing delimiter");
+    Assert(FastXmlCompletion.Suggest(FastContext("<dir><field ty¦ />"), fastCatalog)
+        .Select(entry => entry.InsertText).ToHashSet().SetEquals(["type=\"{{-}}\"", "type=\"Decimal\""]),
+        "FAST XML derives attribute name and default from its value catalog");
+    Assert(FastContext("<script><![CDATA[w.ge¦]]></script>").Language == "javascript" &&
+        FastXmlCompletion.Suggest(FastContext("<script>w.ge¦</script>"), fastCatalog).Single().Text == "getItem", "FAST JS member aliases match inside script and CDATA");
+    Assert(FastContext("<dir><commands><command event='Checking'><![CDATA[f.ge¦]]></command></commands></dir>").Language == "javascript" &&
+        FastContext("<dir><response><![CDATA[select @@us¦]]></response></dir>").Language == "sql" &&
+        FastContext("<dir><css>backg¦</css></dir>").Language == "css" &&
+        FastContext("<!DOCTYPE dir [<!ENTITY x 'select col¦'>]><dir/>").Language == "sql", "FAST completion routes checking, response, style and inline entity contexts");
+    Assert(FastContext("<dir><!-- <script>w.ge¦ --> </dir>") is null &&
+        FastContext("<dir val='&lt;script&gt;'><field type='Dec¦' /></dir>").Language == "xml", "FAST completion ignores comments and nested markup in quoted attributes");
+    Assert(FastContext("<sql><![CDATA[select '@@us¦']]></sql>") is null &&
+        FastContext("<sql><![CDATA[-- @@us¦]]></sql>") is null &&
+        FastContext("<css>/* backg¦ */</css>") is null &&
+        FastContext("<script><![CDATA[// f.ge¦]]></script>") is null,
+        "FAST completion skips SQL literals and embedded comments");
+    var cssContext = FastContext("<css>aside { backg¦round-old: #333; }</css>");
+    var cssCatalog = FastXmlCompletion.ReadCatalog("""<config><Snippet><Item keyword="background-color">background-color: #{{0}};\n{{1}}</Item></Snippet></config>""");
+    Assert(cssContext.ExistingProperty && FastXmlCompletion.Suggest(cssContext, cssCatalog).Single().InsertText == "background-color" &&
+        FastXmlCompletion.Suggest(FastContext("<css>aside { backg¦ }</css>"), cssCatalog).Single().InsertText.Contains('\n'),
+        "FAST CSS replaces an existing property name or expands a new declaration with the original line breaks");
+    var fieldMarker = "<dir><fields><field name='ma_demo'/></fields><script><![CDATA[w.getItem('ma_¦')]]></script></dir>";
+    Assert(FastXmlCompletion.Fields(FastContext(fieldMarker), fieldMarker.Replace("¦", ""), null, null).Single().Text == "ma_demo" &&
+        FastXmlCompletion.Fields(FastContext("<script><![CDATA[var x = \"f.getItem('ma_¦\"]]></script>"), fieldMarker.Replace("¦", ""), null, null).Count == 0,
+        "FAST JS field suggestions resolve only in actual field arguments");
+    var viewMarker = "<dir><fields><field name='ma_demo'/></fields><views><view><item value='110; ma_¦old, ma_next'/></view></views></dir>";
+    var viewContext = FastContext(viewMarker);
+    var viewText = viewMarker.Replace("¦", "");
+    Assert(viewText[viewContext.Start..viewContext.End] == "ma_old" && FastXmlCompletion.Fields(viewContext, viewText, null, null).Single().Text == "ma_demo",
+        "FAST view field completion preserves the row mask and neighboring fields");
     foreach (var encoding in new Encoding[] { new UTF8Encoding(false, true), new UTF8Encoding(true, true), new UnicodeEncoding(false, true, true), new UnicodeEncoding(true, true, true) })
     {
         var file = Path.Combine(root, Guid.NewGuid() + ".xml");

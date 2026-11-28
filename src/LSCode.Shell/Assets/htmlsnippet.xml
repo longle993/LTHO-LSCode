@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<config>
+  <Snippet>
+    <Item keyword="&lt;lookup"><![CDATA[<items style="AutoComplete" controller="{{0-controller}}" reference="{{1-field}}" />]]></Item>
+    <Item keyword="&lt;dropdownlist"><![CDATA[<items style="DropDownList">
+  <item value="{{0-value}}"><text v="{{1-label}}" e="" /></item>
+</items>]]></Item>
+    <Item keyword="&lt;field"><![CDATA[<field name="{{0-field}}">
+  <header v="{{1-label}}" e="" />
+</field>]]></Item>
+    <Item keyword="&lt;String"><![CDATA[<field name="{{0-field}}"><header v="{{1-label}}" e="" /></field>]]></Item>
+    <Item keyword="&lt;Boolean"><![CDATA[<field name="{{0-field}}" type="Boolean"><header v="{{1-label}}" e="" /></field>]]></Item>
+    <Item keyword="&lt;NumberQuantity"><![CDATA[<field name="{{0-field}}" type="Decimal" dataFormatString="@quantityInputFormat"><items style="Numeric" /></field>]]></Item>
+    <Item keyword="&lt;view"><![CDATA[<view id="{{0-view}}"><item value="{{1-layout}}" /></view>]]></Item>
+    <Item keyword="&lt;response$"><![CDATA[<response name="{{0-name}}"><![CDATA[{{1}}]]]]><![CDATA[></response>]]></Item>
+    <Item keyword="&lt;action$"><![CDATA[<action id="{{0-id}}">{{1}}</action>]]></Item>
+    <Item keyword="&lt;command$"><![CDATA[<command event="{{0-event}}"><![CDATA[{{1}}]]]]><![CDATA[></command>]]></Item>
+    <Item keyword="&lt;script$"><![CDATA[<script><![CDATA[{{0}}]]]]><![CDATA[></script>]]></Item>
+    <Item keyword="&lt;css$"><![CDATA[<css><![CDATA[{{0}}]]]]><![CDATA[></css>]]></Item>
+    <Item keyword="name"><![CDATA[name="{{0}}"]]></Item>
+    <Item keyword="categoryIndex"><![CDATA[categoryIndex="{{0}}"]]></Item>
+    <Item keyword="operation"><![CDATA[operation="{{0}}"]]></Item>
+    <Item keyword="anchor"><![CDATA[anchor="{{0}}"]]></Item>
+  </Snippet>
+  <Hint>
+    <HintItem object="type=">
+      <Item keyword="DateTime">DateTime</Item>
+      <Item keyword="Boolean">Boolean</Item>
+      <Item keyword="Decimal" default="1">Decimal</Item>
+      <Item keyword="Byte">Byte</Item>
+      <Item keyword="Voucher">Voucher</Item>
+      <Item keyword="Detail">Detail</Item>
+      <Item keyword="Inquiry">Inquiry</Item>
+    </HintItem>
+    <HintItem object="style=">
+      <Item keyword="Numeric" default="1">Numeric</Item>
+      <Item keyword="Mask">Mask</Item>
+      <Item keyword="AutoComplete">AutoComplete</Item>
+      <Item keyword="Lookup">Lookup</Item>
+      <Item keyword="CheckBox">CheckBox</Item>
+      <Item keyword="DropDownList">DropDownList</Item>
+      <Item keyword="ListBox">ListBox</Item>
+      <Item keyword="RadioButtonList">RadioButtonList</Item>
+    </HintItem>
+    <HintItem object="allowNulls=;allowFilter=;allowSorting=;external=;hidden=;readOnly=;disabled=">
+      <Item keyword="true">true</Item>
+      <Item keyword="false">false</Item>
+    </HintItem>
+    <HintItem object="align=">
+      <Item keyword="right" default="1">right</Item>
+      <Item keyword="center">center</Item>
+      <Item keyword="left">left</Item>
+    </HintItem>
+    <HintItem object="dataFormatString=">
+      <Item keyword="@datetimeFormat">@datetimeFormat</Item>
+      <Item keyword="@quantityInputFormat">@quantityInputFormat</Item>
+      <Item keyword="@quantityViewFormat">@quantityViewFormat</Item>
+      <Item keyword="@baseCurrencyAmountInputFormat">@baseCurrencyAmountInputFormat</Item>
+      <Item keyword="@baseCurrencyAmountViewFormat">@baseCurrencyAmountViewFormat</Item>
+      <Item keyword="@foreignCurrencyAmountInputFormat">@foreignCurrencyAmountInputFormat</Item>
+      <Item keyword="@foreignCurrencyAmountViewFormat">@foreignCurrencyAmountViewFormat</Item>
+    </HintItem>
+  </Hint>
+</config>

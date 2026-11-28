@@ -5,7 +5,7 @@ import JsonWorker from "monaco-editor/esm/vs/language/json/json.worker?worker";
 import TsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker";
 import HtmlWorker from "monaco-editor/esm/vs/language/html/html.worker?worker";
 import CssWorker from "monaco-editor/esm/vs/language/css/css.worker?worker";
-import { request } from "./bridge";
+import { operation, request } from "./bridge";
 import type { DocumentInfo, Snippet, Target } from "./bridge";
 import { xmlLanguage } from "./xmlLanguage";
 
@@ -169,40 +169,66 @@ export function markSqlErrors(
   );
 }
 const targetByModel = new Map<string, Target | undefined>();
-type CompletionSnippet = { key: string; body: string; description: string };
-let completionSnippets: Promise<CompletionSnippet[]> | undefined;
-const sqlCompletionSnippets = () => completionSnippets ??= request<CompletionSnippet[]>("snippet.completions", { language: "sql" });
+type EditorCompletion = { text: string; insertText: string; description: string; isSnippet: boolean };
+type XmlCompletion = {
+  start: number;
+  end: number;
+  language: "xml" | "sql" | "javascript" | "css";
+  suggestions: EditorCompletion[];
+};
+
+async function cancellableCompletion<T>(method: string, payload: unknown, token: monaco.CancellationToken) {
+  if (token.isCancellationRequested) return null;
+  const pending = operation<T>(method, payload, 8000);
+  const cancellation = token.onCancellationRequested(() => void pending.cancel().catch(() => {}));
+  return await pending.promise.catch(() => null).finally(() => cancellation.dispose());
+}
+
+async function xmlCompletion(model: monaco.editor.ITextModel, position: monaco.Position, token: monaco.CancellationToken, localOnly = false) {
+  if (model.getValueLength() > 1_000_000) return;
+  const key = model.uri.toString();
+  const target = targetByModel.get(key)?.id;
+  const path = modelSources.get(key)?.path;
+  const version = model.getVersionId();
+  const offset = model.getOffsetAt(position);
+  const result = await cancellableCompletion<XmlCompletion | null>("xml.complete", {
+    text: model.getValue(), offset, path, buffers: xmlIncludeBuffers(), targetId: localOnly ? undefined : target,
+  }, token);
+  if (!result || token.isCancellationRequested || model.isDisposed() || version !== model.getVersionId() ||
+    target !== targetByModel.get(key)?.id || path !== modelSources.get(key)?.path) return;
+  if (result.start < 0 || result.start > offset || result.end < offset || result.end > model.getValueLength()) return;
+  return result;
+}
+
 monaco.languages.registerCompletionItemProvider(xmlLanguage, {
-  triggerCharacters: ["@"],
-  async provideCompletionItems(model, position) {
-    const line = model.getLineContent(position.lineNumber);
-    const before = line.slice(0, position.column - 1);
-    const prefix = before.match(/(?<![\w@#$])@@[\w$]*$/);
-    if (!prefix) return;
-    const start = prefix.index!;
-    const text = model.getValueInRange({
-      startLineNumber: 1, startColumn: 1,
-      endLineNumber: position.lineNumber, endColumn: position.column,
-    });
-    const token = monaco.editor.tokenize(text, xmlLanguage).at(-1)
-      ?.reverse().find((candidate) => candidate.offset <= start);
-    if (token?.language !== "sql" || !/^(identifier|predefined)\.sql$/.test(token.type)) return;
-    const suffix = line.slice(position.column - 1).match(/^[\w$]*/)?.[0] ?? "";
-    const snippets = await sqlCompletionSnippets();
-    return {
-      suggestions: snippets.filter((snippet) => snippet.key.startsWith("@@") && !snippet.body.includes("{{")).map((snippet) => ({
-        label: snippet.key,
-        detail: snippet.description || "Biến session FAST",
-        insertText: snippet.body,
-        kind: monaco.languages.CompletionItemKind.Variable,
-        range: {
-          startLineNumber: position.lineNumber, endLineNumber: position.lineNumber,
-          startColumn: start + 1, endColumn: position.column + suffix.length,
-        },
-      })),
-    };
+  triggerCharacters: ["<", "/", ".", "'", '"', "@", "#"],
+  async provideCompletionItems(model, position, _, token) {
+    const result = await xmlCompletion(model, position, token);
+    if (!result) return;
+    const { start, end } = result;
+    const first = model.getPositionAt(start);
+    const last = model.getPositionAt(end);
+    if (first.lineNumber !== last.lineNumber) return;
+    const range = new monaco.Range(first.lineNumber, first.column, last.lineNumber, last.column);
+    return { suggestions: result.suggestions.map((hint, index) => ({
+      label: hint.text,
+      sortText: String(index).padStart(4, "0"),
+      detail: hint.description,
+      insertText: hint.isSnippet ? fastEditorSnippet(hint.insertText) : hint.insertText,
+      insertTextRules: hint.isSnippet ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet : undefined,
+      kind: hint.isSnippet ? monaco.languages.CompletionItemKind.Snippet
+        : hint.text.startsWith("@@") ? monaco.languages.CompletionItemKind.Variable : monaco.languages.CompletionItemKind.Field,
+      range,
+    })) };
   },
 });
+
+function fastEditorSnippet(body: string) {
+  let nextTabStop = 0;
+  const escape = (text: string) => text.replace(/[\\$}]/g, "\\$&");
+  return body.replace(/\{\{(?:[-|]|\d+)?(?:-([^{}]*))?\}\}|[\\$}]/g, (match, label) =>
+    match.length === 1 ? escape(match) : "${" + ++nextTabStop + ":" + escape(label ?? "") + "}");
+}
 monaco.languages.registerCompletionItemProvider("sql", {
   triggerCharacters: [".", "/", "@", "#"],
   provideCompletionItems: async (model, position, _, token) => {
@@ -245,14 +271,7 @@ monaco.languages.registerCompletionItemProvider("sql", {
       endColumn: localPrefix ? position.column + localSuffix.length : word.endColumn,
     };
     try {
-      const values = await request<
-        {
-          text: string;
-          insertText: string;
-          description: string;
-          isSnippet: boolean;
-        }[]
-      >("sql.complete", {
+      const values = await request<EditorCompletion[]>("sql.complete", {
         targetId: localPrefix ? undefined : target?.id,
         text: model.getValue(),
         beforeCaret: model.getValueInRange({
@@ -287,6 +306,76 @@ monaco.languages.registerCompletionItemProvider("sql", {
     }
   },
 });
+
+function sqlCodeAtCaret(beforeCaret: string) {
+  let quote = "", lineComment = false, blockComments = 0;
+  for (const [delimiter] of beforeCaret.matchAll(/--|\/\*|\*\/|''|""|\]\]|['"\[\]\r\n]/g)) {
+    if (lineComment) {
+      if (delimiter === "\r" || delimiter === "\n") lineComment = false;
+    } else if (blockComments > 0) {
+      if (delimiter === "/*") blockComments++;
+      if (delimiter === "*/") blockComments--;
+    } else if (quote) {
+      if (delimiter === quote) quote = "";
+    } else if (delimiter === "--") lineComment = true;
+    else if (delimiter === "/*") blockComments++;
+    else if (delimiter === "'" || delimiter === '"') quote = delimiter;
+    else if (delimiter === "[") quote = "]";
+  }
+  return !quote && !lineComment && blockComments === 0;
+}
+
+for (const id of [xmlLanguage, "sql"]) {
+  monaco.languages.registerInlineCompletionsProvider(id, {
+    async provideInlineCompletions(model, position, context, token) {
+      const none = { items: [] };
+      if (context.selectedSuggestionInfo || token.isCancellationRequested || model.getValueLength() > 1_000_000) return none;
+      const offset = model.getOffsetAt(position);
+      const line = model.getLineContent(position.lineNumber);
+      const before = line.slice(0, position.column - 1);
+      const after = line.slice(position.column - 1);
+      if (!/[\p{L}\p{N}_$]{2}$/u.test(before) || /^[\p{L}\p{N}_@$#]/u.test(after)) return none;
+
+      let start: number;
+      let suggestions: EditorCompletion[];
+      let sql = id === "sql";
+      if (id === xmlLanguage) {
+        const result = await xmlCompletion(model, position, token, true);
+        if (!result || result.end !== offset || (result.language !== "xml" && result.language !== "sql")) return none;
+        ({ start, suggestions } = result);
+        sql = result.language === "sql";
+      } else {
+        const prefix = before.match(/(?:@{1,2}|#{1,2})?[\p{L}\p{N}_$]+$/u)?.[0];
+        const text = model.getValue();
+        const beforeCaret = text.slice(0, offset);
+        if (!prefix || !sqlCodeAtCaret(beforeCaret)) return none;
+        start = offset - prefix.length;
+        const version = model.getVersionId();
+        const values = await cancellableCompletion<EditorCompletion[]>("sql.complete", { text, beforeCaret }, token);
+        if (!values || token.isCancellationRequested || model.isDisposed() || version !== model.getVersionId()) return none;
+        suggestions = values;
+      }
+
+      const first = model.getPositionAt(start);
+      if (first.lineNumber !== position.lineNumber || first.column === position.column) return none;
+      const prefix = before.slice(first.column - 1);
+      for (const suggestion of suggestions) {
+        const completion = suggestion.isSnippet
+          ? (!sql && prefix.startsWith("<") ? suggestion.insertText.match(/^<[\p{L}_][\p{L}\p{N}_.:-]*(?=[\s/>])/u)?.[0] : undefined)
+          : suggestion.insertText;
+        if (!completion || completion.length <= prefix.length || /[\r\n]/.test(completion)) continue;
+        if (!(sql ? completion.toLowerCase().startsWith(prefix.toLowerCase()) : completion.startsWith(prefix))) continue;
+        return { items: [{
+          range: monaco.Range.fromPositions(first, position),
+          insertText: prefix + completion.slice(prefix.length),
+        }] };
+      }
+      return none;
+    },
+    freeInlineCompletions() {},
+  });
+}
+
 function sqlSnippet(body: string) {
   let n = 0;
   const escapeLiteral = (text: string) => text.replace(/[\\$}]/g, character => "\\" + character);
@@ -299,7 +388,7 @@ function userSqlSnippet(snippet: Snippet) {
   return sqlSnippet(snippet.body.slice(0, position) + marker + snippet.body.slice(position))
     .replace(marker, "$0");
 }
-for (const lang of ["javascript", xmlLanguage, "html"])
+for (const lang of ["javascript", "html"])
   monaco.languages.registerCompletionItemProvider(lang, {
     triggerCharacters: [".", "'", '"'],
     provideCompletionItems: async (model, position, _, token) => {
@@ -314,7 +403,7 @@ for (const lang of ["javascript", xmlLanguage, "html"])
         const values = await request<
           { text: string; insertText: string; description: string; isSnippet: boolean }[]
         >("javascript.complete", {
-          language: lang === xmlLanguage ? "xml" : lang,
+          language: lang,
           text: model.getValue(),
           beforeCaret: model.getValueInRange({
             startLineNumber: 1,
@@ -459,7 +548,10 @@ export function CodeEditor({
         );
     });
     const keys = editor.onKeyDown((e) => {
-      if (e.keyCode !== monaco.KeyCode.Tab) return;
+      if (e.keyCode !== monaco.KeyCode.Tab || e.altKey || e.ctrlKey || e.metaKey) return;
+      // Monaco accepts visible suggestions before the ERP placeholder navigation.
+      if (!e.shiftKey && (editor.getAction("editor.action.inlineSuggest.hide")?.isSupported() ||
+        editor.getDomNode()?.querySelector(".suggest-widget.visible, .suggest-widget .monaco-list-row.focused"))) return;
       const model = editor.getModel(),
         selection = editor.getSelection();
       if (!model || !selection) return;
@@ -500,8 +592,13 @@ export function CodeEditor({
   }, []);
   useEffect(() => {
     const model = modelFor(document);
+    const id = editorLanguage(document.name);
+    const ghostText = id === xmlLanguage || id === "sql";
     instance.current!.updateOptions({
-      quickSuggestions: { other: true, comments: false, strings: model.getLanguageId() === xmlLanguage },
+      inlineSuggest: { suppressSuggestions: ghostText },
+      // Give the local inline provider time to answer before the popup fallback.
+      quickSuggestionsDelay: ghostText ? 550 : 10,
+      quickSuggestions: { other: true, comments: false, strings: id === xmlLanguage },
     });
     targetByModel.set(model.uri.toString(), target);
     const previous = instance.current!.getModel(),
@@ -514,7 +611,7 @@ export function CodeEditor({
     callbacks.current.onDiagnostics?.(
       monaco.editor.getModelMarkers({ resource: model.uri }).map(toDiagnostic),
     );
-    monaco.editor.setModelLanguage(model, editorLanguage(document.name));
+    monaco.editor.setModelLanguage(model, id);
     if (previous !== model) modelSources.get(model.uri.toString())?.validate();
     callbacks.current.onMount(instance.current!);
   }, [document.id, document.name, document.path, target?.id]);
@@ -526,7 +623,7 @@ export function CodeEditor({
     monaco.editor.defineTheme("lscode-" + base, {
       base, inherit: true,
       rules: [{ token: "delimiter.cdata.xml", foreground: base === "vs" ? "18683C" : base === "hc-black" ? "BFFF00" : "63D990", fontStyle: "bold" }],
-      colors: {},
+      colors: { "editorGhostText.foreground": base === "vs" ? "#707070" : base === "hc-black" ? "#A7A7A7" : "#A3A5AC" },
     });
     monaco.editor.setTheme("lscode-" + base);
   }, [theme]);

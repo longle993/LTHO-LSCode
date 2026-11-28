@@ -22,3 +22,5 @@ Triển khai mới: [tối ưu menu và tích hợp Mobile](docs/specifications/
 [Tạo danh mục ERP](docs/specifications/CATALOG-TABLE-DESIGNER.vi.md) liên kết khảo sát Create List trong [tư liệu nguồn](sources/README.md#khảo-sát-fcode) với [CatalogSourceTool](src/LSCode.Web/src/features/CatalogSourceTool.tsx) và [CatalogSourceGenerator](src/LSCode.Infrastructure/CatalogSourceGenerator.cs).
 
 [Phân loại nút và tùy chỉnh màu](docs/specifications/BUTTON-THEME.vi.md) ghi quy tắc dùng nút và lộ trình áp dụng theme WebView/WPF.
+
+[IntelliSense XML theo FcodeViewer](contexte/kien-truc.md#intellisense-xml-theo-fcodeviewer) liên kết khảo sát nguồn với [bộ phân tích ngữ cảnh](src/LSCode.Core/FastXmlCompletion.cs), [bộ nạp danh mục](src/LSCode.Infrastructure/FastEditorCompletion.cs) và danh mục dự phòng [XML](src/LSCode.Shell/Assets/htmlsnippet.xml), [CSS](src/LSCode.Shell/Assets/csssnippet.xml).
